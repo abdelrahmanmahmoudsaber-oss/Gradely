@@ -20,7 +20,10 @@
         {
           "subject": "General Physics",
           "score": 88,
-          "maxScore": 100
+          "maxScore": 100,
+          "absences": [
+            1
+          ]
         },
         {
           "subject": "Structured Programming",
@@ -41,7 +44,8 @@
         {
           "subject": "General Physics",
           "score": 85,
-          "maxScore": 100
+          "maxScore": 100,
+          "absences": []
         },
         {
           "subject": "Structured Programming",
@@ -67,7 +71,8 @@
         {
           "subject": "General Physics",
           "score": 74,
-          "maxScore": 100
+          "maxScore": 100,
+          "absences": []
         },
         {
           "subject": "Structured Programming",
