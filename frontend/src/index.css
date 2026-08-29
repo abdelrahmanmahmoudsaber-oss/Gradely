@@ -1,5 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap');
 
+/* ===== CSS VARIABLES ===== */
 :root {
   --bg: #0b1120;
   --surface: #131c31;
@@ -11,6 +12,9 @@
   --border: #2a3441;
   
   --success: #10b981;
+  --success-bg: rgba(16, 185, 129, 0.1);
+  --warning: #f59e0b;
+  --warning-bg: rgba(245, 158, 11, 0.1);
   --danger: #ef4444;
   --warning: #f59e0b;
 }
