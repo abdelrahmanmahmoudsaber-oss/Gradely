@@ -1,4 +1,4 @@
-﻿import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import AdminDashboard from './pages/AdminDashboard';
 import StudentDashboard from './pages/StudentDashboard';
@@ -7,7 +7,7 @@ import { supabase } from './supabaseClient';
 import { cacheManager } from './utils/dataCache';
 import NetworkIndicator from './components/NetworkIndicator';
 
-function App() {
+export default function App() {
   const [user, setUser] = useState(null);
   // authLoading: true while we check the Supabase session on mount.
   // Prevents a flash of the login page before the session is confirmed.
