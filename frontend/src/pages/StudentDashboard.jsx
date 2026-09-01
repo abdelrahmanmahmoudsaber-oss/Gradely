@@ -1,7 +1,12 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { cacheManager } from '../utils/dataCache';
-import { LogOut, BookOpen, Calendar, FileText, GraduationCap, UserCheck, Award } from 'lucide-react';
+import { printStudentReportPDF } from '../utils/pdfHelper';
+import { 
+  LogOut, BookOpen, Calendar, FileText, GraduationCap, UserCheck, 
+  Award, TrendingUp, Star, CheckCircle2, AlertTriangle, Printer, 
+  BarChart3, Sparkles, Trophy, Target
+} from 'lucide-react';
 
 const SUBJECT_COLORS = [
   { bg: 'rgba(79, 70, 229, 0.15)', border: 'var(--primary)', text: 'var(--primary-hover)', tag: '#6366f1' },
@@ -19,7 +24,7 @@ export default function StudentDashboard({ user, onLogout }) {
   const [grades, setGrades] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedSubjectId, setSelectedSubjectId] = useState('');
-  const [viewMode, setViewMode] = useState('attendance');
+  const [viewMode, setViewMode] = useState('attendance'); // 'attendance', 'grades', 'analytics'
 
   // Dynamic Visibility Settings controlled by Super Admin
   const [visibility, setVisibility] = useState({
@@ -144,6 +149,24 @@ export default function StudentDashboard({ user, onLogout }) {
     }
   };
 
+  const handleExportMyReportPDF = () => {
+    printStudentReportPDF({
+      student: user,
+      subjects: subjects,
+      grades: grades,
+      attendance: attendance,
+      options: {
+        includeAttendanceDetails: visibility.showAttendanceTab,
+        includeGrades: true,
+        includeQuizzes: visibility.showQuiz1 || visibility.showQuiz2,
+        includeProject: visibility.showProject,
+        includeAttendanceScore: visibility.showAttendanceScore,
+        includeTotal: visibility.showTotal,
+        selectedSubjectIds: subjects.map(s => s.id)
+      }
+    });
+  };
+
   if (loading) {
     return (
       <div style={{display: 'flex', minHeight: '100vh', width: '100%', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)'}}>
@@ -155,16 +178,67 @@ export default function StudentDashboard({ user, onLogout }) {
     );
   }
 
+  // Calculate Overall Analytics
   const totalRecordedSessions = attendance.length;
   const totalAttendedSessions = attendance.filter(a => a.status === 'present' || a.status === 'late').length;
+  const totalAbsences = attendance.filter(a => a.status === 'absent').length;
   const attendanceRate = totalRecordedSessions > 0 ? Math.round((totalAttendedSessions / totalRecordedSessions) * 100) : 100;
+
+  // Compute Subject Analytics Breakdown
+  let bestAttendanceSub = null;
+  let highestRate = -1;
+  let bestGradesSub = null;
+  let highestScore = -1;
+  let totalCalculatedMarks = 0;
+  let scoredSubjectsCount = 0;
+
+  const subjectStats = subjects.map(sub => {
+    const subAtt = attendance.filter(a => a.subject_id === sub.id);
+    const attendedCount = subAtt.filter(a => a.status === 'present' || a.status === 'late').length;
+    const absSubCount = subAtt.filter(a => a.status === 'absent').length;
+    const subRate = subAtt.length > 0 ? Math.round((attendedCount / subAtt.length) * 100) : 100;
+
+    const g = grades.find(grd => grd.subject_id === sub.id) || {};
+    let subTotal = 0;
+    if (visibility.showQuiz1) subTotal += (g.quiz_1 || 0);
+    if (visibility.showQuiz2) subTotal += (g.quiz_2 || 0);
+    if (visibility.showProject) subTotal += (g.project || 0);
+    if (visibility.showAttendanceScore) subTotal += (g.attendance_score || 0);
+
+    if (subAtt.length > 0 && subRate > highestRate) {
+      highestRate = subRate;
+      bestAttendanceSub = { name: sub.name, rate: subRate };
+    }
+
+    if (subTotal > highestScore && subTotal > 0) {
+      highestScore = subTotal;
+      bestGradesSub = { name: sub.name, score: subTotal };
+    }
+
+    if (subTotal > 0) {
+      totalCalculatedMarks += subTotal;
+      scoredSubjectsCount++;
+    }
+
+    return {
+      id: sub.id,
+      name: sub.name,
+      year: normalizeYear(sub.year_level),
+      instructor: sub.instructor_name || 'المدير الرئيسي',
+      attendedCount,
+      absSubCount,
+      rate: subRate,
+      score: subTotal,
+      gradeDetails: g
+    };
+  });
 
   const currentSubject = subjects.find(s => s.id === selectedSubjectId);
   const currentGrades = grades.find(g => g.subject_id === selectedSubjectId) || {};
   const currentAttendance = attendance.filter(a => a.subject_id === selectedSubjectId);
   const absCount = currentAttendance.filter(a => a.status === 'absent').length;
 
-  // Calculate dynamic visible total score
+  // Calculate dynamic visible total score for current subject
   let visibleTotal = 0;
   let hasAnyGradeVisible = false;
   if (visibility.showQuiz1) { visibleTotal += (currentGrades.quiz_1 || 0); hasAnyGradeVisible = true; }
@@ -199,6 +273,28 @@ export default function StudentDashboard({ user, onLogout }) {
           <span className="badge" style={{background:'rgba(16, 185, 129, 0.1)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.2)',padding:'5px 10px',fontWeight:700,fontSize:'0.8rem'}}>
             فرقة {normalizeYear(user.year_level)} | {normalizeSection(user.section || 'S1')}
           </span>
+
+          <button 
+            onClick={handleExportMyReportPDF}
+            style={{
+              background: 'rgba(16, 185, 129, 0.12)',
+              color: 'var(--success)',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              padding: '6px 14px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+              fontWeight: 700,
+              transition: 'all 0.2s'
+            }}
+            title="تصدير وطباعة التقرير الأكاديمي الشامل كـ PDF"
+          >
+            <Printer size={15} /> كشف درجاتي PDF
+          </button>
+
           <button 
             onClick={onLogout} 
             style={{
@@ -232,44 +328,128 @@ export default function StudentDashboard({ user, onLogout }) {
           </p>
         </div>
 
-        {/* Student KPIs */}
+        {/* 🌟 MONTHLY & SEMESTER ANALYTICS OVERVIEW CARDS */}
         {subjects.length > 0 && (
-          <div className="grid-cards fade-in" style={{marginBottom: '2rem', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))'}}>
+          <div className="grid-cards fade-in" style={{marginBottom: '2rem', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem'}}>
+            
+            {/* Total Subjects */}
             <div className="panel" style={{display: 'flex', alignItems: 'center', gap: '1rem', borderTop: '4px solid var(--primary-hover)'}}>
-              <div style={{background: 'rgba(79, 70, 229, 0.1)', padding: '0.8rem', borderRadius: '50%', color: 'var(--primary-hover)'}}>
+              <div style={{background: 'rgba(79, 70, 229, 0.1)', padding: '0.9rem', borderRadius: '50%', color: 'var(--primary-hover)'}}>
                 <BookOpen size={24} />
               </div>
               <div>
                 <p className="text-muted" style={{margin: '0 0 3px 0', fontSize: '0.85rem'}}>المواد المسجلة</p>
-                <h3 style={{margin: 0, fontSize: '1.5rem', fontWeight: 800}}>{subjects.length} مادة</h3>
+                <h3 style={{margin: 0, fontSize: '1.5rem', fontWeight: 800}}>{subjects.length} مقررات</h3>
               </div>
             </div>
 
+            {/* Attendance Rate */}
             {visibility.showAttendanceTab && (
-              <>
-                <div className="panel" style={{display: 'flex', alignItems: 'center', gap: '1rem', borderTop: '4px solid #10b981'}}>
-                  <div style={{background: 'rgba(16, 185, 129, 0.1)', padding: '0.8rem', borderRadius: '50%', color: '#10b981'}}>
-                    <UserCheck size={24} />
-                  </div>
-                  <div>
-                    <p className="text-muted" style={{margin: '0 0 3px 0', fontSize: '0.85rem'}}>إجمالي الحضور</p>
-                    <h3 style={{margin: 0, fontSize: '1.5rem', fontWeight: 800}}>{totalAttendedSessions} محاضرة</h3>
-                  </div>
+              <div className="panel" style={{display: 'flex', alignItems: 'center', gap: '1rem', borderTop: '4px solid #10b981'}}>
+                <div style={{background: 'rgba(16, 185, 129, 0.1)', padding: '0.9rem', borderRadius: '50%', color: '#10b981'}}>
+                  <UserCheck size={24} />
                 </div>
-
-                <div className="panel" style={{display: 'flex', alignItems: 'center', gap: '1rem', borderTop: '4px solid #3b82f6'}}>
-                  <div style={{background: 'rgba(59, 130, 246, 0.1)', padding: '0.8rem', borderRadius: '50%', color: '#3b82f6'}}>
-                    <Award size={24} />
-                  </div>
-                  <div>
-                    <p className="text-muted" style={{margin: '0 0 3px 0', fontSize: '0.85rem'}}>نسبة الالتزام</p>
-                    <h3 style={{margin: 0, fontSize: '1.5rem', fontWeight: 800, color: attendanceRate >= 85 ? 'var(--success)' : '#3b82f6'}}>
-                      {attendanceRate}%
-                    </h3>
-                  </div>
+                <div>
+                  <p className="text-muted" style={{margin: '0 0 3px 0', fontSize: '0.85rem'}}>نسبة الالتزام والنشاط</p>
+                  <h3 style={{margin: 0, fontSize: '1.5rem', fontWeight: 800, color: attendanceRate >= 80 ? 'var(--success)' : '#f59e0b'}}>
+                    {attendanceRate}%
+                  </h3>
                 </div>
-              </>
+              </div>
             )}
+
+            {/* Best Attendance Subject */}
+            {visibility.showAttendanceTab && bestAttendanceSub && (
+              <div className="panel" style={{display: 'flex', alignItems: 'center', gap: '1rem', borderTop: '4px solid #f59e0b'}}>
+                <div style={{background: 'rgba(245, 158, 11, 0.1)', padding: '0.9rem', borderRadius: '50%', color: '#f59e0b'}}>
+                  <Trophy size={24} />
+                </div>
+                <div>
+                  <p className="text-muted" style={{margin: '0 0 3px 0', fontSize: '0.85rem'}}>الأعلى التزاماً وحضوراً</p>
+                  <h3 style={{margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#f59e0b', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:'160px'}}>
+                    {bestAttendanceSub.name}
+                  </h3>
+                  <span style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>نسبة حضور: {bestAttendanceSub.rate}%</span>
+                </div>
+              </div>
+            )}
+
+            {/* Highest Grade Subject */}
+            {visibility.showTotal && bestGradesSub && (
+              <div className="panel" style={{display: 'flex', alignItems: 'center', gap: '1rem', borderTop: '4px solid #3b82f6'}}>
+                <div style={{background: 'rgba(59, 130, 246, 0.1)', padding: '0.9rem', borderRadius: '50%', color: '#3b82f6'}}>
+                  <Star size={24} />
+                </div>
+                <div>
+                  <p className="text-muted" style={{margin: '0 0 3px 0', fontSize: '0.85rem'}}>المادة الأكثر تميزاً</p>
+                  <h3 style={{margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#3b82f6', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:'160px'}}>
+                    {bestGradesSub.name}
+                  </h3>
+                  <span style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>الدرجة: {bestGradesSub.score} درجة</span>
+                </div>
+              </div>
+            )}
+
+          </div>
+        )}
+
+        {/* 📊 VISUAL PERFORMANCE COMPARISON PROGRESS BARS */}
+        {subjects.length > 0 && (
+          <div className="panel fade-in" style={{marginBottom: '2rem', padding: '1.4rem'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',flexWrap:'wrap',gap:'0.8rem'}}>
+              <h3 style={{margin: 0, fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--primary-hover)'}}>
+                <BarChart3 size={20} /> المؤشر التحليلي للمقررات الدراسية
+              </h3>
+              <span style={{fontSize: '0.85rem', color: 'var(--text-muted)'}}>
+                مقارنة بصرية لمستوى الحضور والتحصيل لكل مادة
+              </span>
+            </div>
+
+            <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem'}}>
+              {subjectStats.map(sub => (
+                <div 
+                  key={sub.id} 
+                  onClick={() => setSelectedSubjectId(sub.id)}
+                  style={{
+                    background: 'var(--bg)',
+                    border: sub.id === selectedSubjectId ? '1px solid var(--primary)' : '1px solid var(--border)',
+                    borderRadius: '8px',
+                    padding: '12px 14px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px'}}>
+                    <strong style={{fontSize: '0.95rem', color: sub.id === selectedSubjectId ? 'var(--primary-hover)' : 'var(--text-main)'}}>
+                      {sub.name}
+                    </strong>
+                    {visibility.showTotal && (
+                      <span style={{fontSize: '0.85rem', fontWeight: 800, color: 'var(--primary-hover)'}}>
+                        {sub.score} درجة
+                      </span>
+                    )}
+                  </div>
+
+                  {visibility.showAttendanceTab && (
+                    <div>
+                      <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '4px'}}>
+                        <span>حضور المحاضرات</span>
+                        <span style={{fontWeight: 700, color: sub.rate >= 80 ? 'var(--success)' : '#f59e0b'}}>{sub.rate}%</span>
+                      </div>
+                      <div style={{width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden'}}>
+                        <div style={{
+                          width: sub.rate + '%',
+                          height: '100%',
+                          background: sub.rate >= 80 ? 'var(--success)' : sub.rate >= 60 ? '#f59e0b' : 'var(--danger)',
+                          borderRadius: '3px',
+                          transition: 'width 0.5s ease'
+                        }} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
