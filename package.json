@@ -1,9 +1,9 @@
 {
-  "name": "gradely-root",
+  "name": "gradely",
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "cd frontend && npm install && npm run build",
-    "dev": "cd frontend && npm run dev"
+    "build": "cd frontend && npm install && npm run build && node -e \"const fs=require('fs'); if(!fs.existsSync('../dist')) fs.mkdirSync('../dist'); fs.cpSync('dist', '../dist', {recursive: true});\"",
+    "start": "cd frontend && npm run preview"
   }
 }
