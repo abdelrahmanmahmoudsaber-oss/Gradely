@@ -340,6 +340,7 @@ export default function StudentsTab({ user }) {
       return matchSearch && matchYear && matchSection;
     });
 
+  const allStudentsList = allUsers.filter(u => u.role === 'student');
   const adminsList = allUsers.filter(u => u.role === 'admin');
 
   const toggleSelectAllFiltered = () => {

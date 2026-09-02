@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { cacheManager } from '../../utils/dataCache';
-import { exportExcelFile } from '../../utils/excelHelper';
+import { exportExcelFile, exportMultiSheetExcelFile } from '../../utils/excelHelper';
 import { 
   Users, BookOpen, Clock, Shield, Sliders, Eye, EyeOff, 
-  Download, Upload, Database, RefreshCw, CheckCircle2, AlertTriangle, FileSpreadsheet
+  Download, Upload, Database, RefreshCw, CheckCircle2, AlertTriangle, FileSpreadsheet, Calendar
 } from 'lucide-react';
 
 export default function OverviewTab({ user }) {
@@ -17,10 +17,9 @@ export default function OverviewTab({ user }) {
   });
   const [loading, setLoading] = useState(true);
   const [allSubjectsList, setAllSubjectsList] = useState([]);
-  const [selectedSubjectForVisibility, setSelectedSubjectForVisibility] = useState('global'); // 'global' or subId
+  const [selectedSubjectForVisibility, setSelectedSubjectForVisibility] = useState('global');
 
   // Student Dashboard Visibility Configuration
-  // Structure: { global: { showQuiz1: true, ... }, [subId]: { showQuiz1: false, ... } }
   const [visibilitySettings, setVisibilitySettings] = useState({
     global: {
       showQuiz1: true,
@@ -39,6 +38,8 @@ export default function OverviewTab({ user }) {
   const [backingUp, setBackingUp] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [backupMessage, setBackupMessage] = useState('');
+  const [backupSchedule, setBackupSchedule] = useState(() => localStorage.getItem('gradely_backup_schedule') || '3days');
+  const [lastBackupDate, setLastBackupDate] = useState(() => localStorage.getItem('gradely_last_backup') || null);
 
   const isSuper = !user || user.user_id === 'admin';
 
@@ -197,7 +198,7 @@ export default function OverviewTab({ user }) {
     }
   };
 
-  // FULL SYSTEM BACKUP (JSON + EXCEL)
+  // FULL COMPREHENSIVE BACKUP (ALL TABLES: USERS + SUBJECTS + ATTENDANCE + GRADES)
   const handleFullBackup = async (format = 'json') => {
     if (!isSuper) return;
     setBackingUp(true);
@@ -205,7 +206,7 @@ export default function OverviewTab({ user }) {
 
     try {
       const [usersRes, subRes, attRes, grdRes] = await Promise.all([
-        supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects, created_at'),
+        supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at'),
         supabase.from('subjects').select('*'),
         supabase.from('attendance').select('*'),
         supabase.from('grades').select('*')
@@ -213,7 +214,7 @@ export default function OverviewTab({ user }) {
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const backupData = {
-        version: 'Gradely-v2-Backup',
+        version: 'Gradely-v2-FullBackup',
         exportedAt: new Date().toISOString(),
         users: usersRes.data || [],
         subjects: subRes.data || [],
@@ -227,35 +228,77 @@ export default function OverviewTab({ user }) {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `Gradely_Full_Backup_${timestamp}.json`;
+        a.download = `Gradely_Full_System_Backup_${timestamp}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       } else {
-        // Multi-table Excel Export
-        const exportArray = (usersRes.data || []).map(u => ({
-          'ID': u.user_id,
-          'Name': u.name,
-          'Role': u.role,
-          'Year': u.year_level,
-          'Section': u.section,
-          'Created At': u.created_at
+        // Multi-Sheet Comprehensive Excel Workbook
+        const subMap = {};
+        (subRes.data || []).forEach(s => { subMap[s.id] = s.name; });
+
+        const usersSheet = (usersRes.data || []).map(u => ({
+          'الرقم الأكاديمي / كود المستخدم': u.user_id,
+          'الاسم': u.name,
+          'الدور': u.role === 'admin' ? 'معيد/مشرف' : 'طالب',
+          'الفرقة': u.year_level || '1',
+          'السكشن': u.section || 'S1',
+          'المواد والسكاشن المسندة': Array.isArray(u.assigned_subjects) ? u.assigned_subjects.join(', ') : '',
+          'تاريخ التسجيل': u.created_at || ''
         }));
-        await exportExcelFile(exportArray, `Gradely_Users_Backup_${timestamp}.xlsx`);
+
+        const subjectsSheet = (subRes.data || []).map(s => ({
+          'كود المادة': s.id,
+          'اسم المادة': s.name,
+          'الفرقة': s.year_level,
+          'عدد الأسابيع': s.total_weeks,
+          'المشرف/المعيد الرئيسي': s.instructor_name || '',
+          'عدد الطلاب المسجلين': Array.isArray(s.enrolled_students) ? s.enrolled_students.length : 0
+        }));
+
+        const attendanceSheet = (attRes.data || []).map(a => ({
+          'رقم الطالب': a.student_id,
+          'المادة': subMap[a.subject_id] || a.subject_id,
+          'رقم الأسبوع': `الأسبوع ${a.week_number}`,
+          'تاريخ المحاضرة': a.session_date || '',
+          'الحالة': a.status === 'present' ? 'حاضر' : a.status === 'absent' ? 'غائب' : a.status === 'late' ? 'تأخير' : a.status === 'excused' ? 'عذر' : a.status,
+          'سبب العذر': a.excuse_reason || ''
+        }));
+
+        const gradesSheet = (grdRes.data || []).map(g => ({
+          'رقم الطالب': g.student_id,
+          'المادة': subMap[g.subject_id] || g.subject_id,
+          'كويز 1': g.quiz_1 || 0,
+          'كويز 2': g.quiz_2 || 0,
+          'المشروع/العملي': g.project || 0,
+          'درجة الحضور': g.attendance_score || 0,
+          'المجموع النهائي': g.final_grade || 0
+        }));
+
+        await exportMultiSheetExcelFile([
+          { name: 'المستخدمين والطلاب', data: usersSheet },
+          { name: 'المواد الدراسية', data: subjectsSheet },
+          { name: 'كشف الغياب لكافة الأسابيع', data: attendanceSheet },
+          { name: 'كشف الدرجات الشامل', data: gradesSheet }
+        ], `Gradely_Comprehensive_Backup_${timestamp}.xlsx`);
       }
 
-      setBackupMessage('✅ تم تحميل النسخة الاحتياطية الكاملة بنجاح على جهازك!');
-      setTimeout(() => setBackupMessage(''), 4500);
+      const nowIso = new Date().toLocaleString('ar-EG');
+      setLastBackupDate(nowIso);
+      localStorage.setItem('gradely_last_backup', nowIso);
+
+      setBackupMessage('✅ تم إنشاء وتحميل النسخة الاحتياطية الشاملة بنجاح!');
+      setTimeout(() => setBackupMessage(''), 5000);
     } catch (err) {
       console.error('Backup error:', err);
-      setBackupMessage('❌ فشل إنشاء النسخة الاحتياطية');
+      setBackupMessage('❌ فشل إنشاء النسخة الاحتياطية: ' + err.message);
     } finally {
       setBackingUp(false);
     }
   };
 
-  // RESTORE FROM BACKUP JSON
+  // ROBUST SYSTEM RESTORE (INSERTS/UPSERTS ALL 4 TABLES)
   const handleRestoreFromFile = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -264,36 +307,50 @@ export default function OverviewTab({ user }) {
     reader.onload = async (event) => {
       try {
         setRestoring(true);
-        setBackupMessage('جاري قراءة واستعادة البيانات...');
+        setBackupMessage('جاري فحص واستعادة كافة جداول النظام...');
         const parsed = JSON.parse(event.target.result);
 
-        if (!parsed.version || !parsed.users) {
-          throw new Error('الملف المختار ليس نسخة احتياطية صالحة لنظام Gradely');
+        if (!parsed.users || !parsed.subjects) {
+          throw new Error('الملف المختار لا يحتوي على بنية النسخة الاحتياطية الصحيحة للنظام.');
         }
 
-        if (!window.confirm(`تحذير: سيتم استعادة البيانات من ملف النسخة الاحتياطية (${parsed.exportedAt}). هل أنت متأكد من المتابعة؟`)) {
+        if (!window.confirm(`تحذير هام: سيتم استعادة كافة الطلاب (${parsed.users?.length || 0} مستخدم)، والمواد (${parsed.subjects?.length || 0} مادة)، والغياب (${parsed.attendance?.length || 0} سجل)، والدرجات (${parsed.grades?.length || 0} درجة). هل أنت متأكد من المتابعة؟`)) {
           setRestoring(false);
           setBackupMessage('');
           return;
         }
 
-        // Restore Subjects
+        // 1. Restore Users (including all deleted students/TAs)
+        if (Array.isArray(parsed.users) && parsed.users.length > 0) {
+          const cleanUsers = parsed.users.map(u => ({
+            user_id: u.user_id,
+            name: u.name,
+            role: u.role,
+            year_level: u.year_level || '1',
+            section: u.section || 'S1',
+            assigned_subjects: u.assigned_subjects || [],
+            auth_id: u.auth_id || null
+          }));
+          await supabase.from('users').upsert(cleanUsers, { onConflict: 'user_id' });
+        }
+
+        // 2. Restore Subjects
         if (Array.isArray(parsed.subjects) && parsed.subjects.length > 0) {
           await supabase.from('subjects').upsert(parsed.subjects, { onConflict: 'id' });
         }
 
-        // Restore Grades
+        // 3. Restore Grades
         if (Array.isArray(parsed.grades) && parsed.grades.length > 0) {
           await supabase.from('grades').upsert(parsed.grades, { onConflict: 'student_id,subject_id' });
         }
 
-        // Restore Attendance
+        // 4. Restore Attendance
         if (Array.isArray(parsed.attendance) && parsed.attendance.length > 0) {
           await supabase.from('attendance').upsert(parsed.attendance, { onConflict: 'student_id,subject_id,week_number' });
         }
 
         cacheManager.clear();
-        setBackupMessage('🎉 تم استعادة قاعدة البيانات بالكامل بنجاح!');
+        setBackupMessage('🎉 تم استعادة قاعدة البيانات بالكامل بنجاح وإرجاع كافة الطلاب والبيانات!');
         setTimeout(() => {
           window.location.reload();
         }, 2000);
@@ -307,6 +364,13 @@ export default function OverviewTab({ user }) {
     };
     reader.readAsText(file);
     e.target.value = '';
+  };
+
+  const handleScheduleChange = (val) => {
+    setBackupSchedule(val);
+    localStorage.setItem('gradely_backup_schedule', val);
+    setBackupMessage('✅ تم حفظ جدول تذكير النسخ الاحتياطي');
+    setTimeout(() => setBackupMessage(''), 3000);
   };
 
   if (loading) {
@@ -534,13 +598,13 @@ export default function OverviewTab({ user }) {
       {/* SUPER ADMIN: FULL SYSTEM BACKUP & RESTORE TOOL */}
       {isSuper && (
         <div className="panel fade-in" style={{border:'1px solid var(--border)',padding:'1.5rem'}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',flexWrap:'wrap',gap:'1rem'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',flexWrap:'wrap',gap:'1rem',borderBottom:'1px solid var(--border)',paddingBottom:'1rem'}}>
             <div>
               <h3 style={{margin:'0 0 4px 0',fontSize:'1.3rem',display:'flex',alignItems:'center',gap:'8px',color:'var(--success)'}}>
-                <Database size={22} /> مركز النسخ الاحتياطي واستعادة قاعدة البيانات (Super Admin Backup)
+                <Database size={22} /> مركز النسخ الاحتياطي الشامل واستعادة النظام (Full System Backup & Restore)
               </h3>
               <p className="text-muted" style={{margin:0,fontSize:'0.85rem'}}>
-                حمّل نسخة احتياطية شاملة لكافة الطلاب، المواد، الغياب، والدرجات، واحتفظ بها على جهازك أو استعد أي نسخة سابقة:
+                حفظ شامل لكافة جداول النظام (الطلاب، المواد، كشف الغياب الكامل لكافة الأسابيع، والدرجات) في ملف واحد:
               </p>
             </div>
             {backupMessage && (
@@ -550,12 +614,30 @@ export default function OverviewTab({ user }) {
             )}
           </div>
 
+          {/* Backup Schedule & Status Reminder */}
+          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px 16px',marginBottom:'1.5rem',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'1rem'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+              <Calendar size={18} style={{color:'var(--primary-hover)'}} />
+              <span style={{fontSize:'0.9rem',fontWeight:700}}>جدولة تذكير النسخ الاحتياطي:</span>
+              <select className="input-field" value={backupSchedule} onChange={e=>handleScheduleChange(e.target.value)} style={{padding:'4px 8px',width:'auto',fontSize:'0.85rem'}}>
+                <option value="daily">يومياً (Daily)</option>
+                <option value="3days">كل 3 أيام (كل 72 ساعة)</option>
+                <option value="weekly">أسبوعياً (كل 7 أيام)</option>
+              </select>
+            </div>
+
+            <div style={{fontSize:'0.85rem',color:'var(--text-muted)'}}>
+              آخر نسخة احتياطية: <strong style={{color:'var(--text-main)'}}>{lastBackupDate || 'لم يتم الحفظ بعد'}</strong>
+            </div>
+          </div>
+
           <div style={{display:'flex',gap:'1rem',flexWrap:'wrap',alignItems:'center'}}>
             <button 
               className="btn-primary" 
               onClick={() => handleFullBackup('json')} 
               disabled={backingUp || restoring}
               style={{display:'flex',alignItems:'center',gap:'8px',padding:'10px 18px',fontSize:'0.95rem'}}
+              title="نسخة شاملة تحتوي على كل الجداول والطلاب والغياب والدرجات لاستعادتها في أي وقت"
             >
               <Download size={18} /> {backingUp ? 'جاري إنشاء النسخة...' : 'تحميل نسخة احتياطية كاملة (JSON)'}
             </button>
@@ -564,9 +646,10 @@ export default function OverviewTab({ user }) {
               className="btn-secondary" 
               onClick={() => handleFullBackup('excel')} 
               disabled={backingUp || restoring}
-              style={{display:'flex',alignItems:'center',gap:'8px',padding:'10px 18px',fontSize:'0.95rem',color:'var(--success)'}}
+              style={{display:'flex',alignItems:'center',gap:'8px',padding:'10px 18px',fontSize:'0.95rem',color:'var(--success)',borderColor:'rgba(16,185,129,0.4)'}}
+              title="شيت إكسيل متعدد الصفحات يحتوي على كافة المواد وغياب كل الأسابيع والدرجات"
             >
-              <FileSpreadsheet size={18} /> تحميل شيت إكسيل لكافة المستخدمين
+              <FileSpreadsheet size={18} /> تحميل شيت إكسيل شامل (4 صفحات)
             </button>
 
             <label className="btn-secondary" style={{display:'flex',alignItems:'center',gap:'8px',padding:'10px 18px',fontSize:'0.95rem',cursor:'pointer',borderColor:'#f59e0b',color:'#f59e0b'}}>

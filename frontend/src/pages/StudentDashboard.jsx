@@ -298,26 +298,7 @@ export default function StudentDashboard({ user, onLogout }) {
             فرقة {normalizeYear(user.year_level)} | {normalizeSection(user.section || 'S1')}
           </span>
 
-          <button 
-            onClick={handleExportMyReportPDF}
-            style={{
-              background: 'rgba(16, 185, 129, 0.12)',
-              color: 'var(--success)',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
-              padding: '6px 14px',
-              borderRadius: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              cursor: 'pointer',
-              fontSize: '0.85rem',
-              fontWeight: 700,
-              transition: 'all 0.2s'
-            }}
-            title="تصدير وطباعة التقرير الأكاديمي الشامل كـ PDF"
-          >
-            <Printer size={15} /> كشف درجاتي PDF
-          </button>
+          
 
           <button 
             onClick={onLogout} 
@@ -414,66 +395,6 @@ export default function StudentDashboard({ user, onLogout }) {
               </div>
             )}
 
-          </div>
-        )}
-
-        {/* 📊 VISUAL PERFORMANCE COMPARISON PROGRESS BARS */}
-        {subjects.length > 0 && (
-          <div className="panel fade-in" style={{marginBottom: '2rem', padding: '1.4rem'}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',flexWrap:'wrap',gap:'0.8rem'}}>
-              <h3 style={{margin: 0, fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--primary-hover)'}}>
-                <BarChart3 size={20} /> المؤشر التحليلي للمقررات الدراسية
-              </h3>
-              <span style={{fontSize: '0.85rem', color: 'var(--text-muted)'}}>
-                مقارنة بصرية لمستوى الحضور والتحصيل لكل مادة
-              </span>
-            </div>
-
-            <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem'}}>
-              {subjectStats.map(sub => (
-                <div 
-                  key={sub.id} 
-                  onClick={() => setSelectedSubjectId(sub.id)}
-                  style={{
-                    background: 'var(--bg)',
-                    border: sub.id === selectedSubjectId ? '1px solid var(--primary)' : '1px solid var(--border)',
-                    borderRadius: '8px',
-                    padding: '12px 14px',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px'}}>
-                    <strong style={{fontSize: '0.95rem', color: sub.id === selectedSubjectId ? 'var(--primary-hover)' : 'var(--text-main)'}}>
-                      {sub.name}
-                    </strong>
-                    {currentSubVis.showTotal && (
-                      <span style={{fontSize: '0.85rem', fontWeight: 800, color: 'var(--primary-hover)'}}>
-                        {sub.score} درجة
-                      </span>
-                    )}
-                  </div>
-
-                  {currentSubVis.showAttendanceTab && (
-                    <div>
-                      <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '4px'}}>
-                        <span>حضور المحاضرات</span>
-                        <span style={{fontWeight: 700, color: sub.rate >= 80 ? 'var(--success)' : '#f59e0b'}}>{sub.rate}%</span>
-                      </div>
-                      <div style={{width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden'}}>
-                        <div style={{
-                          width: sub.rate + '%',
-                          height: '100%',
-                          background: sub.rate >= 80 ? 'var(--success)' : sub.rate >= 60 ? '#f59e0b' : 'var(--danger)',
-                          borderRadius: '3px',
-                          transition: 'width 0.5s ease'
-                        }} />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
           </div>
         )}
 
@@ -615,6 +536,11 @@ export default function StudentDashboard({ user, onLogout }) {
                       <div key={w} style={{background: bg, border: '1px solid ' + border, borderRadius: '6px', padding: '10px 6px', textAlign: 'center'}}>
                         <div style={{fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '2px'}}>الأسبوع {w}</div>
                         <div style={{fontWeight: 'bold', color: statusColor, fontSize: '0.85rem'}}>{statusLabel}</div>
+                        {record?.session_date && (
+                          <div style={{fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px', fontFamily: 'monospace'}}>
+                            {record.session_date}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

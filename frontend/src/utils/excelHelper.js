@@ -14,10 +14,6 @@ export const sanitizeCell = (val) => {
 
 /**
  * Parses an uploaded .xlsx or .xls file into an array of row objects using ExcelJS.
- * Compatible with previous XLSX.utils.sheet_to_json() output.
- * 
- * @param {File} file The file from <input type="file" />
- * @returns {Promise<Array<Object>>} Array of objects with header keys
  */
 export async function parseExcelFile(file) {
   if (!file) throw new Error('No file provided');
@@ -35,13 +31,11 @@ export async function parseExcelFile(file) {
     return [];
   }
 
-  // Row count check (excluding header row)
   const rowCount = worksheet.rowCount;
   if (rowCount - 1 > MAX_ROWS) {
     throw new Error(`عدد الصفوف (${rowCount - 1}) يتجاوز الحد الأقصى المسموح (${MAX_ROWS} صف).`);
   }
 
-  // First row is headers
   const headerRow = worksheet.getRow(1);
   const headers = [];
   headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
@@ -50,7 +44,7 @@ export async function parseExcelFile(file) {
 
   const data = [];
   worksheet.eachRow((row, rowNumber) => {
-    if (rowNumber === 1) return; // Skip header
+    if (rowNumber === 1) return;
 
     let hasValue = false;
     const rowObj = {};
@@ -60,7 +54,6 @@ export async function parseExcelFile(file) {
         const cell = row.getCell(colNumber);
         let val = cell.value;
 
-        // Handle formula cells if any
         if (val && typeof val === 'object' && val.result !== undefined) {
           val = val.result;
         }
@@ -83,11 +76,7 @@ export async function parseExcelFile(file) {
 }
 
 /**
- * Exports an array of row objects to an .xlsx file and triggers browser download via ExcelJS.
- * Compatible with previous XLSX.writeFile() workflow.
- * 
- * @param {Array<Object>} data Array of objects to export
- * @param {string} fileName The name of the downloaded file (e.g. 'Grades.xlsx')
+ * Exports an array of row objects to a single-sheet .xlsx file.
  */
 export async function exportExcelFile(data, fileName) {
   if (!data || data.length === 0) return;
@@ -95,7 +84,6 @@ export async function exportExcelFile(data, fileName) {
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet('Sheet1');
 
-  // Columns definition
   const colKeys = Object.keys(data[0]);
   worksheet.columns = colKeys.map(key => ({
     header: key,
@@ -103,10 +91,8 @@ export async function exportExcelFile(data, fileName) {
     width: Math.max(key.length + 5, 15)
   }));
 
-  // Format header row
   worksheet.getRow(1).font = { bold: true };
 
-  // Add rows with formula injection sanitization
   data.forEach(item => {
     const rowValues = {};
     colKeys.forEach(key => {
@@ -117,7 +103,58 @@ export async function exportExcelFile(data, fileName) {
     worksheet.addRow(rowValues);
   });
 
-  // Generate binary buffer & trigger download in browser
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+
+  const safeFileName = fileName.endsWith('.xlsx') ? fileName : `${fileName}.xlsx`;
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = safeFileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  window.URL.revokeObjectURL(url);
+}
+
+/**
+ * Exports multiple datasets into separate tabs/sheets in a single comprehensive .xlsx workbook.
+ */
+export async function exportMultiSheetExcelFile(sheets, fileName) {
+  if (!sheets || sheets.length === 0) return;
+
+  const workbook = new ExcelJS.Workbook();
+
+  sheets.forEach(({ name, data }) => {
+    const sheetName = name.slice(0, 31).replace(/[*?:/\\[\]]/g, '_');
+    const worksheet = workbook.addWorksheet(sheetName);
+
+    if (data && data.length > 0) {
+      const colKeys = Object.keys(data[0]);
+      worksheet.columns = colKeys.map(key => ({
+        header: key,
+        key: key,
+        width: Math.max(key.length + 5, 15)
+      }));
+
+      worksheet.getRow(1).font = { bold: true };
+
+      data.forEach(item => {
+        const rowValues = {};
+        colKeys.forEach(key => {
+          const val = item[key];
+          const strVal = val === null || val === undefined ? '' : String(val);
+          rowValues[key] = sanitizeCell(strVal);
+        });
+        worksheet.addRow(rowValues);
+      });
+    } else {
+      worksheet.addRow(['لا توجد بيانات مسجلة']);
+    }
+  });
+
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'

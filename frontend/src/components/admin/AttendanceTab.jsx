@@ -5,7 +5,7 @@ import { cacheManager } from '../../utils/dataCache';
 import { 
   Download, Users, UserPlus, UserMinus, UserCheck, CheckSquare, 
   FileText, Filter, Calendar, Save, Search, CheckCircle2, XCircle, 
-  Clock, AlertCircle, LayoutGrid, List, RotateCcw, Copy, Check, MessageSquare
+  Clock, AlertCircle, LayoutGrid, List, RotateCcw, Copy, Check, MessageSquare, X, FileSpreadsheet
 } from 'lucide-react';
 
 export default function AttendanceTab({ user }) {
@@ -20,18 +20,21 @@ export default function AttendanceTab({ user }) {
   const [sessionDate, setSessionDate] = useState(new Date().toISOString().split('T')[0]);
   const [attendanceRecords, setAttendanceRecords] = useState({});
   const [excuseReasons, setExcuseReasons] = useState({});
-  const [saving, setSaving] = useState(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState('');
   const [message, setMessage] = useState('');
   const [studentSearch, setStudentSearch] = useState('');
   const [viewMode, setViewMode] = useState('cards'); // 'cards' or 'table'
-  const [copiedTxt, setCopiedTxt] = useState(false);
+
+  // Custom Export Modal State (.txt / .xlsx)
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFormat, setExportFormat] = useState('txt'); // 'txt' or 'xlsx'
+  const [exportFilter, setExportFilter] = useState('all'); // 'all', 'present', 'absent', 'excused', 'late'
 
   // Excuse Modal
   const [excuseModalStudent, setExcuseModalStudent] = useState(null);
   const [excuseInputText, setExcuseInputText] = useState('');
   
-  // Custom enrollment states
+  // Custom enrollment states (Super Admin only)
   const [showManageStudents, setShowManageStudents] = useState(false);
   const [enrollMode, setEnrollMode] = useState('multi');
   const [filterYearToAdd, setFilterYearToAdd] = useState('1');
@@ -285,7 +288,7 @@ export default function AttendanceTab({ user }) {
     }
   };
 
-  // Instant Auto-Save on Toggle
+  // Instant 0ms Local Toggle + Non-blocking Background Upsert
   const toggleAttendance = (studentId, newStatus) => {
     const currentVal = attendanceRecords[studentId];
     const nextVal = currentVal === newStatus ? null : newStatus;
@@ -300,8 +303,12 @@ export default function AttendanceTab({ user }) {
     const updatedRecs = { ...attendanceRecords, [studentId]: nextVal };
     setAttendanceRecords(updatedRecs);
     cacheManager.set('att_' + selectedSubject + '_w' + week, { records: updatedRecs, excuses: excuseReasons, date: sessionDate });
+    cacheManager.invalidate('rep_' + studentId);
+    cacheManager.invalidate('student_data_' + studentId);
     
-    setAutoSaveStatus('جاري الحفظ...');
+    setAutoSaveStatus('✓ تم الحفظ');
+    setTimeout(() => setAutoSaveStatus(''), 1500);
+
     supabase.from('attendance').upsert({
       student_id: studentId,
       subject_id: selectedSubject,
@@ -309,12 +316,8 @@ export default function AttendanceTab({ user }) {
       status: nextVal || 'unrecorded',
       session_date: sessionDate,
       excuse_reason: nextVal === 'excused' ? (excuseReasons[studentId] || null) : null
-    }, { onConflict: 'student_id,subject_id,week_number' }).then(({ error }) => {
-      if (!error) {
-        setAutoSaveStatus('✅ تم الحفظ تلقائياً');
-        setTimeout(() => setAutoSaveStatus(''), 2000);
-        cacheManager.invalidate('rep_' + studentId);
-      }
+    }, { onConflict: 'student_id,subject_id,week_number' }).catch(err => {
+      console.error('Background save error:', err);
     });
   };
 
@@ -324,6 +327,8 @@ export default function AttendanceTab({ user }) {
     const updatedExcuses = { ...excuseReasons, [sId]: excuseInputText.trim() };
     setExcuseReasons(updatedExcuses);
     cacheManager.set('att_' + selectedSubject + '_w' + week, { records: attendanceRecords, excuses: updatedExcuses, date: sessionDate });
+    cacheManager.invalidate('rep_' + sId);
+    cacheManager.invalidate('student_data_' + sId);
 
     supabase.from('attendance').upsert({
       student_id: sId,
@@ -332,9 +337,7 @@ export default function AttendanceTab({ user }) {
       status: 'excused',
       session_date: sessionDate,
       excuse_reason: excuseInputText.trim() || null
-    }, { onConflict: 'student_id,subject_id,week_number' }).then(() => {
-      cacheManager.invalidate('rep_' + sId);
-    });
+    }, { onConflict: 'student_id,subject_id,week_number' });
 
     setExcuseModalStudent(null);
     setExcuseInputText('');
@@ -356,11 +359,10 @@ export default function AttendanceTab({ user }) {
       session_date: sessionDate
     }));
 
-    setAutoSaveStatus('جاري الحفظ...');
-    supabase.from('attendance').upsert(rows, { onConflict: 'student_id,subject_id,week_number' }).then(() => {
-      setAutoSaveStatus('✅ تم حفظ الكل كـ حاضر');
-      setTimeout(() => setAutoSaveStatus(''), 2500);
-    });
+    setAutoSaveStatus('✓ تم حفظ الكل');
+    setTimeout(() => setAutoSaveStatus(''), 1500);
+
+    supabase.from('attendance').upsert(rows, { onConflict: 'student_id,subject_id,week_number' });
   };
 
   const handleResetCurrentAttendance = () => {
@@ -382,96 +384,64 @@ export default function AttendanceTab({ user }) {
     supabase.from('attendance').upsert(rows, { onConflict: 'student_id,subject_id,week_number' });
   };
 
-  // Quick Copy Clean TXT / Clipboard Export
-  const handleCopyCleanTxt = () => {
-    const subName = currentSub ? currentSub.name : 'مادة';
+  // ADVANCED CUSTOM EXPORT (.TXT or .XLSX) BASED ON SELECTION
+  const handleExecuteCustomExport = async () => {
+    setShowExportModal(false);
+    const subName = currentSub ? currentSub.name : 'Subject';
     const yr = currentSub ? normalizeYear(currentSub.year_level) : '';
-    const secName = selectedSection !== 'all' ? selectedSection : 'جميع السكاشن';
-    const taName = currentSub ? getSectionInstructorName(selectedSubject, selectedSection) : '';
+    const secName = selectedSection !== 'all' ? selectedSection : 'All';
+    const filename = `Attendance_${subName}_${secName}_Week${week}_${exportFilter}_${sessionDate}`;
 
-    const presentList = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'present');
-    const absentList = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'absent');
-    const lateList = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'late');
-    const excusedList = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'excused');
+    let targetStudents = displayedEnrolledStudents;
+    if (exportFilter === 'present') targetStudents = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'present');
+    else if (exportFilter === 'absent') targetStudents = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'absent');
+    else if (exportFilter === 'late') targetStudents = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'late');
+    else if (exportFilter === 'excused') targetStudents = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'excused');
 
-    let txt = `كشف حضور وغياب — مادة: ${subName} (الفرقة ${yr})\n`;
-    txt += `السكشن: ${secName} | المشرف/المعيد: ${taName}\n`;
-    txt += `رقم الأسبوع: الأسبوع ${week} | التاريخ: ${sessionDate}\n`;
-    txt += `--------------------------------------------------\n`;
-    txt += `إجمالي الحضور: ${presentList.length} | الغياب: ${absentList.length} | التأخير: ${lateList.length} | الأعذار: ${excusedList.length}\n\n`;
+    if (exportFormat === 'txt') {
+      let txt = `==================================================\n`;
+      txt += `كشف حضور وغياب — مادة: ${subName} (الفرقة ${yr})\n`;
+      txt += `السكشن: ${secName} | رقم الأسبوع: الأسبوع ${week}\n`;
+      txt += `تاريخ المحاضرة: ${sessionDate}\n`;
+      txt += `نوع التقرير: ${exportFilter === 'all' ? 'الكشف الكامل' : exportFilter === 'present' ? 'الحاضرون فقط' : exportFilter === 'absent' ? 'الغائبون فقط' : exportFilter === 'late' ? 'المتأخرون' : 'أصحاب الأعذار'}\n`;
+      txt += `إجمالي الطلاب في هذا الملف: ${targetStudents.length} طالب\n`;
+      txt += `==================================================\n\n`;
 
-    txt += `✅ الطلاب الحاضرون (${presentList.length}):\n`;
-    presentList.forEach((s, i) => {
-      txt += `${i + 1}. [${s.user_id}] ${s.name} - سكشن ${normalizeSection(s.section || 'S1')}\n`;
-    });
-
-    if (absentList.length > 0) {
-      txt += `\n❌ الطلاب الغائبون (${absentList.length}):\n`;
-      absentList.forEach((s, i) => {
-        txt += `${i + 1}. [${s.user_id}] ${s.name} - سكشن ${normalizeSection(s.section || 'S1')}\n`;
+      targetStudents.forEach((s, idx) => {
+        const st = attendanceRecords[s.user_id] || 'لم يرصد';
+        const stLabel = st === 'present' ? 'حاضر' : st === 'absent' ? 'غائب' : st === 'late' ? 'تأخير' : st === 'excused' ? 'عذر' : 'لم يرصد';
+        const rsn = excuseReasons[s.user_id] ? ` [السبب: ${excuseReasons[s.user_id]}]` : '';
+        txt += `${idx + 1}. [${s.user_id}] ${s.name} - سكشن ${normalizeSection(s.section || 'S1')} - (${stLabel})${rsn}\n`;
       });
+
+      const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${filename}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } else {
+      // Excel Export
+      const excelRows = targetStudents.map((s, idx) => {
+        const st = attendanceRecords[s.user_id] || 'لم يرصد';
+        const stLabel = st === 'present' ? 'حاضر' : st === 'absent' ? 'غائب' : st === 'late' ? 'تأخير' : st === 'excused' ? 'عذر' : 'لم يرصد';
+        return {
+          'م': idx + 1,
+          'الرقم الأكاديمي': s.user_id,
+          'اسم الطالب': s.name,
+          'الفرقة': normalizeYear(s.year_level),
+          'السكشن': normalizeSection(s.section || 'S1'),
+          'الأسبوع': `الأسبوع ${week}`,
+          'تاريخ المحاضرة': sessionDate,
+          'الحالة': stLabel,
+          'سبب العذر': excuseReasons[s.user_id] || ''
+        };
+      });
+      await exportExcelFile(excelRows, `${filename}.xlsx`);
     }
-
-    if (lateList.length > 0) {
-      txt += `\n⏰ الطلاب المتأخرون (${lateList.length}):\n`;
-      lateList.forEach((s, i) => {
-        txt += `${i + 1}. [${s.user_id}] ${s.name}\n`;
-      });
-    }
-
-    if (excusedList.length > 0) {
-      txt += `\n📄 أصحاب الأعذار (${excusedList.length}):\n`;
-      excusedList.forEach((s, i) => {
-        const rsn = excuseReasons[s.user_id] ? ` (السبب: ${excuseReasons[s.user_id]})` : '';
-        txt += `${i + 1}. [${s.user_id}] ${s.name}${rsn}\n`;
-      });
-    }
-
-    navigator.clipboard.writeText(txt).then(() => {
-      setCopiedTxt(true);
-      setTimeout(() => setCopiedTxt(false), 3000);
-    });
-  };
-
-  const handleExport = async () => {
-    if (!currentSub) return;
-    const { data: allAttendance } = await supabase
-      .from('attendance')
-      .select('student_id, week_number, status, session_date, excuse_reason')
-      .eq('subject_id', selectedSubject);
-    
-    const exportData = displayedEnrolledStudents.map(stu => {
-      const row = { 'ID': stu.user_id, 'Name': stu.name, 'Section': normalizeSection(stu.section || 'S1') };
-      const stuAtt = allAttendance ? allAttendance.filter(a => a.student_id === stu.user_id) : [];
-      let totalAttended = 0;
-      let totalAbsent = 0;
-
-      for (let w = 1; w <= (currentSub.total_weeks || 12); w++) {
-        row['Week ' + w] = '';
-      }
-
-      stuAtt.forEach(a => {
-        const dateNote = a.session_date ? ` (${a.session_date})` : '';
-        if (a.status === 'present') {
-          row['Week ' + a.week_number] = '1' + dateNote;
-          totalAttended++;
-        } else if (a.status === 'late') {
-          row['Week ' + a.week_number] = 'تأخير' + dateNote;
-          totalAttended++;
-        } else if (a.status === 'absent') {
-          row['Week ' + a.week_number] = '0' + dateNote;
-          totalAbsent++;
-        } else if (a.status === 'excused') {
-          row['Week ' + a.week_number] = (a.excuse_reason ? `عذر: ${a.excuse_reason}` : 'عذر') + dateNote;
-        }
-      });
-
-      row['إجمالي الحضور (Total Present)'] = String(totalAttended);
-      row['إجمالي الغياب (Total Absence)'] = String(totalAbsent);
-      return row;
-    });
-
-    await exportExcelFile(exportData, 'Attendance_' + currentSub.name + (selectedSection !== 'all' ? '_' + selectedSection : '') + '.xlsx');
   };
 
   const candidateStudents = allStudents.filter(s => 
@@ -514,7 +484,7 @@ export default function AttendanceTab({ user }) {
           <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
             <h2 style={{margin:0,fontSize:'1.6rem',fontWeight:800}}>سجل الغياب الأسبوعي</h2>
             {autoSaveStatus && (
-              <span style={{fontSize:'0.85rem',color: autoSaveStatus.startsWith('✅') ? 'var(--success)' : 'var(--primary-hover)',fontWeight:700}}>
+              <span style={{fontSize:'0.85rem',color: 'var(--success)',fontWeight:700,background:'rgba(16,185,129,0.1)',padding:'3px 8px',borderRadius:'4px',border:'1px solid rgba(16,185,129,0.2)'}}>
                 {autoSaveStatus}
               </span>
             )}
@@ -532,18 +502,13 @@ export default function AttendanceTab({ user }) {
           )}
 
           <button 
-            className="btn-secondary" 
-            onClick={handleCopyCleanTxt} 
+            className="btn-primary" 
+            onClick={() => setShowExportModal(true)} 
             disabled={!selectedSubject || displayedEnrolledStudents.length === 0}
-            style={{color:'var(--primary-hover)',borderColor:'rgba(79, 70, 229, 0.4)'}}
-            title="نسخ كشف الحضور والغياب بصيغة نصية مرتبة لتقديمها مباشرة"
+            style={{background:'var(--primary)',display:'flex',alignItems:'center',gap:'8px',padding:'9px 16px',fontSize:'0.9rem'}}
+            title="تصدير كشف الحضور أو الغياب كملف TXT أو Excel"
           >
-            {copiedTxt ? <Check size={18} style={{color:'var(--success)'}} /> : <Copy size={18} />}
-            {copiedTxt ? 'تم نسخ الكشف ✓' : 'نسخ الكشف (TXT)'}
-          </button>
-
-          <button className="btn-secondary" onClick={handleExport} disabled={!selectedSubject || displayedEnrolledStudents.length === 0} style={{color:'var(--success)'}}>
-            <Download size={18} /> تصدير إكسيل
+            <Download size={18} /> تصدير كشف الأسبوع (.txt / Excel)
           </button>
         </div>
       </div>
@@ -613,7 +578,6 @@ export default function AttendanceTab({ user }) {
             value={sessionDate} 
             onChange={e => {
               setSessionDate(e.target.value);
-              // Update date for existing week's attendance in background
               supabase.from('attendance').update({ session_date: e.target.value }).eq('subject_id', selectedSubject).eq('week_number', week);
             }} 
           />
@@ -910,7 +874,7 @@ export default function AttendanceTab({ user }) {
                   background: cardBg,
                   borderRadius:'12px',
                   boxShadow: status ? '0 4px 15px rgba(0,0,0,0.2)' : 'none',
-                  transition:'all 0.2s ease',
+                  transition:'all 0.15s ease',
                   display:'flex',
                   flexDirection:'column',
                   justifyContent:'space-between'
@@ -1140,6 +1104,72 @@ export default function AttendanceTab({ user }) {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* CUSTOM EXPORT MODAL (.TXT or .XLSX) */}
+      {showExportModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem'
+        }}>
+          <div className="panel fade-in" style={{maxWidth: '460px', width: '100%'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',borderBottom:'1px solid var(--border)',paddingBottom:'0.8rem'}}>
+              <h3 style={{margin:0,fontSize:'1.2rem',display:'flex',alignItems:'center',gap:'8px',color:'var(--primary-hover)'}}>
+                <Download size={20} /> خيارات تصدير كشف الغياب والحضور
+              </h3>
+              <button onClick={() => setShowExportModal(false)} style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{display:'flex',flexDirection:'column',gap:'1.2rem'}}>
+              <div>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'0.9rem',fontWeight:700}}>1. صيغة ونوع الملف:</label>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>
+                  <label style={{
+                    display:'flex',alignItems:'center',gap:'8px',padding:'10px',borderRadius:'8px',cursor:'pointer',
+                    background: exportFormat === 'txt' ? 'rgba(79, 70, 229, 0.15)' : 'var(--bg)',
+                    border: exportFormat === 'txt' ? '1px solid var(--primary)' : '1px solid var(--border)'
+                  }}>
+                    <input type="radio" name="exportFormat" value="txt" checked={exportFormat === 'txt'} onChange={() => setExportFormat('txt')} />
+                    <FileText size={18} style={{color:'var(--primary-hover)'}} />
+                    <span>ملف نصي (.txt)</span>
+                  </label>
+
+                  <label style={{
+                    display:'flex',alignItems:'center',gap:'8px',padding:'10px',borderRadius:'8px',cursor:'pointer',
+                    background: exportFormat === 'xlsx' ? 'rgba(16, 185, 129, 0.15)' : 'var(--bg)',
+                    border: exportFormat === 'xlsx' ? '1px solid var(--success)' : '1px solid var(--border)'
+                  }}>
+                    <input type="radio" name="exportFormat" value="xlsx" checked={exportFormat === 'xlsx'} onChange={() => setExportFormat('xlsx')} />
+                    <FileSpreadsheet size={18} style={{color:'var(--success)'}} />
+                    <span>شيت إكسيل (.xlsx)</span>
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'0.9rem',fontWeight:700}}>2. الطلاب المطلوب تصديرهم:</label>
+                <select className="input-field" value={exportFilter} onChange={e => setExportFilter(e.target.value)} style={{width:'100%',padding:'10px',fontWeight:700}}>
+                  <option value="all">📋 الكشف الكامل (حاضر + غائب + تأخير + عذر)</option>
+                  <option value="present">🟢 الحاضرون فقط ({countPresent} طالب)</option>
+                  <option value="absent">🔴 الغائبون فقط ({countAbsent} طالب)</option>
+                  <option value="late">🟡 المتأخرون فقط ({countLate} طالب)</option>
+                  <option value="excused">🔵 أصحاب الأعذار فقط ({countExcused} طالب)</option>
+                </select>
+              </div>
+
+              <div style={{display:'flex',gap:'10px',marginTop:'0.5rem'}}>
+                <button className="btn-primary" onClick={handleExecuteCustomExport} style={{flex:1,padding:'10px',display:'flex',alignItems:'center',justifyContent:'center',gap:'8px'}}>
+                  <Download size={18} /> تحميل الملف الآن
+                </button>
+                <button className="btn-secondary" onClick={() => setShowExportModal(false)}>
+                  إلغاء
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
