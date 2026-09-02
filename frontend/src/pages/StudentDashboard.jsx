@@ -61,17 +61,39 @@ export default function StudentDashboard({ user, onLogout }) {
 
   const parseVisibilityFromSubjects = (subList) => {
     if (!Array.isArray(subList)) return null;
+    const settings = {
+      global: {
+        showQuiz1: true,
+        showQuiz2: true,
+        showProject: true,
+        showAttendanceScore: true,
+        showTotal: true,
+        showAttendanceTab: true
+      }
+    };
+
     for (const sub of subList) {
       if (Array.isArray(sub.excluded_students)) {
-        const configEntry = sub.excluded_students.find(item => typeof item === 'string' && item.startsWith('CONFIG:'));
-        if (configEntry) {
-          try {
-            return JSON.parse(configEntry.replace('CONFIG:', ''));
-          } catch (e) {}
-        }
+        sub.excluded_students.forEach(item => {
+          if (typeof item === 'string') {
+            if (item.startsWith('CONFIG:')) {
+              try { settings.global = JSON.parse(item.replace('CONFIG:', '')); } catch (e) {}
+            } else if (item.startsWith('CONFIG_SUB:')) {
+              try {
+                const parsed = JSON.parse(item.replace('CONFIG_SUB:', ''));
+                Object.assign(settings, parsed);
+              } catch (e) {}
+            }
+          }
+        });
       }
     }
-    return null;
+    return settings;
+  };
+
+  const getSubVisibility = (subId) => {
+    if (!visibility) return { showQuiz1: true, showQuiz2: true, showProject: true, showAttendanceScore: true, showTotal: true, showAttendanceTab: true };
+    return visibility[subId] || visibility.global || visibility;
   };
 
   const fetchData = async () => {
@@ -83,7 +105,7 @@ export default function StudentDashboard({ user, onLogout }) {
       setGrades(cached.grades);
       if (cached.visibility) {
         setVisibility(cached.visibility);
-        if (!cached.visibility.showAttendanceTab) setViewMode('grades');
+        if (!cached.currentSubVis.showAttendanceTab) setViewMode('grades');
       }
       if (cached.subjects.length > 0) setSelectedSubjectId(cached.subjects[0].id);
       setLoading(false);
@@ -156,12 +178,12 @@ export default function StudentDashboard({ user, onLogout }) {
       grades: grades,
       attendance: attendance,
       options: {
-        includeAttendanceDetails: visibility.showAttendanceTab,
+        includeAttendanceDetails: currentSubVis.showAttendanceTab,
         includeGrades: true,
-        includeQuizzes: visibility.showQuiz1 || visibility.showQuiz2,
-        includeProject: visibility.showProject,
-        includeAttendanceScore: visibility.showAttendanceScore,
-        includeTotal: visibility.showTotal,
+        includeQuizzes: currentSubVis.showQuiz1 || currentSubVis.showQuiz2,
+        includeProject: currentSubVis.showProject,
+        includeAttendanceScore: currentSubVis.showAttendanceScore,
+        includeTotal: currentSubVis.showTotal,
         selectedSubjectIds: subjects.map(s => s.id)
       }
     });
@@ -199,11 +221,12 @@ export default function StudentDashboard({ user, onLogout }) {
     const subRate = subAtt.length > 0 ? Math.round((attendedCount / subAtt.length) * 100) : 100;
 
     const g = grades.find(grd => grd.subject_id === sub.id) || {};
+    const subVis = getSubVisibility(sub.id);
     let subTotal = 0;
-    if (visibility.showQuiz1) subTotal += (g.quiz_1 || 0);
-    if (visibility.showQuiz2) subTotal += (g.quiz_2 || 0);
-    if (visibility.showProject) subTotal += (g.project || 0);
-    if (visibility.showAttendanceScore) subTotal += (g.attendance_score || 0);
+    if (subVis.showQuiz1) subTotal += (g.quiz_1 || 0);
+    if (subVis.showQuiz2) subTotal += (g.quiz_2 || 0);
+    if (subVis.showProject) subTotal += (g.project || 0);
+    if (subVis.showAttendanceScore) subTotal += (g.attendance_score || 0);
 
     if (subAtt.length > 0 && subRate > highestRate) {
       highestRate = subRate;
@@ -239,12 +262,13 @@ export default function StudentDashboard({ user, onLogout }) {
   const absCount = currentAttendance.filter(a => a.status === 'absent').length;
 
   // Calculate dynamic visible total score for current subject
+  const currentSubVis = getSubVisibility(selectedSubjectId);
   let visibleTotal = 0;
   let hasAnyGradeVisible = false;
-  if (visibility.showQuiz1) { visibleTotal += (currentGrades.quiz_1 || 0); hasAnyGradeVisible = true; }
-  if (visibility.showQuiz2) { visibleTotal += (currentGrades.quiz_2 || 0); hasAnyGradeVisible = true; }
-  if (visibility.showProject) { visibleTotal += (currentGrades.project || 0); hasAnyGradeVisible = true; }
-  if (visibility.showAttendanceScore) { visibleTotal += (currentGrades.attendance_score || 0); hasAnyGradeVisible = true; }
+  if (currentSubVis.showQuiz1) { visibleTotal += (currentGrades.quiz_1 || 0); hasAnyGradeVisible = true; }
+  if (currentSubVis.showQuiz2) { visibleTotal += (currentGrades.quiz_2 || 0); hasAnyGradeVisible = true; }
+  if (currentSubVis.showProject) { visibleTotal += (currentGrades.project || 0); hasAnyGradeVisible = true; }
+  if (currentSubVis.showAttendanceScore) { visibleTotal += (currentGrades.attendance_score || 0); hasAnyGradeVisible = true; }
 
   return (
     <div style={{minHeight: '100vh', width: '100%', flex: 1, background: 'var(--bg)', display: 'flex', flexDirection: 'column', overflowX: 'hidden'}}>
@@ -344,7 +368,7 @@ export default function StudentDashboard({ user, onLogout }) {
             </div>
 
             {/* Attendance Rate */}
-            {visibility.showAttendanceTab && (
+            {currentSubVis.showAttendanceTab && (
               <div className="panel" style={{display: 'flex', alignItems: 'center', gap: '1rem', borderTop: '4px solid #10b981'}}>
                 <div style={{background: 'rgba(16, 185, 129, 0.1)', padding: '0.9rem', borderRadius: '50%', color: '#10b981'}}>
                   <UserCheck size={24} />
@@ -359,7 +383,7 @@ export default function StudentDashboard({ user, onLogout }) {
             )}
 
             {/* Best Attendance Subject */}
-            {visibility.showAttendanceTab && bestAttendanceSub && (
+            {currentSubVis.showAttendanceTab && bestAttendanceSub && (
               <div className="panel" style={{display: 'flex', alignItems: 'center', gap: '1rem', borderTop: '4px solid #f59e0b'}}>
                 <div style={{background: 'rgba(245, 158, 11, 0.1)', padding: '0.9rem', borderRadius: '50%', color: '#f59e0b'}}>
                   <Trophy size={24} />
@@ -375,7 +399,7 @@ export default function StudentDashboard({ user, onLogout }) {
             )}
 
             {/* Highest Grade Subject */}
-            {visibility.showTotal && bestGradesSub && (
+            {currentSubVis.showTotal && bestGradesSub && (
               <div className="panel" style={{display: 'flex', alignItems: 'center', gap: '1rem', borderTop: '4px solid #3b82f6'}}>
                 <div style={{background: 'rgba(59, 130, 246, 0.1)', padding: '0.9rem', borderRadius: '50%', color: '#3b82f6'}}>
                   <Star size={24} />
@@ -423,14 +447,14 @@ export default function StudentDashboard({ user, onLogout }) {
                     <strong style={{fontSize: '0.95rem', color: sub.id === selectedSubjectId ? 'var(--primary-hover)' : 'var(--text-main)'}}>
                       {sub.name}
                     </strong>
-                    {visibility.showTotal && (
+                    {currentSubVis.showTotal && (
                       <span style={{fontSize: '0.85rem', fontWeight: 800, color: 'var(--primary-hover)'}}>
                         {sub.score} درجة
                       </span>
                     )}
                   </div>
 
-                  {visibility.showAttendanceTab && (
+                  {currentSubVis.showAttendanceTab && (
                     <div>
                       <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '4px'}}>
                         <span>حضور المحاضرات</span>
@@ -510,7 +534,7 @@ export default function StudentDashboard({ user, onLogout }) {
               </div>
 
               {/* View Toggle (Only shown if attendance tab is enabled) */}
-              {visibility.showAttendanceTab && (
+              {currentSubVis.showAttendanceTab && (
                 <div style={{display: 'flex', gap: '6px', background: 'var(--bg)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border)'}}>
                   <button 
                     onClick={() => setViewMode('attendance')}
@@ -541,7 +565,7 @@ export default function StudentDashboard({ user, onLogout }) {
             </div>
 
             {/* Attendance View */}
-            {viewMode === 'attendance' && visibility.showAttendanceTab && (
+            {viewMode === 'attendance' && currentSubVis.showAttendanceTab && (
               <div className="fade-in">
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',flexWrap:'wrap',gap:'0.8rem'}}>
                   <h4 style={{margin: 0, color: 'var(--text-muted)', fontSize:'0.95rem'}}>
@@ -599,13 +623,13 @@ export default function StudentDashboard({ user, onLogout }) {
             )}
 
             {/* Grades View (Dynamically respecting visibility toggles) */}
-            {(viewMode === 'grades' || !visibility.showAttendanceTab) && (
+            {(viewMode === 'grades' || !currentSubVis.showAttendanceTab) && (
               <div className="fade-in">
                 
                 {hasAnyGradeVisible ? (
                   <>
                     <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem', marginBottom: '1.5rem'}}>
-                      {visibility.showQuiz1 && (
+                      {currentSubVis.showQuiz1 && (
                         <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
                           <span className="text-muted" style={{fontSize: '0.8rem'}}>كويز 1</span>
                           <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
@@ -614,7 +638,7 @@ export default function StudentDashboard({ user, onLogout }) {
                         </div>
                       )}
 
-                      {visibility.showQuiz2 && (
+                      {currentSubVis.showQuiz2 && (
                         <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
                           <span className="text-muted" style={{fontSize: '0.8rem'}}>كويز 2</span>
                           <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
@@ -623,7 +647,7 @@ export default function StudentDashboard({ user, onLogout }) {
                         </div>
                       )}
 
-                      {visibility.showProject && (
+                      {currentSubVis.showProject && (
                         <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
                           <span className="text-muted" style={{fontSize: '0.8rem'}}>المشروع</span>
                           <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
@@ -632,7 +656,7 @@ export default function StudentDashboard({ user, onLogout }) {
                         </div>
                       )}
 
-                      {visibility.showAttendanceScore && (
+                      {currentSubVis.showAttendanceScore && (
                         <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
                           <span className="text-muted" style={{fontSize: '0.8rem'}}>الحضور</span>
                           <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--success)'}}>
@@ -642,7 +666,7 @@ export default function StudentDashboard({ user, onLogout }) {
                       )}
                     </div>
 
-                    {visibility.showTotal && (
+                    {currentSubVis.showTotal && (
                       <div style={{background: 'linear-gradient(135deg, rgba(79, 70, 229, 0.15), rgba(99, 102, 241, 0.05))', border: '1px solid var(--primary)', borderRadius: '10px', padding: '1.2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.8rem'}}>
                         <div>
                           <h3 style={{margin: '0 0 2px 0', fontSize: '1.1rem', color: 'var(--text-main)'}}>المجموع الكلي</h3>

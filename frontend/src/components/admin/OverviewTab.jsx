@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { cacheManager } from '../../utils/dataCache';
-import { Users, BookOpen, Clock, Shield, Sliders, Eye, EyeOff } from 'lucide-react';
+import { exportExcelFile } from '../../utils/excelHelper';
+import { 
+  Users, BookOpen, Clock, Shield, Sliders, Eye, EyeOff, 
+  Download, Upload, Database, RefreshCw, CheckCircle2, AlertTriangle, FileSpreadsheet
+} from 'lucide-react';
 
 export default function OverviewTab({ user }) {
   const [stats, setStats] = useState({
@@ -12,18 +16,29 @@ export default function OverviewTab({ user }) {
     lastUpdate: 'غير متوفر'
   });
   const [loading, setLoading] = useState(true);
+  const [allSubjectsList, setAllSubjectsList] = useState([]);
+  const [selectedSubjectForVisibility, setSelectedSubjectForVisibility] = useState('global'); // 'global' or subId
 
   // Student Dashboard Visibility Configuration
+  // Structure: { global: { showQuiz1: true, ... }, [subId]: { showQuiz1: false, ... } }
   const [visibilitySettings, setVisibilitySettings] = useState({
-    showQuiz1: true,
-    showQuiz2: true,
-    showProject: true,
-    showAttendanceScore: true,
-    showTotal: true,
-    showAttendanceTab: true
+    global: {
+      showQuiz1: true,
+      showQuiz2: true,
+      showProject: true,
+      showAttendanceScore: true,
+      showTotal: true,
+      showAttendanceTab: true
+    }
   });
+
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState('');
+
+  // Backup & Restore State
+  const [backingUp, setBackingUp] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [backupMessage, setBackupMessage] = useState('');
 
   const isSuper = !user || user.user_id === 'admin';
 
@@ -33,17 +48,34 @@ export default function OverviewTab({ user }) {
 
   const parseVisibilityFromSubjects = (subList) => {
     if (!Array.isArray(subList)) return null;
+    const settings = {
+      global: {
+        showQuiz1: true,
+        showQuiz2: true,
+        showProject: true,
+        showAttendanceScore: true,
+        showTotal: true,
+        showAttendanceTab: true
+      }
+    };
+
     for (const sub of subList) {
       if (Array.isArray(sub.excluded_students)) {
-        const configEntry = sub.excluded_students.find(item => typeof item === 'string' && item.startsWith('CONFIG:'));
-        if (configEntry) {
-          try {
-            return JSON.parse(configEntry.replace('CONFIG:', ''));
-          } catch (e) {}
-        }
+        sub.excluded_students.forEach(item => {
+          if (typeof item === 'string') {
+            if (item.startsWith('CONFIG:')) {
+              try { settings.global = JSON.parse(item.replace('CONFIG:', '')); } catch (e) {}
+            } else if (item.startsWith('CONFIG_SUB:')) {
+              try {
+                const parsed = JSON.parse(item.replace('CONFIG_SUB:', ''));
+                Object.assign(settings, parsed);
+              } catch (e) {}
+            }
+          }
+        });
       }
     }
-    return null;
+    return settings;
   };
 
   const fetchOverviewData = async () => {
@@ -63,6 +95,8 @@ export default function OverviewTab({ user }) {
         cacheManager.set('admin_users_base', allUsersList);
         cacheManager.set('admin_subjects_base', allSubList);
       }
+
+      setAllSubjectsList(allSubList);
 
       const parsedConfig = parseVisibilityFromSubjects(allSubList);
       if (parsedConfig) {
@@ -109,33 +143,51 @@ export default function OverviewTab({ user }) {
     }
   };
 
+  const currentActiveVisibility = visibilitySettings[selectedSubjectForVisibility] || visibilitySettings.global || {
+    showQuiz1: true,
+    showQuiz2: true,
+    showProject: true,
+    showAttendanceScore: true,
+    showTotal: true,
+    showAttendanceTab: true
+  };
+
   const handleToggleVisibility = async (key) => {
     if (!isSuper) return;
-    const updated = {
-      ...visibilitySettings,
-      [key]: !visibilitySettings[key]
+    const currentSubScope = selectedSubjectForVisibility;
+    const updatedSubScope = {
+      ...currentActiveVisibility,
+      [key]: !currentActiveVisibility[key]
     };
-    setVisibilitySettings(updated);
+
+    const updatedSettings = {
+      ...visibilitySettings,
+      [currentSubScope]: updatedSubScope
+    };
+
+    setVisibilitySettings(updatedSettings);
     setSavingSettings(true);
     setSettingsMessage('');
 
     try {
-      const configStr = 'CONFIG:' + JSON.stringify(updated);
-      
-      // Fetch latest subjects
+      const globalConfigStr = 'CONFIG:' + JSON.stringify(updatedSettings.global || {});
+      const subConfigStr = 'CONFIG_SUB:' + JSON.stringify(updatedSettings);
+
       const { data: subData } = await supabase.from('subjects').select('id, excluded_students');
       if (subData && subData.length > 0) {
         for (const sub of subData) {
-          const currentExcluded = Array.isArray(sub.excluded_students) ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG:')) : [];
-          currentExcluded.push(configStr);
-          await supabase.from('subjects').update({ excluded_students: currentExcluded }).eq('id', sub.id);
+          const cleanExcluded = Array.isArray(sub.excluded_students) 
+            ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG:') && !x.startsWith('CONFIG_SUB:')) 
+            : [];
+          cleanExcluded.push(globalConfigStr);
+          cleanExcluded.push(subConfigStr);
+          await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', sub.id);
         }
       }
 
       cacheManager.invalidate('admin_subjects_base');
       cacheManager.invalidate('student_data_');
-      localStorage.setItem('gradely_student_visibility', JSON.stringify(updated));
-      setSettingsMessage('✅ تم تحديث إعدادات ظهور البيانات للطلاب فوراً');
+      setSettingsMessage('✅ تم تحديث إعدادات ظهور البيانات بنجاح');
       setTimeout(() => setSettingsMessage(''), 3500);
     } catch (err) {
       console.error('Save visibility error:', err);
@@ -143,6 +195,118 @@ export default function OverviewTab({ user }) {
     } finally {
       setSavingSettings(false);
     }
+  };
+
+  // FULL SYSTEM BACKUP (JSON + EXCEL)
+  const handleFullBackup = async (format = 'json') => {
+    if (!isSuper) return;
+    setBackingUp(true);
+    setBackupMessage('');
+
+    try {
+      const [usersRes, subRes, attRes, grdRes] = await Promise.all([
+        supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects, created_at'),
+        supabase.from('subjects').select('*'),
+        supabase.from('attendance').select('*'),
+        supabase.from('grades').select('*')
+      ]);
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const backupData = {
+        version: 'Gradely-v2-Backup',
+        exportedAt: new Date().toISOString(),
+        users: usersRes.data || [],
+        subjects: subRes.data || [],
+        attendance: attRes.data || [],
+        grades: grdRes.data || []
+      };
+
+      if (format === 'json') {
+        const jsonStr = JSON.stringify(backupData, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Gradely_Full_Backup_${timestamp}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } else {
+        // Multi-table Excel Export
+        const exportArray = (usersRes.data || []).map(u => ({
+          'ID': u.user_id,
+          'Name': u.name,
+          'Role': u.role,
+          'Year': u.year_level,
+          'Section': u.section,
+          'Created At': u.created_at
+        }));
+        await exportExcelFile(exportArray, `Gradely_Users_Backup_${timestamp}.xlsx`);
+      }
+
+      setBackupMessage('✅ تم تحميل النسخة الاحتياطية الكاملة بنجاح على جهازك!');
+      setTimeout(() => setBackupMessage(''), 4500);
+    } catch (err) {
+      console.error('Backup error:', err);
+      setBackupMessage('❌ فشل إنشاء النسخة الاحتياطية');
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
+  // RESTORE FROM BACKUP JSON
+  const handleRestoreFromFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        setRestoring(true);
+        setBackupMessage('جاري قراءة واستعادة البيانات...');
+        const parsed = JSON.parse(event.target.result);
+
+        if (!parsed.version || !parsed.users) {
+          throw new Error('الملف المختار ليس نسخة احتياطية صالحة لنظام Gradely');
+        }
+
+        if (!window.confirm(`تحذير: سيتم استعادة البيانات من ملف النسخة الاحتياطية (${parsed.exportedAt}). هل أنت متأكد من المتابعة؟`)) {
+          setRestoring(false);
+          setBackupMessage('');
+          return;
+        }
+
+        // Restore Subjects
+        if (Array.isArray(parsed.subjects) && parsed.subjects.length > 0) {
+          await supabase.from('subjects').upsert(parsed.subjects, { onConflict: 'id' });
+        }
+
+        // Restore Grades
+        if (Array.isArray(parsed.grades) && parsed.grades.length > 0) {
+          await supabase.from('grades').upsert(parsed.grades, { onConflict: 'student_id,subject_id' });
+        }
+
+        // Restore Attendance
+        if (Array.isArray(parsed.attendance) && parsed.attendance.length > 0) {
+          await supabase.from('attendance').upsert(parsed.attendance, { onConflict: 'student_id,subject_id,week_number' });
+        }
+
+        cacheManager.clear();
+        setBackupMessage('🎉 تم استعادة قاعدة البيانات بالكامل بنجاح!');
+        setTimeout(() => {
+          window.location.reload();
+        }, 2000);
+
+      } catch (err) {
+        console.error('Restore error:', err);
+        setBackupMessage('❌ خطأ في استعادة النسخة الاحتياطية: ' + err.message);
+      } finally {
+        setRestoring(false);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   if (loading) {
@@ -205,16 +369,16 @@ export default function OverviewTab({ user }) {
         </div>
       </div>
 
-      {/* SUPER ADMIN: STUDENT DASHBOARD VISIBILITY CONTROLS */}
+      {/* SUPER ADMIN: STUDENT DASHBOARD VISIBILITY CONTROLS (PER SUBJECT) */}
       {isSuper && (
-        <div className="panel fade-in" style={{border:'1px solid var(--primary)',marginBottom:'2rem',padding:'1.5rem'}}>
+        <div className="panel fade-in" style={{border:'1px solid var(--primary)',marginBottom:'2.5rem',padding:'1.5rem'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',flexWrap:'wrap',gap:'1rem',borderBottom:'1px solid var(--border)',paddingBottom:'1rem'}}>
             <div>
               <h3 style={{margin:'0 0 4px 0',fontSize:'1.3rem',display:'flex',alignItems:'center',gap:'8px',color:'var(--primary-hover)'}}>
-                <Sliders size={22} /> التحكم بظهور درجات وبيانات صفحة الطالب
+                <Sliders size={22} /> التحكم بظهور درجات وبيانات صفحة الطالب (مخصص لكل مادة)
               </h3>
               <p className="text-muted" style={{margin:0,fontSize:'0.85rem'}}>
-                تحكم بضغطة زر في إظهار أو إخفاء أي درجة أو تبويب من لوحة تحكم الطلاب مباشرة:
+                اختر المادة وحدد بدقة أي درجة أو سجل تريد إظهاره أو إخفاءه عن الطلاب:
               </p>
             </div>
             {settingsMessage && (
@@ -224,122 +388,191 @@ export default function OverviewTab({ user }) {
             )}
           </div>
 
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))',gap:'1rem'}}>
+          {/* Subject Scope Selector */}
+          <div style={{marginBottom:'1.5rem',display:'flex',alignItems:'center',gap:'12px',flexWrap:'wrap'}}>
+            <label style={{fontWeight:700,fontSize:'0.95rem'}}>تطبيق الإعدادات على:</label>
+            <select 
+              className="input-field" 
+              value={selectedSubjectForVisibility} 
+              onChange={e => setSelectedSubjectForVisibility(e.target.value)}
+              style={{maxWidth:'320px',padding:'8px 12px',fontWeight:'bold'}}
+            >
+              <option value="global">🌐 الإعداد الافتراضي العام (كافة المواد)</option>
+              {allSubjectsList.map(s => (
+                <option key={s.id} value={s.id}>
+                  📚 مادة: {s.name} (الفرقة {s.year_level})
+                </option>
+              ))}
+            </select>
+            {selectedSubjectForVisibility !== 'global' && (
+              <span className="badge" style={{background:'rgba(79, 70, 229, 0.1)',color:'var(--primary-hover)'}}>
+                تخصيص لمادة محددة
+              </span>
+            )}
+          </div>
+
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))',gap:'1rem'}}>
             
             <div 
               onClick={() => handleToggleVisibility('showQuiz1')}
               style={{
-                background: visibilitySettings.showQuiz1 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
-                border: visibilitySettings.showQuiz1 ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
-                borderRadius:'8px',padding:'12px 16px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',transition:'all 0.2s'
+                background: currentActiveVisibility.showQuiz1 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
+                border: currentActiveVisibility.showQuiz1 ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius:'8px',padding:'12px 14px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',transition:'all 0.2s'
               }}
             >
               <div>
-                <div style={{fontWeight:700,fontSize:'0.95rem',color: visibilitySettings.showQuiz1 ? 'var(--success)' : 'var(--text-muted)'}}>
-                  درجة كويز 1
+                <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showQuiz1 ? 'var(--success)' : 'var(--text-muted)'}}>
+                  كويز 1
                 </div>
                 <div style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
-                  {visibilitySettings.showQuiz1 ? 'ظاهر للطلاب' : 'مخفي عن الطلاب'}
+                  {currentActiveVisibility.showQuiz1 ? 'ظاهر للطلاب' : 'مخفي'}
                 </div>
               </div>
-              {visibilitySettings.showQuiz1 ? <Eye size={20} style={{color:'var(--success)'}} /> : <EyeOff size={20} style={{color:'var(--danger)'}} />}
+              {currentActiveVisibility.showQuiz1 ? <Eye size={18} style={{color:'var(--success)'}} /> : <EyeOff size={18} style={{color:'var(--danger)'}} />}
             </div>
 
             <div 
               onClick={() => handleToggleVisibility('showQuiz2')}
               style={{
-                background: visibilitySettings.showQuiz2 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
-                border: visibilitySettings.showQuiz2 ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
-                borderRadius:'8px',padding:'12px 16px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',transition:'all 0.2s'
+                background: currentActiveVisibility.showQuiz2 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
+                border: currentActiveVisibility.showQuiz2 ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius:'8px',padding:'12px 14px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',transition:'all 0.2s'
               }}
             >
               <div>
-                <div style={{fontWeight:700,fontSize:'0.95rem',color: visibilitySettings.showQuiz2 ? 'var(--success)' : 'var(--text-muted)'}}>
-                  درجة كويز 2
+                <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showQuiz2 ? 'var(--success)' : 'var(--text-muted)'}}>
+                  كويز 2
                 </div>
                 <div style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
-                  {visibilitySettings.showQuiz2 ? 'ظاهر للطلاب' : 'مخفي عن الطلاب'}
+                  {currentActiveVisibility.showQuiz2 ? 'ظاهر للطلاب' : 'مخفي'}
                 </div>
               </div>
-              {visibilitySettings.showQuiz2 ? <Eye size={20} style={{color:'var(--success)'}} /> : <EyeOff size={20} style={{color:'var(--danger)'}} />}
+              {currentActiveVisibility.showQuiz2 ? <Eye size={18} style={{color:'var(--success)'}} /> : <EyeOff size={18} style={{color:'var(--danger)'}} />}
             </div>
 
             <div 
               onClick={() => handleToggleVisibility('showProject')}
               style={{
-                background: visibilitySettings.showProject ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
-                border: visibilitySettings.showProject ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
-                borderRadius:'8px',padding:'12px 16px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',transition:'all 0.2s'
+                background: currentActiveVisibility.showProject ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
+                border: currentActiveVisibility.showProject ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius:'8px',padding:'12px 14px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',transition:'all 0.2s'
               }}
             >
               <div>
-                <div style={{fontWeight:700,fontSize:'0.95rem',color: visibilitySettings.showProject ? 'var(--success)' : 'var(--text-muted)'}}>
-                  درجة المشروع
+                <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showProject ? 'var(--success)' : 'var(--text-muted)'}}>
+                  المشروع / العملي
                 </div>
                 <div style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
-                  {visibilitySettings.showProject ? 'ظاهر للطلاب' : 'مخفي عن الطلاب'}
+                  {currentActiveVisibility.showProject ? 'ظاهر للطلاب' : 'مخفي'}
                 </div>
               </div>
-              {visibilitySettings.showProject ? <Eye size={20} style={{color:'var(--success)'}} /> : <EyeOff size={20} style={{color:'var(--danger)'}} />}
+              {currentActiveVisibility.showProject ? <Eye size={18} style={{color:'var(--success)'}} /> : <EyeOff size={18} style={{color:'var(--danger)'}} />}
             </div>
 
             <div 
               onClick={() => handleToggleVisibility('showAttendanceScore')}
               style={{
-                background: visibilitySettings.showAttendanceScore ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
-                border: visibilitySettings.showAttendanceScore ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
-                borderRadius:'8px',padding:'12px 16px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',transition:'all 0.2s'
+                background: currentActiveVisibility.showAttendanceScore ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
+                border: currentActiveVisibility.showAttendanceScore ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius:'8px',padding:'12px 14px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',transition:'all 0.2s'
               }}
             >
               <div>
-                <div style={{fontWeight:700,fontSize:'0.95rem',color: visibilitySettings.showAttendanceScore ? 'var(--success)' : 'var(--text-muted)'}}>
+                <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showAttendanceScore ? 'var(--success)' : 'var(--text-muted)'}}>
                   درجة الحضور
                 </div>
                 <div style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
-                  {visibilitySettings.showAttendanceScore ? 'ظاهر للطلاب' : 'مخفي عن الطلاب'}
+                  {currentActiveVisibility.showAttendanceScore ? 'ظاهر للطلاب' : 'مخفي'}
                 </div>
               </div>
-              {visibilitySettings.showAttendanceScore ? <Eye size={20} style={{color:'var(--success)'}} /> : <EyeOff size={20} style={{color:'var(--danger)'}} />}
+              {currentActiveVisibility.showAttendanceScore ? <Eye size={18} style={{color:'var(--success)'}} /> : <EyeOff size={18} style={{color:'var(--danger)'}} />}
             </div>
 
             <div 
               onClick={() => handleToggleVisibility('showTotal')}
               style={{
-                background: visibilitySettings.showTotal ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
-                border: visibilitySettings.showTotal ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
-                borderRadius:'8px',padding:'12px 16px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',transition:'all 0.2s'
+                background: currentActiveVisibility.showTotal ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
+                border: currentActiveVisibility.showTotal ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius:'8px',padding:'12px 14px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',transition:'all 0.2s'
               }}
             >
               <div>
-                <div style={{fontWeight:700,fontSize:'0.95rem',color: visibilitySettings.showTotal ? 'var(--success)' : 'var(--text-muted)'}}>
+                <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showTotal ? 'var(--success)' : 'var(--text-muted)'}}>
                   المجموع الكلي
                 </div>
                 <div style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
-                  {visibilitySettings.showTotal ? 'ظاهر للطلاب' : 'مخفي عن الطلاب'}
+                  {currentActiveVisibility.showTotal ? 'ظاهر للطلاب' : 'مخفي'}
                 </div>
               </div>
-              {visibilitySettings.showTotal ? <Eye size={20} style={{color:'var(--success)'}} /> : <EyeOff size={20} style={{color:'var(--danger)'}} />}
+              {currentActiveVisibility.showTotal ? <Eye size={18} style={{color:'var(--success)'}} /> : <EyeOff size={18} style={{color:'var(--danger)'}} />}
             </div>
 
             <div 
               onClick={() => handleToggleVisibility('showAttendanceTab')}
               style={{
-                background: visibilitySettings.showAttendanceTab ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
-                border: visibilitySettings.showAttendanceTab ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
-                borderRadius:'8px',padding:'12px 16px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',transition:'all 0.2s'
+                background: currentActiveVisibility.showAttendanceTab ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
+                border: currentActiveVisibility.showAttendanceTab ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius:'8px',padding:'12px 14px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',transition:'all 0.2s'
               }}
             >
               <div>
-                <div style={{fontWeight:700,fontSize:'0.95rem',color: visibilitySettings.showAttendanceTab ? 'var(--success)' : 'var(--text-muted)'}}>
-                  سجل الغياب بالأسابيع
+                <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showAttendanceTab ? 'var(--success)' : 'var(--text-muted)'}}>
+                  سجل الأسابيع
                 </div>
                 <div style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
-                  {visibilitySettings.showAttendanceTab ? 'ظاهر للطلاب' : 'مخفي عن الطلاب'}
+                  {currentActiveVisibility.showAttendanceTab ? 'ظاهر للطلاب' : 'مخفي'}
                 </div>
               </div>
-              {visibilitySettings.showAttendanceTab ? <Eye size={20} style={{color:'var(--success)'}} /> : <EyeOff size={20} style={{color:'var(--danger)'}} />}
+              {currentActiveVisibility.showAttendanceTab ? <Eye size={18} style={{color:'var(--success)'}} /> : <EyeOff size={18} style={{color:'var(--danger)'}} />}
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* SUPER ADMIN: FULL SYSTEM BACKUP & RESTORE TOOL */}
+      {isSuper && (
+        <div className="panel fade-in" style={{border:'1px solid var(--border)',padding:'1.5rem'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',flexWrap:'wrap',gap:'1rem'}}>
+            <div>
+              <h3 style={{margin:'0 0 4px 0',fontSize:'1.3rem',display:'flex',alignItems:'center',gap:'8px',color:'var(--success)'}}>
+                <Database size={22} /> مركز النسخ الاحتياطي واستعادة قاعدة البيانات (Super Admin Backup)
+              </h3>
+              <p className="text-muted" style={{margin:0,fontSize:'0.85rem'}}>
+                حمّل نسخة احتياطية شاملة لكافة الطلاب، المواد، الغياب، والدرجات، واحتفظ بها على جهازك أو استعد أي نسخة سابقة:
+              </p>
+            </div>
+            {backupMessage && (
+              <span style={{color: backupMessage.startsWith('✅') || backupMessage.startsWith('🎉') ? 'var(--success)' : 'var(--danger)', fontWeight:'bold', fontSize:'0.9rem'}}>
+                {backupMessage}
+              </span>
+            )}
+          </div>
+
+          <div style={{display:'flex',gap:'1rem',flexWrap:'wrap',alignItems:'center'}}>
+            <button 
+              className="btn-primary" 
+              onClick={() => handleFullBackup('json')} 
+              disabled={backingUp || restoring}
+              style={{display:'flex',alignItems:'center',gap:'8px',padding:'10px 18px',fontSize:'0.95rem'}}
+            >
+              <Download size={18} /> {backingUp ? 'جاري إنشاء النسخة...' : 'تحميل نسخة احتياطية كاملة (JSON)'}
+            </button>
+
+            <button 
+              className="btn-secondary" 
+              onClick={() => handleFullBackup('excel')} 
+              disabled={backingUp || restoring}
+              style={{display:'flex',alignItems:'center',gap:'8px',padding:'10px 18px',fontSize:'0.95rem',color:'var(--success)'}}
+            >
+              <FileSpreadsheet size={18} /> تحميل شيت إكسيل لكافة المستخدمين
+            </button>
+
+            <label className="btn-secondary" style={{display:'flex',alignItems:'center',gap:'8px',padding:'10px 18px',fontSize:'0.95rem',cursor:'pointer',borderColor:'#f59e0b',color:'#f59e0b'}}>
+              <Upload size={18} /> {restoring ? 'جاري استعادة النظام...' : 'استعادة النظام من نسخة احتياطية (JSON)'}
+              <input type="file" accept=".json" onChange={handleRestoreFromFile} style={{display:'none'}} disabled={restoring} />
+            </label>
           </div>
         </div>
       )}

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { cacheManager } from '../../utils/dataCache';
 import { printStudentReportPDF } from '../../utils/pdfHelper';
-import { Search, Printer, Calendar, BookOpen, FileText, CheckCircle2, XCircle, X, ChevronDown, ChevronUp, Sliders, CheckSquare, Square } from 'lucide-react';
+import { Search, Printer, Calendar, BookOpen, FileText, CheckCircle2, XCircle, X, ChevronDown, ChevronUp, Sliders, CheckSquare, Square, RefreshCw } from 'lucide-react';
 
 export default function StudentReportTab({ user }) {
   const [loading, setLoading] = useState(true);
@@ -14,7 +14,7 @@ export default function StudentReportTab({ user }) {
   const [studentGrades, setStudentGrades] = useState([]);
   const [selectedYearFilter, setSelectedYearFilter] = useState('all');
   const [selectedSectionFilter, setSelectedSectionFilter] = useState('all');
-  const [showWeeksDetails, setShowWeeksDetails] = useState({}); // { [subId]: boolean }
+  const [refreshing, setRefreshing] = useState(false);
 
   // PDF Export Modal State
   const [showPdfModal, setShowPdfModal] = useState(false);
@@ -51,18 +51,25 @@ export default function StudentReportTab({ user }) {
     fetchInitialData();
   }, []);
 
-  const fetchInitialData = async () => {
+  const fetchInitialData = async (forceRefresh = false) => {
     try {
-      setLoading(true);
+      if (forceRefresh) setRefreshing(true);
+      else setLoading(true);
+
       const isSuper = !user || user.user_id === 'admin';
+
+      if (forceRefresh) {
+        cacheManager.invalidate('admin_users_base');
+        cacheManager.invalidate('admin_subjects_base');
+      }
 
       let allUsersList = cacheManager.get('admin_users_base');
       let allSubList = cacheManager.get('admin_subjects_base');
 
-      if (!allUsersList || !allSubList) {
+      if (!allUsersList || !allSubList || forceRefresh) {
         const [userRes, subRes] = await Promise.all([
           supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects'),
-          supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students')
+          supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students')
         ]);
         allUsersList = userRes.data || [];
         allSubList = subRes.data || [];
@@ -86,28 +93,32 @@ export default function StudentReportTab({ user }) {
       setAllStudents(studentsOnly);
 
       if (studentsOnly.length > 0) {
-        handleSelectStudent(studentsOnly[0]);
+        const target = selectedStudent ? studentsOnly.find(s => s.user_id === selectedStudent.user_id) || studentsOnly[0] : studentsOnly[0];
+        handleSelectStudent(target, forceRefresh);
       }
     } catch (err) {
       console.error('Fetch report initial data error:', err);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  const handleSelectStudent = async (stu) => {
+  const handleSelectStudent = async (stu, forceFetch = false) => {
     setSelectedStudent(stu);
     const cacheKey = 'rep_' + stu.user_id;
-    const cached = cacheManager.get(cacheKey);
-    if (cached) {
-      setStudentAttendance(cached.attendance);
-      setStudentGrades(cached.grades);
-      return;
+    if (!forceFetch) {
+      const cached = cacheManager.get(cacheKey);
+      if (cached) {
+        setStudentAttendance(cached.attendance);
+        setStudentGrades(cached.grades);
+        return;
+      }
     }
 
     try {
       const [attRes, grdRes] = await Promise.all([
-        supabase.from('attendance').select('student_id, subject_id, week_number, status').eq('student_id', stu.user_id),
+        supabase.from('attendance').select('student_id, subject_id, week_number, status, session_date, excuse_reason').eq('student_id', stu.user_id),
         supabase.from('grades').select('student_id, subject_id, quiz_1, quiz_2, project, attendance_score, final_grade').eq('student_id', stu.user_id)
       ]);
 
@@ -120,13 +131,6 @@ export default function StudentReportTab({ user }) {
     } catch (err) {
       console.error('Fetch student report error:', err);
     }
-  };
-
-  const toggleSubjectWeeks = (subId) => {
-    setShowWeeksDetails(prev => ({
-      ...prev,
-      [subId]: !prev[subId]
-    }));
   };
 
   const filteredStudents = allStudents.filter(s => {
@@ -190,25 +194,36 @@ export default function StudentReportTab({ user }) {
           <h2 style={{margin:0,fontSize:'1.6rem',fontWeight:800}}>التقرير الشامل للطالب</h2>
           <p className="text-muted" style={{margin:'5px 0 0 0'}}>استعراض وتصدير السجل الأكاديمي والغياب لكل طالب</p>
         </div>
-        {selectedStudent && (
+        <div style={{display:'flex',gap:'10px',alignItems:'center'}}>
           <button 
             className="btn-secondary" 
-            onClick={handleOpenPdfModal} 
-            style={{
-              color:'var(--success)',
-              borderColor:'rgba(16, 185, 129, 0.4)',
-              background:'rgba(16, 185, 129, 0.08)',
-              padding:'8px 18px',
-              fontSize:'0.95rem',
-              fontWeight:700,
-              display:'flex',
-              alignItems:'center',
-              gap:'8px'
-            }}
+            onClick={() => fetchInitialData(true)}
+            disabled={refreshing}
+            style={{padding:'8px 14px',fontSize:'0.85rem',display:'flex',alignItems:'center',gap:'6px'}}
+            title="تحديث فوري لبيانات الدرجات والغياب"
           >
-            <Printer size={18} /> تصدير تقرير الطالب PDF
+            <RefreshCw size={15} className={refreshing ? 'spin' : ''} /> {refreshing ? 'جاري التحديث...' : 'تحديث البيانات'}
           </button>
-        )}
+          {selectedStudent && (
+            <button 
+              className="btn-secondary" 
+              onClick={handleOpenPdfModal} 
+              style={{
+                color:'var(--success)',
+                borderColor:'rgba(16, 185, 129, 0.4)',
+                background:'rgba(16, 185, 129, 0.08)',
+                padding:'8px 18px',
+                fontSize:'0.95rem',
+                fontWeight:700,
+                display:'flex',
+                alignItems:'center',
+                gap:'8px'
+              }}
+            >
+              <Printer size={18} /> تصدير تقرير الطالب PDF
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Main Two-Column Layout */}
@@ -238,7 +253,7 @@ export default function StudentReportTab({ user }) {
                 </div>
               </div>
 
-              {/* Enrolled Subjects Cards (Matching Image 1 EXACTLY) */}
+              {/* Enrolled Subjects Cards */}
               <div style={{display:'flex',flexDirection:'column',gap:'1.2rem'}}>
                 {enrolledSubjects.map(sub => {
                   const g = studentGrades.find(grd => grd.subject_id === sub.id) || {};
@@ -246,7 +261,6 @@ export default function StudentReportTab({ user }) {
                   const totalAttended = subAtt.filter(a => a.status === 'present' || a.status === 'late').length;
                   const totalAbsent = subAtt.filter(a => a.status === 'absent').length;
                   const totalWeeks = sub.total_weeks || 12;
-                  const isWeeksExpanded = showWeeksDetails[sub.id] || false;
 
                   return (
                     <div key={sub.id} className="panel" style={{padding:'1.4rem',position:'relative'}}>
@@ -261,7 +275,7 @@ export default function StudentReportTab({ user }) {
                         </h4>
                       </div>
 
-                      {/* 5 Distinct Metric Cards (Image 1 Style) */}
+                      {/* 5 Distinct Metric Cards */}
                       <div style={{display:'grid',gridTemplateColumns:'repeat(5, 1fr)',gap:'10px',marginBottom:'1.2rem'}}>
                         <div className="panel" style={{background:'rgba(79, 70, 229, 0.15)',border:'1px solid rgba(79, 70, 229, 0.3)',borderRadius:'8px',padding:'12px 6px',textAlign:'center'}}>
                           <div style={{fontSize:'0.85rem',color:'var(--primary-hover)',fontWeight:700,marginBottom:'4px'}}>المجموع</div>
@@ -291,62 +305,42 @@ export default function StudentReportTab({ user }) {
                         </div>
                       </div>
 
-                      {/* Detailed Week-by-Week Attendance Pills */}
-                      {isWeeksExpanded && (
-                        <div className="fade-in" style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px',marginBottom:'1rem'}}>
-                          <div style={{fontSize:'0.85rem',fontWeight:700,color:'var(--text-muted)',marginBottom:'8px'}}>
-                            📅 تفاصيل حضور الأسابيع:
-                          </div>
-                          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(80px, 1fr))',gap:'6px'}}>
-                            {Array.from({ length: totalWeeks }, (_, i) => i + 1).map(w => {
-                              const record = subAtt.find(a => a.week_number === w);
-                              let stLabel = 'لم يرصد';
-                              let stColor = 'var(--text-muted)';
-                              let stBg = 'var(--surface)';
-                              let stBorder = 'var(--border)';
-
-                              if (record) {
-                                if (record.status === 'present') { stLabel = 'حاضر ✓'; stColor = 'var(--success)'; stBg = 'rgba(16, 185, 129, 0.1)'; stBorder = 'rgba(16, 185, 129, 0.25)'; }
-                                else if (record.status === 'absent') { stLabel = 'غائب ✗'; stColor = 'var(--danger)'; stBg = 'rgba(239, 68, 68, 0.1)'; stBorder = 'rgba(239, 68, 68, 0.25)'; }
-                                else if (record.status === 'late') { stLabel = 'تأخير'; stColor = 'var(--warning)'; stBg = 'rgba(245, 158, 11, 0.1)'; stBorder = 'rgba(245, 158, 11, 0.25)'; }
-                                else if (record.status === 'excused') { stLabel = 'عذر'; stColor = '#3b82f6'; stBg = 'rgba(59, 130, 246, 0.1)'; stBorder = 'rgba(59, 130, 246, 0.25)'; }
-                              }
-
-                              return (
-                                <div key={w} style={{background: stBg, border: '1px solid ' + stBorder, borderRadius: '6px', padding: '6px 4px', textAlign: 'center'}}>
-                                  <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>أسبوع {w}</div>
-                                  <div style={{fontWeight: 'bold', color: stColor, fontSize: '0.8rem', marginTop: '2px'}}>{stLabel}</div>
-                                </div>
-                              );
-                            })}
-                          </div>
+                      {/* Always Visible Detailed Week-by-Week Attendance Pills */}
+                      <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px',marginBottom:'1rem'}}>
+                        <div style={{fontSize:'0.85rem',fontWeight:700,color:'var(--text-muted)',marginBottom:'8px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                          <span>📅 تفاصيل حضور الأسابيع:</span>
+                          <span style={{fontSize:'0.8rem',fontWeight:'normal'}}>إجمالي المحاضرات: <strong>{totalWeeks}</strong></span>
                         </div>
-                      )}
+                        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(75px, 1fr))',gap:'6px'}}>
+                          {Array.from({ length: totalWeeks }, (_, i) => i + 1).map(w => {
+                            const record = subAtt.find(a => a.week_number === w);
+                            let stLabel = 'لم يرصد';
+                            let stColor = 'var(--text-muted)';
+                            let stBg = 'var(--surface)';
+                            let stBorder = 'var(--border)';
 
-                      {/* Bottom Footer: Stats + Toggle Details */}
-                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',fontSize:'0.9rem',color:'var(--text-muted)',borderTop:'1px solid rgba(255,255,255,0.05)',paddingTop:'8px'}}>
-                        <button 
-                          onClick={() => toggleSubjectWeeks(sub.id)}
-                          style={{
-                            background:'transparent',
-                            border:'none',
-                            color:'var(--primary-hover)',
-                            cursor:'pointer',
-                            fontSize:'0.85rem',
-                            fontWeight:700,
-                            display:'flex',
-                            alignItems:'center',
-                            gap:'4px'
-                          }}
-                        >
-                          {isWeeksExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                          {isWeeksExpanded ? 'إخفاء تفاصيل الأسابيع' : 'عرض تفاصيل الأسابيع بالكامل (' + totalWeeks + ' أسبوع)'}
-                        </button>
+                            if (record) {
+                              if (record.status === 'present') { stLabel = 'حاضر ✓'; stColor = 'var(--success)'; stBg = 'rgba(16, 185, 129, 0.1)'; stBorder = 'rgba(16, 185, 129, 0.25)'; }
+                              else if (record.status === 'absent') { stLabel = 'غائب ✗'; stColor = 'var(--danger)'; stBg = 'rgba(239, 68, 68, 0.1)'; stBorder = 'rgba(239, 68, 68, 0.25)'; }
+                              else if (record.status === 'late') { stLabel = 'تأخير'; stColor = 'var(--warning)'; stBg = 'rgba(245, 158, 11, 0.1)'; stBorder = 'rgba(245, 158, 11, 0.25)'; }
+                              else if (record.status === 'excused') { stLabel = 'عذر'; stColor = '#3b82f6'; stBg = 'rgba(59, 130, 246, 0.1)'; stBorder = 'rgba(59, 130, 246, 0.25)'; }
+                            }
 
-                        <div style={{display:'flex',gap:'15px'}}>
-                          <span>حضور: <strong style={{color:'var(--success)'}}>{totalAttended}</strong></span>
-                          <span>غياب: <strong style={{color:'var(--danger)'}}>{totalAbsent}</strong></span>
+                            return (
+                              <div key={w} style={{background: stBg, border: '1px solid ' + stBorder, borderRadius: '6px', padding: '6px 4px', textAlign: 'center'}} title={record?.excuse_reason ? ('سبب العذر: ' + record.excuse_reason) : ''}>
+                                <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>أسبوع {w}</div>
+                                <div style={{fontWeight: 'bold', color: stColor, fontSize: '0.8rem', marginTop: '2px'}}>{stLabel}</div>
+                                {record?.session_date && <div style={{fontSize:'0.65rem',color:'var(--text-muted)',marginTop:'2px'}}>{record.session_date.slice(5)}</div>}
+                              </div>
+                            );
+                          })}
                         </div>
+                      </div>
+
+                      {/* Bottom Footer: Stats */}
+                      <div style={{display:'flex',justifyContent:'flex-end',alignItems:'center',gap:'20px',fontSize:'0.9rem',color:'var(--text-muted)',borderTop:'1px solid rgba(255,255,255,0.05)',paddingTop:'8px'}}>
+                        <span>حضور: <strong style={{color:'var(--success)'}}>{totalAttended}</strong></span>
+                        <span>غياب: <strong style={{color:'var(--danger)'}}>{totalAbsent}</strong></span>
                       </div>
 
                     </div>
@@ -369,7 +363,7 @@ export default function StudentReportTab({ user }) {
           )}
         </div>
 
-        {/* RIGHT COLUMN: Search + Filters + Student Cards List (Image 1 Style) */}
+        {/* RIGHT COLUMN: Search + Filters + Student Cards List */}
         <div className="panel" style={{padding:'1rem'}}>
           
           {/* Search Input */}
@@ -405,14 +399,14 @@ export default function StudentReportTab({ user }) {
             </select>
           </div>
 
-          {/* Student Cards List (Image 1 Style) */}
+          {/* Student Cards List */}
           <div style={{maxHeight:'650px',overflowY:'auto',display:'flex',flexDirection:'column',gap:'8px'}}>
             {filteredStudents.map(s => {
               const isSelected = selectedStudent?.id === s.id;
               return (
                 <div 
                   key={s.id} 
-                  onClick={()=>handleSelectStudent(s)} 
+                  onClick={()=>handleSelectStudent(s, true)} 
                   style={{
                     padding:'12px 14px',
                     borderRadius:'8px',

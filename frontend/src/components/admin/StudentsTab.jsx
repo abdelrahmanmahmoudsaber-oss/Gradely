@@ -12,6 +12,7 @@ export default function StudentsTab({ user }) {
   // Modals visibility
   const [showAddModal, setShowAddModal] = useState(false);
   const [showExcelImport, setShowExcelImport] = useState(false);
+  const [importTargetSubject, setImportTargetSubject] = useState('');
 
   const [file, setFile] = useState(null);
   const [importing, setImporting] = useState(false);

@@ -16,6 +16,8 @@ export default function GradesTab({ user }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [importing, setImporting] = useState(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState('');
+  const [saveTimeout, setSaveTimeout] = useState(null);
 
   const normalizeYear = (yr) => {
     if (!yr) return '1';
@@ -166,17 +168,40 @@ export default function GradesTab({ user }) {
 
   const availableSections = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
 
-  const handleGradeChange = (studentId, field, val) => {
+    const handleGradeChange = (studentId, field, val) => {
     const num = Math.max(0, parseFloat(val) || 0);
+    const currentStudentGrades = grades[studentId] || { quiz_1: 0, quiz_2: 0, project: 0, attendance_score: 0 };
+    const updatedStudentGrades = { ...currentStudentGrades, [field]: num };
     const updated = {
       ...grades,
-      [studentId]: {
-        ...(grades[studentId] || { quiz_1: 0, quiz_2: 0, project: 0, attendance_score: 0 }),
-        [field]: num
-      }
+      [studentId]: updatedStudentGrades
     };
     setGrades(updated);
     cacheManager.set('grades_' + selectedSubject, updated);
+    cacheManager.invalidate('rep_' + studentId);
+    cacheManager.invalidate('student_data_' + studentId);
+
+    // Debounced Auto-Save
+    if (saveTimeout) clearTimeout(saveTimeout);
+    setAutoSaveStatus('جاري الحفظ...');
+    const t = setTimeout(async () => {
+      const finalGrade = (updatedStudentGrades.quiz_1 || 0) + (updatedStudentGrades.quiz_2 || 0) + (updatedStudentGrades.project || 0) + (updatedStudentGrades.attendance_score || 0);
+      const { error } = await supabase.from('grades').upsert({
+        student_id: studentId,
+        subject_id: selectedSubject,
+        quiz_1: updatedStudentGrades.quiz_1 || 0,
+        quiz_2: updatedStudentGrades.quiz_2 || 0,
+        project: updatedStudentGrades.project || 0,
+        attendance_score: updatedStudentGrades.attendance_score || 0,
+        final_grade: finalGrade
+      }, { onConflict: 'student_id,subject_id' });
+
+      if (!error) {
+        setAutoSaveStatus('✅ تم الحفظ تلقائياً');
+        setTimeout(() => setAutoSaveStatus(''), 2000);
+      }
+    }, 600);
+    setSaveTimeout(t);
   };
 
   const saveGrades = async () => {
@@ -208,6 +233,10 @@ export default function GradesTab({ user }) {
       }
 
       cacheManager.set('grades_' + selectedSubject, grades);
+      Object.keys(grades).forEach(id => {
+        cacheManager.invalidate('rep_' + id);
+        cacheManager.invalidate('student_data_' + id);
+      });
       setMessage('✅ تم حفظ وتأكيد الدرجات بنجاح!');
       setTimeout(() => setMessage(''), 3500);
     } catch (err) {

@@ -2,7 +2,11 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { exportExcelFile } from '../../utils/excelHelper';
 import { cacheManager } from '../../utils/dataCache';
-import { Download, Users, UserPlus, UserMinus, UserCheck, CheckSquare, FileText, Filter, Calendar, Save, Search, CheckCircle2, XCircle, Clock, AlertCircle, LayoutGrid, List, RotateCcw } from 'lucide-react';
+import { 
+  Download, Users, UserPlus, UserMinus, UserCheck, CheckSquare, 
+  FileText, Filter, Calendar, Save, Search, CheckCircle2, XCircle, 
+  Clock, AlertCircle, LayoutGrid, List, RotateCcw, Copy, Check, MessageSquare
+} from 'lucide-react';
 
 export default function AttendanceTab({ user }) {
   const [loading, setLoading] = useState(true);
@@ -15,10 +19,17 @@ export default function AttendanceTab({ user }) {
   const [week, setWeek] = useState(1);
   const [sessionDate, setSessionDate] = useState(new Date().toISOString().split('T')[0]);
   const [attendanceRecords, setAttendanceRecords] = useState({});
+  const [excuseReasons, setExcuseReasons] = useState({});
   const [saving, setSaving] = useState(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState('');
   const [message, setMessage] = useState('');
   const [studentSearch, setStudentSearch] = useState('');
   const [viewMode, setViewMode] = useState('cards'); // 'cards' or 'table'
+  const [copiedTxt, setCopiedTxt] = useState(false);
+
+  // Excuse Modal
+  const [excuseModalStudent, setExcuseModalStudent] = useState(null);
+  const [excuseInputText, setExcuseInputText] = useState('');
   
   // Custom enrollment states
   const [showManageStudents, setShowManageStudents] = useState(false);
@@ -28,6 +39,8 @@ export default function AttendanceTab({ user }) {
   const [selectedStudentToAdd, setSelectedStudentToAdd] = useState('');
   const [selectedStudentsList, setSelectedStudentsList] = useState([]);
   const [pastedIds, setPastedIds] = useState('');
+
+  const isSuper = !user || user.user_id === 'admin';
 
   const normalizeYear = (yr) => {
     if (!yr) return '1';
@@ -55,7 +68,6 @@ export default function AttendanceTab({ user }) {
   const fetchInitialData = async () => {
     try {
       setLoading(true);
-      const isSuper = !user || user.user_id === 'admin';
 
       let allUsersList = cacheManager.get('admin_users_base');
       let allSubList = cacheManager.get('admin_subjects_base');
@@ -63,7 +75,7 @@ export default function AttendanceTab({ user }) {
       if (!allUsersList || !allSubList) {
         const [userRes, subRes] = await Promise.all([
           supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects'),
-          supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students')
+          supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students')
         ]);
 
         allUsersList = userRes.data || [];
@@ -121,22 +133,34 @@ export default function AttendanceTab({ user }) {
     const cacheKey = 'att_' + selectedSubject + '_w' + week;
     const cached = cacheManager.get(cacheKey);
     if (cached) {
-      setAttendanceRecords(cached);
+      setAttendanceRecords(cached.records || {});
+      setExcuseReasons(cached.excuses || {});
+      if (cached.date) setSessionDate(cached.date);
       return;
     }
 
     const { data } = await supabase
       .from('attendance')
-      .select('student_id, status')
+      .select('student_id, status, session_date, excuse_reason')
       .eq('subject_id', selectedSubject)
       .eq('week_number', week);
 
     const recs = {};
+    const excuses = {};
+    let foundDate = sessionDate;
+
     if (data && data.length > 0) {
-      data.forEach(r => { recs[r.student_id] = r.status; });
+      data.forEach(r => { 
+        recs[r.student_id] = r.status;
+        if (r.excuse_reason) excuses[r.student_id] = r.excuse_reason;
+        if (r.session_date) foundDate = r.session_date;
+      });
     }
+
     setAttendanceRecords(recs);
-    cacheManager.set(cacheKey, recs);
+    setExcuseReasons(excuses);
+    if (foundDate) setSessionDate(foundDate);
+    cacheManager.set(cacheKey, { records: recs, excuses, date: foundDate });
   };
 
   const displayedSubjects = subjects.filter(s => selectedYear === 'all' || normalizeYear(s.year_level) === selectedYear);
@@ -186,6 +210,10 @@ export default function AttendanceTab({ user }) {
   const availableSections = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
 
   const handleExcludeStudent = async (studentId, studentName) => {
+    if (!isSuper) {
+      alert('عذراً، إدارة واستبعاد طلاب المادة صلاحية خاصة بالمدير الرئيسي فقط.');
+      return;
+    }
     if (!window.confirm('هل أنت متأكد من حذف الطالب (' + studentName + ') من هذه المادة فقط؟')) return;
     const currentEnrolled = Array.isArray(currentSub.enrolled_students) ? currentSub.enrolled_students : [];
     const updatedEnrolled = currentEnrolled.filter(id => id !== studentId);
@@ -257,21 +285,59 @@ export default function AttendanceTab({ user }) {
     }
   };
 
+  // Instant Auto-Save on Toggle
   const toggleAttendance = (studentId, newStatus) => {
     const currentVal = attendanceRecords[studentId];
     const nextVal = currentVal === newStatus ? null : newStatus;
-    const updated = { ...attendanceRecords, [studentId]: nextVal };
-    setAttendanceRecords(updated);
-    cacheManager.set('att_' + selectedSubject + '_w' + week, updated);
     
+    // If setting to excused, open excuse prompt
+    if (nextVal === 'excused') {
+      const studentObj = allStudents.find(s => s.user_id === studentId);
+      setExcuseModalStudent(studentObj || { user_id: studentId, name: studentId });
+      setExcuseInputText(excuseReasons[studentId] || '');
+    }
+
+    const updatedRecs = { ...attendanceRecords, [studentId]: nextVal };
+    setAttendanceRecords(updatedRecs);
+    cacheManager.set('att_' + selectedSubject + '_w' + week, { records: updatedRecs, excuses: excuseReasons, date: sessionDate });
+    
+    setAutoSaveStatus('جاري الحفظ...');
     supabase.from('attendance').upsert({
       student_id: studentId,
       subject_id: selectedSubject,
       week_number: week,
-      status: nextVal || 'unrecorded'
+      status: nextVal || 'unrecorded',
+      session_date: sessionDate,
+      excuse_reason: nextVal === 'excused' ? (excuseReasons[studentId] || null) : null
     }, { onConflict: 'student_id,subject_id,week_number' }).then(({ error }) => {
-      if (error) console.error('Background save error:', error);
+      if (!error) {
+        setAutoSaveStatus('✅ تم الحفظ تلقائياً');
+        setTimeout(() => setAutoSaveStatus(''), 2000);
+        cacheManager.invalidate('rep_' + studentId);
+      }
     });
+  };
+
+  const handleSaveExcuseReason = () => {
+    if (!excuseModalStudent) return;
+    const sId = excuseModalStudent.user_id;
+    const updatedExcuses = { ...excuseReasons, [sId]: excuseInputText.trim() };
+    setExcuseReasons(updatedExcuses);
+    cacheManager.set('att_' + selectedSubject + '_w' + week, { records: attendanceRecords, excuses: updatedExcuses, date: sessionDate });
+
+    supabase.from('attendance').upsert({
+      student_id: sId,
+      subject_id: selectedSubject,
+      week_number: week,
+      status: 'excused',
+      session_date: sessionDate,
+      excuse_reason: excuseInputText.trim() || null
+    }, { onConflict: 'student_id,subject_id,week_number' }).then(() => {
+      cacheManager.invalidate('rep_' + sId);
+    });
+
+    setExcuseModalStudent(null);
+    setExcuseInputText('');
   };
 
   const handleMarkAllPresent = () => {
@@ -280,16 +346,21 @@ export default function AttendanceTab({ user }) {
       updated[stu.user_id] = 'present';
     });
     setAttendanceRecords(updated);
-    cacheManager.set('att_' + selectedSubject + '_w' + week, updated);
+    cacheManager.set('att_' + selectedSubject + '_w' + week, { records: updated, excuses: excuseReasons, date: sessionDate });
 
     const rows = displayedEnrolledStudents.map(stu => ({
       student_id: stu.user_id,
       subject_id: selectedSubject,
       week_number: week,
-      status: 'present'
+      status: 'present',
+      session_date: sessionDate
     }));
 
-    supabase.from('attendance').upsert(rows, { onConflict: 'student_id,subject_id,week_number' });
+    setAutoSaveStatus('جاري الحفظ...');
+    supabase.from('attendance').upsert(rows, { onConflict: 'student_id,subject_id,week_number' }).then(() => {
+      setAutoSaveStatus('✅ تم حفظ الكل كـ حاضر');
+      setTimeout(() => setAutoSaveStatus(''), 2500);
+    });
   };
 
   const handleResetCurrentAttendance = () => {
@@ -299,48 +370,74 @@ export default function AttendanceTab({ user }) {
       delete updated[stu.user_id];
     });
     setAttendanceRecords(updated);
-    cacheManager.set('att_' + selectedSubject + '_w' + week, updated);
+    cacheManager.set('att_' + selectedSubject + '_w' + week, { records: updated, excuses: excuseReasons, date: sessionDate });
+
+    const rows = displayedEnrolledStudents.map(stu => ({
+      student_id: stu.user_id,
+      subject_id: selectedSubject,
+      week_number: week,
+      status: 'unrecorded',
+      session_date: sessionDate
+    }));
+    supabase.from('attendance').upsert(rows, { onConflict: 'student_id,subject_id,week_number' });
   };
 
-  const handleSaveAttendance = async () => {
-    if (!selectedSubject) return;
-    setSaving(true);
-    setMessage('');
+  // Quick Copy Clean TXT / Clipboard Export
+  const handleCopyCleanTxt = () => {
+    const subName = currentSub ? currentSub.name : 'مادة';
+    const yr = currentSub ? normalizeYear(currentSub.year_level) : '';
+    const secName = selectedSection !== 'all' ? selectedSection : 'جميع السكاشن';
+    const taName = currentSub ? getSectionInstructorName(selectedSubject, selectedSection) : '';
 
-    try {
-      const rowsToUpsert = Object.keys(attendanceRecords)
-        .filter(studentId => Boolean(attendanceRecords[studentId]))
-        .map(studentId => ({
-          student_id: studentId,
-          subject_id: selectedSubject,
-          week_number: week,
-          status: attendanceRecords[studentId]
-        }));
+    const presentList = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'present');
+    const absentList = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'absent');
+    const lateList = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'late');
+    const excusedList = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'excused');
 
-      if (rowsToUpsert.length > 0) {
-        const { error } = await supabase
-          .from('attendance')
-          .upsert(rowsToUpsert, { onConflict: 'student_id,subject_id,week_number' });
+    let txt = `كشف حضور وغياب — مادة: ${subName} (الفرقة ${yr})\n`;
+    txt += `السكشن: ${secName} | المشرف/المعيد: ${taName}\n`;
+    txt += `رقم الأسبوع: الأسبوع ${week} | التاريخ: ${sessionDate}\n`;
+    txt += `--------------------------------------------------\n`;
+    txt += `إجمالي الحضور: ${presentList.length} | الغياب: ${absentList.length} | التأخير: ${lateList.length} | الأعذار: ${excusedList.length}\n\n`;
 
-        if (error) throw error;
-      }
+    txt += `✅ الطلاب الحاضرون (${presentList.length}):\n`;
+    presentList.forEach((s, i) => {
+      txt += `${i + 1}. [${s.user_id}] ${s.name} - سكشن ${normalizeSection(s.section || 'S1')}\n`;
+    });
 
-      cacheManager.set('att_' + selectedSubject + '_w' + week, attendanceRecords);
-      setMessage('✅ تم حفظ وتأكيد كشف الغياب بنجاح!');
-      setTimeout(() => setMessage(''), 3500);
-    } catch (err) {
-      console.error('Save attendance error:', err);
-      setMessage('❌ حدث خطأ أثناء الحفظ');
-    } finally {
-      setSaving(false);
+    if (absentList.length > 0) {
+      txt += `\n❌ الطلاب الغائبون (${absentList.length}):\n`;
+      absentList.forEach((s, i) => {
+        txt += `${i + 1}. [${s.user_id}] ${s.name} - سكشن ${normalizeSection(s.section || 'S1')}\n`;
+      });
     }
+
+    if (lateList.length > 0) {
+      txt += `\n⏰ الطلاب المتأخرون (${lateList.length}):\n`;
+      lateList.forEach((s, i) => {
+        txt += `${i + 1}. [${s.user_id}] ${s.name}\n`;
+      });
+    }
+
+    if (excusedList.length > 0) {
+      txt += `\n📄 أصحاب الأعذار (${excusedList.length}):\n`;
+      excusedList.forEach((s, i) => {
+        const rsn = excuseReasons[s.user_id] ? ` (السبب: ${excuseReasons[s.user_id]})` : '';
+        txt += `${i + 1}. [${s.user_id}] ${s.name}${rsn}\n`;
+      });
+    }
+
+    navigator.clipboard.writeText(txt).then(() => {
+      setCopiedTxt(true);
+      setTimeout(() => setCopiedTxt(false), 3000);
+    });
   };
 
   const handleExport = async () => {
     if (!currentSub) return;
     const { data: allAttendance } = await supabase
       .from('attendance')
-      .select('student_id, week_number, status')
+      .select('student_id, week_number, status, session_date, excuse_reason')
       .eq('subject_id', selectedSubject);
     
     const exportData = displayedEnrolledStudents.map(stu => {
@@ -354,17 +451,18 @@ export default function AttendanceTab({ user }) {
       }
 
       stuAtt.forEach(a => {
+        const dateNote = a.session_date ? ` (${a.session_date})` : '';
         if (a.status === 'present') {
-          row['Week ' + a.week_number] = '1';
+          row['Week ' + a.week_number] = '1' + dateNote;
           totalAttended++;
         } else if (a.status === 'late') {
-          row['Week ' + a.week_number] = 'تأخير';
+          row['Week ' + a.week_number] = 'تأخير' + dateNote;
           totalAttended++;
         } else if (a.status === 'absent') {
-          row['Week ' + a.week_number] = '0';
+          row['Week ' + a.week_number] = '0' + dateNote;
           totalAbsent++;
         } else if (a.status === 'excused') {
-          row['Week ' + a.week_number] = 'عذر';
+          row['Week ' + a.week_number] = (a.excuse_reason ? `عذر: ${a.excuse_reason}` : 'عذر') + dateNote;
         }
       });
 
@@ -413,20 +511,39 @@ export default function AttendanceTab({ user }) {
       {/* Top Header */}
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem',flexWrap:'wrap',gap:'1rem'}}>
         <div>
-          <h2 style={{margin:0,fontSize:'1.6rem',fontWeight:800}}>سجل الغياب الأسبوعي</h2>
+          <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+            <h2 style={{margin:0,fontSize:'1.6rem',fontWeight:800}}>سجل الغياب الأسبوعي</h2>
+            {autoSaveStatus && (
+              <span style={{fontSize:'0.85rem',color: autoSaveStatus.startsWith('✅') ? 'var(--success)' : 'var(--primary-hover)',fontWeight:700}}>
+                {autoSaveStatus}
+              </span>
+            )}
+          </div>
           <p className="text-muted" style={{margin:'5px 0 0 0'}}>
             الطلاب المعروضون: <strong>{displayedEnrolledStudents.length} طالب</strong> {selectedSection !== 'all' ? '(سكشن ' + selectedSection + ')' : '(جميع السكاشن)'}
           </p>
         </div>
         <div style={{display:'flex',gap:'10px',flexWrap:'wrap'}}>
-          <button className="btn-secondary" onClick={() => setShowManageStudents(!showManageStudents)}>
-            <Users size={18} /> {showManageStudents ? 'إغلاق إدارة الطلاب' : 'إدارة وتسجيل طلاب المادة'}
+          {/* Manage Students button is strictly for Super Admin */}
+          {isSuper && (
+            <button className="btn-secondary" onClick={() => setShowManageStudents(!showManageStudents)}>
+              <Users size={18} /> {showManageStudents ? 'إغلاق إدارة الطلاب' : 'إدارة وتسجيل طلاب المادة'}
+            </button>
+          )}
+
+          <button 
+            className="btn-secondary" 
+            onClick={handleCopyCleanTxt} 
+            disabled={!selectedSubject || displayedEnrolledStudents.length === 0}
+            style={{color:'var(--primary-hover)',borderColor:'rgba(79, 70, 229, 0.4)'}}
+            title="نسخ كشف الحضور والغياب بصيغة نصية مرتبة لتقديمها مباشرة"
+          >
+            {copiedTxt ? <Check size={18} style={{color:'var(--success)'}} /> : <Copy size={18} />}
+            {copiedTxt ? 'تم نسخ الكشف ✓' : 'نسخ الكشف (TXT)'}
           </button>
+
           <button className="btn-secondary" onClick={handleExport} disabled={!selectedSubject || displayedEnrolledStudents.length === 0} style={{color:'var(--success)'}}>
             <Download size={18} /> تصدير إكسيل
-          </button>
-          <button className="btn-primary" onClick={handleSaveAttendance} disabled={saving || !selectedSubject} style={{background:'var(--primary)',padding:'10px 20px',fontSize:'1rem',fontWeight:700}}>
-            <Save size={18} /> {saving ? 'جاري الحفظ...' : 'حفظ كشف الغياب'}
           </button>
         </div>
       </div>
@@ -494,7 +611,11 @@ export default function AttendanceTab({ user }) {
             type="date" 
             className="input-field" 
             value={sessionDate} 
-            onChange={e => setSessionDate(e.target.value)} 
+            onChange={e => {
+              setSessionDate(e.target.value);
+              // Update date for existing week's attendance in background
+              supabase.from('attendance').update({ session_date: e.target.value }).eq('subject_id', selectedSubject).eq('week_number', week);
+            }} 
           />
         </div>
       </div>
@@ -586,8 +707,8 @@ export default function AttendanceTab({ user }) {
         </div>
       )}
 
-      {/* ENROLLMENT MANAGEMENT PANEL */}
-      {showManageStudents && currentSub && (
+      {/* ENROLLMENT MANAGEMENT PANEL (Super Admin Only) */}
+      {isSuper && showManageStudents && currentSub && (
         <div className="panel fade-in" style={{marginBottom:'2rem',border:'1px solid var(--primary)'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1rem',flexWrap:'wrap',gap:'1rem'}}>
             <h3 style={{display:'flex',alignItems:'center',gap:'8px',color:'var(--primary-hover)',margin:0}}>
@@ -753,6 +874,7 @@ export default function AttendanceTab({ user }) {
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(320px, 1fr))',gap:'1.2rem'}}>
           {displayedEnrolledStudents.map((s, idx) => {
             const status = attendanceRecords[s.user_id] || null;
+            const excuse = excuseReasons[s.user_id] || '';
             
             // Dynamic card border and ambient glow based on status
             let cardBorder = '1px solid var(--border)';
@@ -845,18 +967,25 @@ export default function AttendanceTab({ user }) {
                           فرقة {normalizeYear(s.year_level)}
                         </span>
                       </div>
+                      {status === 'excused' && excuse && (
+                        <div style={{marginTop:'6px',fontSize:'0.8rem',color:'#3b82f6',display:'flex',alignItems:'center',gap:'4px'}}>
+                          <MessageSquare size={13} /> <span>سبب العذر: {excuse}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  <button 
-                    onClick={() => handleExcludeStudent(s.user_id, s.name)} 
-                    style={{background:'transparent',border:'none',color:'var(--text-muted)',cursor:'pointer',padding:'4px',borderRadius:'4px',transition:'all 0.2s',opacity:0.6}} 
-                    title="حذف الطالب من هذه المادة فقط" 
-                    onMouseOver={e=>{e.currentTarget.style.color='var(--danger)'; e.currentTarget.style.opacity='1';}} 
-                    onMouseOut={e=>{e.currentTarget.style.color='var(--text-muted)'; e.currentTarget.style.opacity='0.6';}}
-                  >
-                    <UserMinus size={16} />
-                  </button>
+                  {isSuper && (
+                    <button 
+                      onClick={() => handleExcludeStudent(s.user_id, s.name)} 
+                      style={{background:'transparent',border:'none',color:'var(--text-muted)',cursor:'pointer',padding:'4px',borderRadius:'4px',transition:'all 0.2s',opacity:0.6}} 
+                      title="حذف الطالب من هذه المادة فقط (صلاحية المدير)" 
+                      onMouseOver={e=>{e.currentTarget.style.color='var(--danger)'; e.currentTarget.style.opacity='1';}} 
+                      onMouseOut={e=>{e.currentTarget.style.color='var(--text-muted)'; e.currentTarget.style.opacity='0.6';}}
+                    >
+                      <UserMinus size={16} />
+                    </button>
+                  )}
                 </div>
 
                 {/* Modern 4-Segment Action Bar */}
@@ -950,15 +1079,17 @@ export default function AttendanceTab({ user }) {
               <Users size={40} style={{marginBottom:'1rem',opacity:0.5}} />
               <h4 style={{margin:'0 0 8px 0',color:'var(--text-main)'}}>لا يوجد طلاب يطابقون التصفية في هذه المادة</h4>
               <p style={{margin:'0 0 1.5rem 0',fontSize:'0.9rem'}}>يمكنك إضافة الطلاب للمادة أو تغيير تصفية السكشن أو البحث.</p>
-              <button className="btn-primary" onClick={() => setShowManageStudents(true)}>
-                <UserPlus size={16} /> إضافة طلاب لهذه المادة
-              </button>
+              {isSuper && (
+                <button className="btn-primary" onClick={() => setShowManageStudents(true)}>
+                  <UserPlus size={16} /> إضافة طلاب لهذه المادة
+                </button>
+              )}
             </div>
           )}
         </div>
       )}
 
-      {/* 2. COMPACT TABLE / LIST VIEW (Alternative View for Super Fast Attendance) */}
+      {/* 2. COMPACT TABLE / LIST VIEW */}
       {selectedSubject && viewMode === 'table' && (
         <div className="panel" style={{padding:0,overflowX:'auto'}}>
           <table className="table" style={{width:'100%',borderCollapse:'collapse'}}>
@@ -969,17 +1100,21 @@ export default function AttendanceTab({ user }) {
                 <th style={{padding:'12px 16px'}}>اسم الطالب</th>
                 <th style={{padding:'12px 16px'}}>السكشن</th>
                 <th style={{padding:'12px 16px',textAlign:'center',minWidth:'320px'}}>حالة الحضور (أسبوع {week})</th>
-                <th style={{padding:'12px 16px',width:'40px',textAlign:'center'}}></th>
+                {isSuper && <th style={{padding:'12px 16px',width:'40px',textAlign:'center'}}></th>}
               </tr>
             </thead>
             <tbody>
               {displayedEnrolledStudents.map((s, idx) => {
                 const status = attendanceRecords[s.user_id] || null;
+                const excuse = excuseReasons[s.user_id] || '';
                 return (
                   <tr key={s.id} style={{borderBottom:'1px solid var(--border)',background: status ? 'rgba(255,255,255,0.01)' : 'transparent'}}>
                     <td style={{padding:'12px 16px',textAlign:'center',color:'var(--text-muted)',fontWeight:700}}>{idx + 1}</td>
                     <td style={{padding:'12px 16px',fontWeight:'bold',fontFamily:'monospace'}}>{s.user_id}</td>
-                    <td style={{padding:'12px 16px',fontWeight:700,fontSize:'1rem'}}>{s.name}</td>
+                    <td style={{padding:'12px 16px',fontWeight:700,fontSize:'1rem'}}>
+                      {s.name}
+                      {status === 'excused' && excuse && <span style={{fontSize:'0.75rem',color:'#3b82f6',display:'block'}}>عذر: {excuse}</span>}
+                    </td>
                     <td style={{padding:'12px 16px'}}>
                       <span className="badge" style={{background:'rgba(16, 185, 129, 0.1)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.2)'}}>
                         {normalizeSection(s.section || 'S1')}
@@ -993,16 +1128,52 @@ export default function AttendanceTab({ user }) {
                         <button onClick={()=>toggleAttendance(s.user_id,'excused')} style={{border:'none',borderRadius:'4px',padding:'6px 12px',fontSize:'0.85rem',fontWeight:800,cursor:'pointer',background: status === 'excused' ? '#3b82f6' : 'transparent',color: status === 'excused' ? '#fff' : 'var(--text-muted)'}}>عذر</button>
                       </div>
                     </td>
-                    <td style={{padding:'8px 16px',textAlign:'center'}}>
-                      <button onClick={()=>handleExcludeStudent(s.user_id, s.name)} style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}} title="حذف الطالب من المادة">
-                        <UserMinus size={16} />
-                      </button>
-                    </td>
+                    {isSuper && (
+                      <td style={{padding:'8px 16px',textAlign:'center'}}>
+                        <button onClick={()=>handleExcludeStudent(s.user_id, s.name)} style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}} title="حذف الطالب من المادة">
+                          <UserMinus size={16} />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* EXCUSE REASON MODAL */}
+      {excuseModalStudent && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem'
+        }}>
+          <div className="panel fade-in" style={{maxWidth: '420px', width: '100%'}}>
+            <h3 style={{marginTop:0,fontSize:'1.2rem',display:'flex',alignItems:'center',gap:'8px',color:'#3b82f6'}}>
+              <MessageSquare size={18} /> تسجيل سبب العذر
+            </h3>
+            <p style={{fontSize:'0.9rem',color:'var(--text-muted)',marginBottom:'12px'}}>
+              الطالب: <strong style={{color:'var(--text-main)'}}>{excuseModalStudent.name}</strong> ({excuseModalStudent.user_id})
+            </p>
+            <textarea
+              className="input-field"
+              rows="3"
+              placeholder="اكتب سبب العذر هنا (مثال: عذر مرضي، إذن رعاية شباب، ظروف عائلية...)"
+              value={excuseInputText}
+              onChange={e => setExcuseInputText(e.target.value)}
+              style={{width:'100%',padding:'10px',fontSize:'0.9rem',marginBottom:'1rem'}}
+              autoFocus
+            />
+            <div style={{display:'flex',gap:'8px',justifyContent:'flex-end'}}>
+              <button className="btn-secondary" onClick={() => setExcuseModalStudent(null)}>
+                إلغاء
+              </button>
+              <button className="btn-primary" onClick={handleSaveExcuseReason} style={{background:'#3b82f6'}}>
+                حفظ العذر
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
