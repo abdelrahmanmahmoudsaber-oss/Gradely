@@ -94,7 +94,7 @@ export default function OverviewTab({ user }) {
       }
     };
     const mergedLabels = {};
-    let mergedCols = [];
+    const colsMap = new Map();
 
     for (const sub of subList) {
       if (Array.isArray(sub.excluded_students)) {
@@ -110,7 +110,9 @@ export default function OverviewTab({ user }) {
             } else if (item.startsWith('CONFIG_CUSTOM_COLS:')) {
               try {
                 const cols = JSON.parse(item.replace('CONFIG_CUSTOM_COLS:', ''));
-                if (Array.isArray(cols)) mergedCols = [...mergedCols, ...cols];
+                if (Array.isArray(cols)) {
+                  cols.forEach(c => { if (c && c.id) colsMap.set(c.id, c); });
+                }
               } catch (e) {}
             } else if (item.startsWith('CONFIG_COL_LABELS:')) {
               try {
@@ -123,7 +125,7 @@ export default function OverviewTab({ user }) {
       }
     }
     setColumnLabels(mergedLabels);
-    if (mergedCols.length > 0) setCustomColumnsList(mergedCols);
+    setCustomColumnsList(Array.from(colsMap.values()));
     return settings;
   };
 

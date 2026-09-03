@@ -151,7 +151,14 @@ export default function StudentDashboard({ user, onLogout }) {
             } else if (item.startsWith('CONFIG_CUSTOM_COLS:')) {
               try {
                 const cols = JSON.parse(item.replace('CONFIG_CUSTOM_COLS:', ''));
-                if (Array.isArray(cols)) setCustomColumnsList(cols);
+                if (Array.isArray(cols)) {
+                  setCustomColumnsList(prev => {
+                    const map = new Map();
+                    prev.forEach(c => map.set(c.id, c));
+                    cols.forEach(c => map.set(c.id, c));
+                    return Array.from(map.values());
+                  });
+                }
               } catch (e) {}
             } else if (item.startsWith('CONFIG_COL_LABELS:')) {
               try {
