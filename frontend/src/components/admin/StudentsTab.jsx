@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
-import { parseExcelFile } from '../../utils/excelHelper';
+import { parseExcelFile, exportExcelFile } from '../../utils/excelHelper';
 import { cacheManager } from '../../utils/dataCache';
-import { Users, Upload, UserPlus, Edit, Trash2, Search, Shield, GraduationCap, X, ChevronDown, KeyRound, Filter, CheckSquare, Square, BookOpen, Lock } from 'lucide-react';
+import { Users, Upload, UserPlus, Edit, Trash2, Search, Shield, GraduationCap, X, ChevronDown, KeyRound, Filter, CheckSquare, Square, BookOpen, Lock, Download, FileSpreadsheet, Info } from 'lucide-react';
 
 export default function StudentsTab({ user }) {
   const [allUsers, setAllUsers] = useState([]);
@@ -266,6 +266,30 @@ export default function StudentsTab({ user }) {
       console.error(err);
       setMessage('❌ حدث خطأ أثناء الحذف الجماعي');
     }
+  };
+
+    const downloadSampleExcel = () => {
+    const sampleData = [
+      {
+        'ID': '2200304',
+        'Name': 'roshdy ahmed roshdy',
+        'StudentLevel': '2',
+        'Section': 'S1',
+        'Password': '123456',
+        'Subject': 'Introduction to Operation Research and Decision Support systems',
+        'CourseLevel': '2'
+      },
+      {
+        'ID': '2200304',
+        'Name': 'roshdy ahmed roshdy',
+        'StudentLevel': '2',
+        'Section': 'S1',
+        'Password': '123456',
+        'Subject': 'Microcontrollers',
+        'CourseLevel': '3'
+      }
+    ];
+    exportExcelFile(sampleData, 'نموذج_استيراد_الطلاب_Gradely.xlsx');
   };
 
   const handleExcelImport = async (e) => {

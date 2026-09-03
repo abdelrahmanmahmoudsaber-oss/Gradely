@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
-import { parseExcelFile } from '../../utils/excelHelper';
+import { parseExcelFile, exportExcelFile } from '../../utils/excelHelper';
 import { cacheManager } from '../../utils/dataCache';
-import { BookOpen, Upload, Plus, Trash2, Edit, Users, UserCheck, X, CheckSquare, Square, Shield, Layers } from 'lucide-react';
+import { BookOpen, Upload, Plus, Trash2, Edit, Users, UserCheck, X, CheckSquare, Square, Shield, Layers, Download, FileSpreadsheet, Info } from 'lucide-react';
 
 const DEFAULT_SECTIONS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
 
@@ -287,6 +287,52 @@ export default function SubjectsTab({ user }) {
       console.error('Bulk delete subjects error:', err);
       setMessage('❌ حدث خطأ أثناء حذف المواد');
     }
+  };
+
+    const downloadSampleExcel = () => {
+    const sampleData = [
+      {
+        'Subject': 'Introduction to Operation Research and Decision Support systems',
+        'ID': '2200304',
+        'Name': 'roshdy ahmed roshdy',
+        'Section': '2',
+        'CourseLevel': '2',
+        'StudentLevel': '2',
+        'Password': '123456',
+        'TA': 'Abdelrahman Mahmoud'
+      },
+      {
+        'Subject': 'Microcontrollers',
+        'ID': '2200304',
+        'Name': 'roshdy ahmed roshdy',
+        'Section': '1',
+        'CourseLevel': '3',
+        'StudentLevel': '2',
+        'Password': '123456',
+        'TA': 'Abdelrahman Mahmoud'
+      },
+      {
+        'Subject': 'Advanced Software Engineering',
+        'ID': '2200304',
+        'Name': 'roshdy ahmed roshdy',
+        'Section': '1',
+        'CourseLevel': '3',
+        'StudentLevel': '2',
+        'Password': '123456',
+        'TA': 'Mostafa Abubakr'
+      },
+      {
+        'Subject': 'Logic Design',
+        'ID': '2200304',
+        'Name': 'roshdy ahmed roshdy',
+        'Section': '3',
+        'CourseLevel': '1',
+        'StudentLevel': '2',
+        'Password': '123456',
+        'TA': 'Mostafa Abubakr'
+      }
+    ];
+    exportExcelFile(sampleData, 'نموذج_استيراد_المواد_والطلاب_Gradely.xlsx');
   };
 
   const handleImport = async () => {
@@ -643,15 +689,71 @@ export default function SubjectsTab({ user }) {
 
       {/* Excel Import Panel */}
       {showExcelImport && (
-        <div className="panel fade-in" style={{marginBottom:'2rem', border: '1px solid var(--primary)'}}>
-          <h3 style={{marginTop:0, marginBottom:'0.5rem', color:'var(--primary-hover)'}}>استيراد مواد وطلاب معاً عبر ملف Excel</h3>
-          <p className="text-muted" style={{fontSize:'0.85rem',marginBottom:'1rem'}}>
-            الأعمدة المطلوبة: <strong>Subject (اسم المادة) | ID (رقم الجلوس) | Name (اسم الطالب) | Section (السكشن: S1, S01, S2...) | Year (الفرقة) | Password (كلمة المرور) | TA (المعيد)</strong>
-          </p>
-          <div style={{display:'flex',gap:'1rem',alignItems:'center',flexWrap:'wrap'}}>
-            <input className="input-field" type="file" accept=".xlsx, .xls" onChange={e=>setFile(e.target.files[0])} style={{padding: '10px 14px', flex: 1, minWidth: '250px'}}/>
-            <button className="btn-primary" onClick={handleImport} disabled={!file || importing}>
-              {importing ? 'جاري الاستيراد...' : 'بدء الاستيراد'}
+        <div className="panel fade-in" style={{marginBottom:'2rem', border: '1px solid var(--primary)', background: 'linear-gradient(180deg, rgba(79, 70, 229, 0.05) 0%, rgba(0, 0, 0, 0) 100%)'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1rem',flexWrap:'wrap',gap:'10px',borderBottom:'1px solid var(--border)',paddingBottom:'1rem'}}>
+            <div>
+              <h3 style={{marginTop:0, marginBottom:'4px', color:'var(--primary-hover)', display:'flex', alignItems:'center', gap:'8px'}}>
+                <FileSpreadsheet size={22} /> استيراد المواد والطلاب وتوزيع السكاشن عبر Excel
+              </h3>
+              <p className="text-muted" style={{fontSize:'0.85rem',margin:0}}>
+                يدعم نظام الساعات المعتمدة (تحديد فرقة المادة وفرقة الطالب المستقلة لكل مقرر وسكشن)
+              </p>
+            </div>
+            <button 
+              type="button" 
+              className="btn-secondary" 
+              onClick={downloadSampleExcel}
+              style={{color:'var(--success)', borderColor:'rgba(16, 185, 129, 0.4)', background:'rgba(16, 185, 129, 0.08)', padding:'8px 14px', fontSize:'0.85rem', fontWeight:700, display:'flex', alignItems:'center', gap:'6px'}}
+            >
+              <Download size={16} /> تحميل نموذج Excel استرشادي جاهز (.xlsx)
+            </button>
+          </div>
+
+          {/* Columns Explanation Cards */}
+          <div style={{marginBottom:'1.2rem'}}>
+            <div style={{fontSize:'0.9rem', fontWeight:700, color:'var(--text-main)', marginBottom:'8px', display:'flex', alignItems:'center', gap:'6px'}}>
+              <Info size={16} style={{color:'var(--primary-hover)'}} /> ترتيب وأسماء الأعمدة في ملف الإكسيل:
+            </div>
+            <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:'8px', fontSize:'0.82rem'}}>
+              <div style={{background:'var(--bg)', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--border)'}}>
+                <strong style={{color:'var(--primary-hover)'}}>1. Subject</strong>
+                <span className="text-muted" style={{display:'block', fontSize:'0.75rem'}}>اسم المادة / المقرر</span>
+              </div>
+              <div style={{background:'var(--bg)', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--border)'}}>
+                <strong style={{color:'var(--primary-hover)'}}>2. ID</strong>
+                <span className="text-muted" style={{display:'block', fontSize:'0.75rem'}}>الرقم الأكاديمي / رقم الجلوس</span>
+              </div>
+              <div style={{background:'var(--bg)', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--border)'}}>
+                <strong style={{color:'var(--primary-hover)'}}>3. Name</strong>
+                <span className="text-muted" style={{display:'block', fontSize:'0.75rem'}}>اسم الطالب الثلاثي أو الرباعي</span>
+              </div>
+              <div style={{background:'var(--bg)', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--border)'}}>
+                <strong style={{color:'var(--success)'}}>4. Section</strong>
+                <span className="text-muted" style={{display:'block', fontSize:'0.75rem'}}>سكشن الطالب في هذه المادة (1, 2, S1...)</span>
+              </div>
+              <div style={{background:'var(--bg)', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--border)'}}>
+                <strong style={{color:'#f59e0b'}}>5. CourseLevel</strong>
+                <span className="text-muted" style={{display:'block', fontSize:'0.75rem'}}>فرقة المادة في اللائحة (1, 2, 3, 4)</span>
+              </div>
+              <div style={{background:'var(--bg)', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--border)'}}>
+                <strong style={{color:'#3b82f6'}}>6. StudentLevel</strong>
+                <span className="text-muted" style={{display:'block', fontSize:'0.75rem'}}>الفرقة الأكاديمية الحالية للطالب</span>
+              </div>
+              <div style={{background:'var(--bg)', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--border)'}}>
+                <strong style={{color:'var(--text-main)'}}>7. Password</strong>
+                <span className="text-muted" style={{display:'block', fontSize:'0.75rem'}}>كلمة المرور (اختياري)</span>
+              </div>
+              <div style={{background:'var(--bg)', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--border)'}}>
+                <strong style={{color:'var(--text-main)'}}>8. TA</strong>
+                <span className="text-muted" style={{display:'block', fontSize:'0.75rem'}}>المعيد المشرف (اختياري - اسم أو كود)</span>
+              </div>
+            </div>
+          </div>
+
+          <div style={{display:'flex',gap:'1rem',alignItems:'center',flexWrap:'wrap', background:'var(--bg)', padding:'1rem', borderRadius:'8px', border:'1px solid var(--border)'}}>
+            <input className="input-field" type="file" accept=".xlsx, .xls" onChange={e=>setFile(e.target.files[0])} style={{padding: '8px 12px', flex: 1, minWidth: '240px'}}/>
+            <button className="btn-primary" onClick={handleImport} disabled={!file || importing} style={{padding:'10px 24px', fontWeight:800}}>
+              {importing ? 'جاري الاستيراد والمعالجة...' : '🚀 بدء الاستيراد الآن'}
             </button>
           </div>
         </div>
