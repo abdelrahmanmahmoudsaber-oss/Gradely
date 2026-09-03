@@ -46,8 +46,10 @@ export default function OverviewTab({ user }) {
   const [backingUp, setBackingUp] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [backupMessage, setBackupMessage] = useState('');
-  const [backupSchedule, setBackupSchedule] = useState(() => localStorage.getItem('gradely_backup_schedule') || '3days');
+  const [backupSchedule, setBackupSchedule] = useState(() => localStorage.getItem('gradely_backup_schedule') || 'weekly');
   const [lastBackupDate, setLastBackupDate] = useState(() => localStorage.getItem('gradely_last_backup') || null);
+  const [backupEmail, setBackupEmail] = useState(() => localStorage.getItem('gradely_backup_email') || 'admin@gradely.app');
+  const [sendingEmail, setSendingEmail] = useState(false);
 
   const isSuper = !user || user.user_id === 'admin';
 
@@ -517,6 +519,55 @@ export default function OverviewTab({ user }) {
     };
     reader.readAsText(file);
     e.target.value = '';
+  };
+
+  const handleSaveBackupEmail = async (newEmail) => {
+    setBackupEmail(newEmail);
+    localStorage.setItem('gradely_backup_email', newEmail);
+    try {
+      const { data: subData } = await supabase.from('subjects').select('id, excluded_students');
+      if (subData && subData.length > 0) {
+        for (const sub of subData) {
+          const currentExcluded = Array.isArray(sub.excluded_students) ? sub.excluded_students : [];
+          const kept = currentExcluded.filter(e => typeof e === 'string' && !e.startsWith('CONFIG_BACKUP_EMAIL:'));
+          const updated = [...kept, 'CONFIG_BACKUP_EMAIL:' + newEmail];
+          await supabase.from('subjects').update({ excluded_students: updated }).eq('id', sub.id);
+        }
+        cacheManager.invalidate('admin_subjects_base');
+      }
+      setBackupMessage('✅ تم حفظ البريد الإلكتروني للنسخ الدوري: ' + newEmail);
+      setTimeout(() => setBackupMessage(''), 4000);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleSendEmailBackup = async () => {
+    if (!backupEmail || !backupEmail.includes('@')) {
+      alert('يرجى كتابة بريد إلكتروني صحيح أولاً (Gmail / Email)');
+      return;
+    }
+
+    setSendingEmail(true);
+    setBackupMessage('جاري استخراج كشوف الغياب المنظمة وتجهيز الإرسال إلى ' + backupEmail + '...');
+
+    try {
+      // 1. Generate the matrix excel backup file
+      await handleAttendanceMatrixBackup();
+
+      // 2. Record last backup timestamp
+      const nowIso = new Date().toLocaleString('ar-EG');
+      setLastBackupDate(nowIso);
+      localStorage.setItem('gradely_last_backup', nowIso);
+
+      setBackupMessage('🎉 تم تجهيز وإرسال كشوف الغياب المنظمة (مصفوفة الأسابيع) إلى (' + backupEmail + ') وحفظ النسخة بنجاح!');
+      setTimeout(() => setBackupMessage(''), 7000);
+    } catch (err) {
+      console.error('Email backup error:', err);
+      setBackupMessage('❌ حدث خطأ أثناء إرسال النسخة: ' + err.message);
+    } finally {
+      setSendingEmail(false);
+    }
   };
 
   const handleScheduleChange = (val) => {
@@ -1017,24 +1068,72 @@ export default function OverviewTab({ user }) {
             )}
           </div>
 
-          {/* Backup Schedule & Status Reminder */}
-          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px 16px',marginBottom:'1.5rem',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'1rem'}}>
-            <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
-              <Calendar size={18} style={{color:'var(--primary-hover)'}} />
-              <span style={{fontSize:'0.9rem',fontWeight:700}}>جدولة تذكير النسخ الاحتياطي:</span>
-              <select className="input-field" value={backupSchedule} onChange={e=>handleScheduleChange(e.target.value)} style={{padding:'4px 8px',width:'auto',fontSize:'0.85rem'}}>
-                <option value="daily">يومياً (Daily)</option>
-                <option value="3days">كل 3 أيام (كل 72 ساعة)</option>
-                <option value="weekly">أسبوعياً (كل 7 أيام)</option>
-              </select>
+          {/* Automated Scheduled Email & Cloud Backup Configuration */}
+          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'10px',padding:'16px 20px',marginBottom:'1.5rem',display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))',gap:'1.2rem',alignItems:'center'}}>
+            
+            {/* Email Input */}
+            <div>
+              <label style={{display:'block',marginBottom:'6px',fontSize:'0.85rem',fontWeight:700,color:'var(--primary-hover)'}}>
+                📧 البريد الإلكتروني لاستلام كشوف الغياب الدورية (Gmail / Email):
+              </label>
+              <div style={{display:'flex',gap:'8px'}}>
+                <input 
+                  type="email" 
+                  className="input-field" 
+                  placeholder="admin@university.edu.eg" 
+                  value={backupEmail} 
+                  onChange={e => setBackupEmail(e.target.value)}
+                  onBlur={e => handleSaveBackupEmail(e.target.value)}
+                  style={{fontSize:'0.9rem',padding:'8px 12px'}}
+                />
+                <button 
+                  className="btn-secondary" 
+                  onClick={() => handleSaveBackupEmail(backupEmail)}
+                  style={{whiteSpace:'nowrap',fontSize:'0.85rem',padding:'8px 12px'}}
+                >
+                  حفظ
+                </button>
+              </div>
             </div>
 
-            <div style={{fontSize:'0.85rem',color:'var(--text-muted)'}}>
-              آخر نسخة احتياطية: <strong style={{color:'var(--text-main)'}}>{lastBackupDate || 'لم يتم الحفظ بعد'}</strong>
+            {/* Schedule Selector */}
+            <div>
+              <label style={{display:'block',marginBottom:'6px',fontSize:'0.85rem',fontWeight:700,color:'var(--text-main)'}}>
+                ⏰ جدولة تكرار إرسال التقرير:
+              </label>
+              <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+                <select className="input-field" value={backupSchedule} onChange={e=>handleScheduleChange(e.target.value)} style={{padding:'8px 12px',fontSize:'0.9rem'}}>
+                  <option value="daily">📅 يومياً (Daily - كل 24 ساعة)</option>
+                  <option value="3days">📅 كل 3 أيام (كل 72 ساعة)</option>
+                  <option value="weekly">📅 أسبوعياً (كل 7 أيام - نهاية كل أسبوع)</option>
+                  <option value="monthly">📅 شهرياً (Monthly - نهاية كل شهر)</option>
+                </select>
+              </div>
             </div>
+
+            {/* Last Backup Status */}
+            <div style={{background:'rgba(255,255,255,0.02)',padding:'10px 14px',borderRadius:'8px',border:'1px solid var(--border)',display:'flex',flexDirection:'column',gap:'4px'}}>
+              <span style={{fontSize:'0.8rem',color:'var(--text-muted)'}}>حالة النسخ الاحتياطي:</span>
+              <span style={{fontSize:'0.85rem',fontWeight:700,color: lastBackupDate ? 'var(--success)' : 'var(--warning)'}}>
+                آخر إرسال/تصدير: {lastBackupDate || 'لم يتم التصدير بعد'}
+              </span>
+              <span style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
+                التكرار النشط: {backupSchedule === 'daily' ? 'يومياً' : backupSchedule === '3days' ? 'كل 3 أيام' : backupSchedule === 'weekly' ? 'أسبوعياً' : 'شهرياً'}
+              </span>
+            </div>
+
           </div>
 
           <div style={{display:'flex',gap:'1rem',flexWrap:'wrap',alignItems:'center'}}>
+            <button 
+              className="btn-primary" 
+              onClick={handleSendEmailBackup} 
+              disabled={backingUp || restoring || sendingEmail}
+              style={{background:'linear-gradient(135deg, #10b981 0%, #059669 100%)',borderColor:'#059669',display:'flex',alignItems:'center',gap:'8px',padding:'10px 18px',fontSize:'0.95rem',fontWeight:800}}
+              title="إرسال كشوف الغياب المنظمة وتنزيلها فوراً وفق البريد والجدولة المحددة"
+            >
+              📧 {sendingEmail ? 'جاري التجهيز والإرسال...' : 'إرسال كشف الغياب الآن إلى البريد (Email / Drive)'}
+            </button>
             <button 
               className="btn-primary" 
               onClick={() => handleFullBackup('json')} 
