@@ -32,6 +32,13 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
     return 'S1';
   };
 
+    const getSubjectWeekDate = (sub, weekNum) => {
+    if (!sub || !Array.isArray(sub.excluded_students)) return '';
+    const prefix = 'WEEK_DATE_W' + weekNum + ':';
+    const entry = sub.excluded_students.find(e => typeof e === 'string' && e.startsWith(prefix));
+    return entry ? entry.replace(prefix, '') : '';
+  };
+
   const getStudentSubSection = (student, subId) => {
     if (student && Array.isArray(student.assigned_subjects)) {
       const match = student.assigned_subjects.find(entry => typeof entry === 'string' && entry.startsWith(subId + ':'));
@@ -92,7 +99,8 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
         const record = subAtt.find(a => a.week_number === w);
         let statusText = '—';
         let statusClass = 'unrecorded';
-        let dateHint = record?.session_date ? `<div class="w-date">${record.session_date.slice(5)}</div>` : '';
+        const wDate = getSubjectWeekDate(sub, w);
+        let dateHint = wDate ? `<div class="w-date">${wDate}</div>` : '';
         
         if (record) {
           if (record.status === 'present') { statusText = 'حاضر ✓'; statusClass = 'present'; }

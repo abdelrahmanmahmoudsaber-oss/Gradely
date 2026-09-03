@@ -60,6 +60,13 @@ export default function StudentDashboard({ user, onLogout }) {
     return '';
   };
 
+    const getSubjectWeekDate = (sub, weekNum) => {
+    if (!sub || !Array.isArray(sub.excluded_students)) return '';
+    const prefix = 'WEEK_DATE_W' + weekNum + ':';
+    const entry = sub.excluded_students.find(e => typeof e === 'string' && e.startsWith(prefix));
+    return entry ? entry.replace(prefix, '') : '';
+  };
+
   const getStudentSubSection = (student, subId) => {
     if (student && Array.isArray(student.assigned_subjects)) {
       const match = student.assigned_subjects.find(entry => typeof entry === 'string' && entry.startsWith(subId + ':'));

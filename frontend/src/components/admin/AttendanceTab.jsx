@@ -402,9 +402,7 @@ export default function AttendanceTab({ user }) {
       subject_id: selectedSubject,
       week_number: week,
       status: 'excused',
-      session_date: sessionDate,
-      excuse_reason: excuseInputText.trim() || null
-    }, { onConflict: 'student_id,subject_id,week_number' });
+      }, { onConflict: 'student_id,subject_id,week_number' });
 
     setExcuseModalStudent(null);
     setExcuseInputText('');
@@ -423,8 +421,7 @@ export default function AttendanceTab({ user }) {
       subject_id: selectedSubject,
       week_number: week,
       status: 'present',
-      session_date: sessionDate
-    }));
+      }));
 
     setAutoSaveStatus('✓ تم حفظ الكل');
     setTimeout(() => setAutoSaveStatus(''), 1500);
@@ -446,8 +443,7 @@ export default function AttendanceTab({ user }) {
       subject_id: selectedSubject,
       week_number: week,
       status: 'unrecorded',
-      session_date: sessionDate
-    }));
+      }));
     supabase.from('attendance').upsert(rows, { onConflict: 'student_id,subject_id,week_number' });
   };
 

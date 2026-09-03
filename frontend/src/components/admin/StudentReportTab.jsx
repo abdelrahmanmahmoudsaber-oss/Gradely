@@ -47,6 +47,13 @@ export default function StudentReportTab({ user }) {
     return 'S1';
   };
 
+    const getSubjectWeekDate = (sub, weekNum) => {
+    if (!sub || !Array.isArray(sub.excluded_students)) return '';
+    const prefix = 'WEEK_DATE_W' + weekNum + ':';
+    const entry = sub.excluded_students.find(e => typeof e === 'string' && e.startsWith(prefix));
+    return entry ? entry.replace(prefix, '') : '';
+  };
+
   const getStudentSubSection = (student, subId) => {
     if (student && Array.isArray(student.assigned_subjects)) {
       const match = student.assigned_subjects.find(entry => typeof entry === 'string' && entry.startsWith(subId + ':'));
@@ -89,19 +96,8 @@ export default function StudentReportTab({ user }) {
       const rawAssigned = Array.isArray(freshCurrentUser?.assigned_subjects) ? freshCurrentUser.assigned_subjects : [];
       const assignedSubIds = rawAssigned.map(entry => entry.split(':')[0]);
 
-      let accessibleSubjects = [];
-      if (isSuper) {
-        accessibleSubjects = allSubList;
-      } else {
-        accessibleSubjects = allSubList.filter(s => 
-          s.instructor_id === user.user_id || 
-          s.instructor_name === user.name || 
-          (user.name && s.instructor_name && s.instructor_name.trim().toLowerCase() === user.name.trim().toLowerCase()) ||
-          assignedSubIds.includes(s.id)
-        );
-      }
-
-      setAllSubjects(accessibleSubjects);
+      // Keep full subjects list so report shows student's entire schedule
+      setAllSubjects(allSubList);
       const studentsOnly = allUsersList.filter(u => u.role === 'student');
       setAllStudents(studentsOnly);
 
@@ -117,21 +113,13 @@ export default function StudentReportTab({ user }) {
     }
   };
 
-  const handleSelectStudent = async (stu, forceFetch = false) => {
+  const handleSelectStudent = async (stu) => {
     setSelectedStudent(stu);
-    const cacheKey = 'rep_' + stu.user_id;
-    if (!forceFetch) {
-      const cached = cacheManager.get(cacheKey);
-      if (cached) {
-        setStudentAttendance(cached.attendance);
-        setStudentGrades(cached.grades);
-        return;
-      }
-    }
 
     try {
+      // Direct live queries to attendance & grades (query only valid columns)
       const [attRes, grdRes] = await Promise.all([
-        supabase.from('attendance').select('student_id, subject_id, week_number, status, session_date, excuse_reason').eq('student_id', stu.user_id),
+        supabase.from('attendance').select('student_id, subject_id, week_number, status').eq('student_id', stu.user_id),
         supabase.from('grades').select('student_id, subject_id, quiz_1, quiz_2, project, attendance_score, final_grade').eq('student_id', stu.user_id)
       ]);
 
@@ -140,7 +128,6 @@ export default function StudentReportTab({ user }) {
 
       setStudentAttendance(attData);
       setStudentGrades(grdData);
-      cacheManager.set(cacheKey, { attendance: attData, grades: grdData });
     } catch (err) {
       console.error('Fetch student report error:', err);
     }
@@ -155,10 +142,9 @@ export default function StudentReportTab({ user }) {
 
   const enrolledSubjects = allSubjects.filter(sub => {
     if (!selectedStudent) return false;
-    if (Array.isArray(sub.enrolled_students)) {
-      return sub.enrolled_students.includes(selectedStudent.user_id);
-    }
-    return false;
+    const isEnrolledInSub = Array.isArray(sub.enrolled_students) && sub.enrolled_students.includes(selectedStudent.user_id);
+    const hasAssignedEntry = Array.isArray(selectedStudent.assigned_subjects) && selectedStudent.assigned_subjects.some(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+    return isEnrolledInSub || hasAssignedEntry;
   });
 
   const handleOpenPdfModal = () => {
@@ -349,11 +335,12 @@ export default function StudentReportTab({ user }) {
                               else if (record.status === 'excused') { stLabel = 'عذر'; stColor = '#3b82f6'; stBg = 'rgba(59, 130, 246, 0.1)'; stBorder = 'rgba(59, 130, 246, 0.25)'; }
                             }
 
+                            const wDate = getSubjectWeekDate(sub, w);
                             return (
-                              <div key={w} style={{background: stBg, border: '1px solid ' + stBorder, borderRadius: '6px', padding: '6px 4px', textAlign: 'center'}} title={record?.excuse_reason ? ('سبب العذر: ' + record.excuse_reason) : ''}>
+                              <div key={w} style={{background: stBg, border: '1px solid ' + stBorder, borderRadius: '6px', padding: '6px 4px', textAlign: 'center'}}>
                                 <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>أسبوع {w}</div>
                                 <div style={{fontWeight: 'bold', color: stColor, fontSize: '0.8rem', marginTop: '2px'}}>{stLabel}</div>
-                                {record?.session_date && <div style={{fontSize:'0.65rem',color:'var(--text-muted)',marginTop:'2px'}}>{record.session_date.slice(5)}</div>}
+                                {wDate && <div style={{fontSize:'0.65rem',color:'var(--text-muted)',marginTop:'2px'}}>{wDate}</div>}
                               </div>
                             );
                           })}
