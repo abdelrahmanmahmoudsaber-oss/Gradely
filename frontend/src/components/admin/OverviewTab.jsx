@@ -17,6 +17,7 @@ export default function OverviewTab({ user }) {
     lastUpdate: 'غير متوفر'
   });
   const [loading, setLoading] = useState(true);
+  const [allAdminsList, setAllAdminsList] = useState([]);
   const [allSubjectsList, setAllSubjectsList] = useState([]);
   const [allStudentsList, setAllStudentsList] = useState([]);
   const [selectedSubjectForVisibility, setSelectedSubjectForVisibility] = useState('global');
@@ -169,6 +170,7 @@ export default function OverviewTab({ user }) {
 
       const allStudents = allUsersList.filter(u => u.role === 'student');
       const allAdmins = allUsersList.filter(u => u.role === 'admin');
+      setAllAdminsList(allAdmins);
 
       let visibleStudentsCount = allStudents.length;
       if (!isSuper) {
