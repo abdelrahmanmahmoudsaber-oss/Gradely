@@ -357,19 +357,6 @@ export default function GradesTab({ user }) {
     <div className="fade-in">
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'2rem',flexWrap:'wrap',gap:'1rem'}}>
         <div>
-          <h2 style={{margin:0,fontSize:'1.6rem',fontWeight:800}}>الدرجات التفصيلية</h2>
-          <p className="text-muted" style={{margin:'5px 0 0 0'}}>
-            الطلاب المعروضون: <strong>{displayedEnrolledStudents.length} طالب</strong> {selectedSection !== 'all' ? '(سكشن ' + selectedSection + ')' : '(جميع السكاشن)'}
-          </p>
-        </div>
-        <div style={{display:'flex',gap:'10px',flexWrap:'wrap'}}>
-          <label className="btn-secondary" style={{cursor:'pointer',display:'inline-flex',alignItems:'center',gap:'8px'}}>
-            <Upload size={18} /> استيراد درجات
-            <input type="file" accept=".xlsx, .xls" onChange={handleImport} style={{display:'none'}} disabled={importing || !selectedSubject} />
-          </label>
-          <button className="btn-secondary" onClick={handleExport} disabled={!selectedSubject || displayedEnrolledStudents.length === 0} style={{color:'var(--success)'}}>
-            <Download size={18} /> تصدير إكسيل
-          </button>
           <button className="btn-primary" onClick={saveGrades} disabled={saving || !selectedSubject} style={{padding:'10px 20px',fontSize:'1rem',fontWeight:700}}>
             <Save size={18} /> {saving ? 'جاري الحفظ...' : 'حفظ التعديلات'}
           </button>
