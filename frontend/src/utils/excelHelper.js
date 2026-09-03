@@ -170,3 +170,49 @@ export async function exportMultiSheetExcelFile(sheets, fileName) {
   document.body.removeChild(anchor);
   window.URL.revokeObjectURL(url);
 }
+
+/**
+ * Generates Base64 encoded string of a multi-sheet .xlsx workbook for emailing and webhooks.
+ */
+export async function generateMultiSheetExcelBase64(sheets) {
+  if (!sheets || sheets.length === 0) return '';
+
+  const workbook = new ExcelJS.Workbook();
+
+  sheets.forEach(({ name, data }) => {
+    const sheetName = name.slice(0, 31).replace(/[*?:/\\[\]]/g, '_');
+    const worksheet = workbook.addWorksheet(sheetName);
+
+    if (data && data.length > 0) {
+      const colKeys = Object.keys(data[0]);
+      worksheet.columns = colKeys.map(key => ({
+        header: key,
+        key: key,
+        width: Math.max(key.length + 5, 15)
+      }));
+
+      worksheet.getRow(1).font = { bold: true };
+
+      data.forEach(item => {
+        const rowValues = {};
+        colKeys.forEach(key => {
+          const val = item[key];
+          const strVal = val === null || val === undefined ? '' : String(val);
+          rowValues[key] = sanitizeCell(strVal);
+        });
+        worksheet.addRow(rowValues);
+      });
+    } else {
+      worksheet.addRow(['لا توجد بيانات مسجلة']);
+    }
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
+}

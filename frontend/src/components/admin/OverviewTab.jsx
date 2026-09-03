@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { cacheManager } from '../../utils/dataCache';
-import { exportExcelFile, exportMultiSheetExcelFile } from '../../utils/excelHelper';
+import { exportExcelFile, exportMultiSheetExcelFile, generateMultiSheetExcelBase64 } from '../../utils/excelHelper';
 import { 
   Users, BookOpen, Clock, Shield, Sliders, Eye, EyeOff, 
   Download, Upload, Database, RefreshCw, CheckCircle2, AlertTriangle, FileSpreadsheet, Calendar,
@@ -49,6 +49,7 @@ export default function OverviewTab({ user }) {
   const [backupSchedule, setBackupSchedule] = useState(() => localStorage.getItem('gradely_backup_schedule') || 'weekly');
   const [lastBackupDate, setLastBackupDate] = useState(() => localStorage.getItem('gradely_last_backup') || null);
   const [backupEmail, setBackupEmail] = useState(() => localStorage.getItem('gradely_backup_email') || 'admin@gradely.app');
+  const [webhookScriptUrl, setWebhookScriptUrl] = useState(() => localStorage.getItem('gradely_webhook_url') || 'https://script.google.com/macros/s/AKfycbzBUNCHESyAtmUK_V8Wm7KV-8zdV3mmpoI8ACd6KHtLRBlhG7B28EiPKZVXf9SU7haiEQ/exec');
   const [sendingEmail, setSendingEmail] = useState(false);
 
   const isSuper = !user || user.user_id === 'admin';
@@ -542,6 +543,11 @@ export default function OverviewTab({ user }) {
     }
   };
 
+  const handleSaveWebhookUrl = (url) => {
+    setWebhookScriptUrl(url);
+    localStorage.setItem('gradely_webhook_url', url);
+  };
+
   const handleSendEmailBackup = async () => {
     if (!backupEmail || !backupEmail.includes('@')) {
       alert('يرجى كتابة بريد إلكتروني صحيح أولاً (Gmail / Email)');
@@ -549,19 +555,134 @@ export default function OverviewTab({ user }) {
     }
 
     setSendingEmail(true);
-    setBackupMessage('جاري استخراج كشوف الغياب المنظمة وتجهيز الإرسال إلى ' + backupEmail + '...');
+    setBackupMessage('جاري استخراج وتجهيز كشوف الغياب المنظمة وإرسالها إلى (' + backupEmail + ')...');
 
     try {
-      // 1. Generate the matrix excel backup file
-      await handleAttendanceMatrixBackup();
+      const [usersRes, subRes, attRes] = await Promise.all([
+        supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects'),
+        supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students'),
+        supabase.from('attendance').select('student_id, subject_id, week_number, status')
+      ]);
 
-      // 2. Record last backup timestamp
+      const allUsers = usersRes.data || [];
+      const allSubs = subRes.data || [];
+      const allAtt = attRes.data || [];
+
+      const freshCurrentUser = allUsers.find(u => u.user_id === user.user_id) || user;
+      const rawAssigned = Array.isArray(freshCurrentUser?.assigned_subjects) ? freshCurrentUser.assigned_subjects : [];
+      const assignedSubIds = rawAssigned.map(e => e.split(':')[0]);
+
+      let mySubs = [];
+      if (isSuper) {
+        mySubs = allSubs;
+      } else {
+        mySubs = allSubs.filter(s => 
+          s.instructor_id === user.user_id || 
+          s.instructor_name === user.name || 
+          assignedSubIds.includes(s.id)
+        );
+      }
+
+      if (mySubs.length === 0) {
+        setBackupMessage('❌ لا توجد مواد مسندة لتصدير كشوفها');
+        setSendingEmail(false);
+        return;
+      }
+
+      const attMatrix = {};
+      allAtt.forEach(r => {
+        if (!attMatrix[r.subject_id]) attMatrix[r.subject_id] = {};
+        if (!attMatrix[r.subject_id][r.student_id]) attMatrix[r.subject_id][r.student_id] = {};
+        attMatrix[r.subject_id][r.student_id][r.week_number] = r.status;
+      });
+
+      const sheets = [];
+
+      mySubs.forEach(sub => {
+        const totalWeeks = sub.total_weeks || 12;
+        const subAtt = attMatrix[sub.id] || {};
+
+        const enrolled = allUsers.filter(u => {
+          if (u.role !== 'student') return false;
+          const inSub = Array.isArray(sub.enrolled_students) && sub.enrolled_students.includes(u.user_id);
+          const hasAssigned = Array.isArray(u.assigned_subjects) && u.assigned_subjects.some(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+          return inSub || hasAssigned;
+        });
+
+        const rows = enrolled.map(stu => {
+          const stuSubSec = (() => {
+            if (Array.isArray(stu.assigned_subjects)) {
+              const m = stu.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+              if (m) return m.split(':')[1];
+            }
+            return stu.section || 'S1';
+          })();
+
+          const row = {
+            'الرقم الأكاديمي': stu.user_id,
+            'اسم الطالب': stu.name,
+            'السكشن': stuSubSec,
+            'الفرقة': stu.year_level || sub.year_level || '1'
+          };
+
+          let presentCount = 0;
+          let absentCount = 0;
+          let lateCount = 0;
+          let excusedCount = 0;
+
+          for (let w = 1; w <= totalWeeks; w++) {
+            const st = subAtt[stu.user_id]?.[w];
+            let label = 'لم يرصد';
+            if (st === 'present') { label = 'حاضر'; presentCount++; }
+            else if (st === 'absent') { label = 'غائب'; absentCount++; }
+            else if (st === 'late') { label = 'تأخير'; lateCount++; presentCount += 0.5; }
+            else if (st === 'excused') { label = 'عذر'; excusedCount++; }
+            row['أسبوع ' + w] = label;
+          }
+
+          const totalRecorded = presentCount + absentCount + (lateCount * 0.5);
+          const attRate = totalRecorded > 0 ? Math.round((presentCount / totalRecorded) * 100) + '%' : '0%';
+
+          row['إجمالي الحضور'] = presentCount;
+          row['إجمالي الغياب'] = absentCount;
+          row['تأخير / عذر'] = lateCount + excusedCount;
+          row['نسبة الالتزام'] = attRate;
+
+          return row;
+        });
+
+        let sheetName = sub.name.replace(/[:\/?*[\]]/g, '').slice(0, 28);
+        if (!sheetName) sheetName = 'مادة ' + sub.id.slice(0, 6);
+        sheets.push({ name: sheetName, data: rows });
+      });
+
+      // 2. Generate Base64 attachment
+      const fileBase64 = await generateMultiSheetExcelBase64(sheets);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 10);
+      const filename = 'Gradely_Attendance_Matrix_' + timestamp + '.xlsx';
+
+      const targetWebhook = webhookScriptUrl.trim() || 'https://script.google.com/macros/s/AKfycbzBUNCHESyAtmUK_V8Wm7KV-8zdV3mmpoI8ACd6KHtLRBlhG7B28EiPKZVXf9SU7haiEQ/exec';
+
+      // 3. Send to Google Apps Script Webhook
+      const payload = JSON.stringify({
+        email: backupEmail,
+        filename: filename,
+        fileBase64: fileBase64
+      });
+
+      await fetch(targetWebhook, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain' },
+        body: payload
+      });
+
       const nowIso = new Date().toLocaleString('ar-EG');
       setLastBackupDate(nowIso);
       localStorage.setItem('gradely_last_backup', nowIso);
 
-      setBackupMessage('🎉 تم تجهيز وإرسال كشوف الغياب المنظمة (مصفوفة الأسابيع) إلى (' + backupEmail + ') وحفظ النسخة بنجاح!');
-      setTimeout(() => setBackupMessage(''), 7000);
+      setBackupMessage('🎉 تم إرسال كشف الغياب المنظم بنجاح إلى (' + backupEmail + ') عبر Google Apps Script!');
+      setTimeout(() => setBackupMessage(''), 9000);
     } catch (err) {
       console.error('Email backup error:', err);
       setBackupMessage('❌ حدث خطأ أثناء إرسال النسخة: ' + err.message);
