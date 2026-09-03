@@ -173,33 +173,47 @@ export default function OverviewTab({ user }) {
       setAllStudentsList(allStudents);
       setAllAdminsList(allAdmins);
 
-      // Compute total sections across accessible subjects
+      // Compute total sections strictly for the logged-in user
       let totalSecs = 0;
       accessibleSubjects.forEach(sub => {
         const secSet = new Set();
-        allStudents.forEach(stu => {
-          const inSub = Array.isArray(sub.enrolled_students) && sub.enrolled_students.includes(stu.user_id);
-          const hasAss = Array.isArray(stu.assigned_subjects) && stu.assigned_subjects.some(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
-          if (inSub || hasAss) {
-            if (Array.isArray(stu.assigned_subjects)) {
-              const m = stu.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
-              if (m) secSet.add(normalizeSection(m.split(':')[1]));
-              else secSet.add(normalizeSection(stu.section || 'S1'));
-            } else {
-              secSet.add(normalizeSection(stu.section || 'S1'));
-            }
-          }
-        });
-        allAdmins.forEach(adm => {
-          if (Array.isArray(adm.assigned_subjects)) {
-            adm.assigned_subjects.forEach(entry => {
-              if (typeof entry === 'string' && entry.startsWith(sub.id + ':')) {
-                secSet.add(normalizeSection(entry.split(':')[1]));
+        if (isSuper) {
+          allStudents.forEach(stu => {
+            const inSub = Array.isArray(sub.enrolled_students) && sub.enrolled_students.includes(stu.user_id);
+            const hasAss = Array.isArray(stu.assigned_subjects) && stu.assigned_subjects.some(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+            if (inSub || hasAss) {
+              if (Array.isArray(stu.assigned_subjects)) {
+                const m = stu.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+                if (m) secSet.add(normalizeSection(m.split(':')[1]));
+                else secSet.add(normalizeSection(stu.section || 'S1'));
+              } else {
+                secSet.add(normalizeSection(stu.section || 'S1'));
               }
-            });
+            }
+          });
+          allAdmins.forEach(adm => {
+            if (Array.isArray(adm.assigned_subjects)) {
+              adm.assigned_subjects.forEach(entry => {
+                if (typeof entry === 'string' && entry.startsWith(sub.id + ':')) {
+                  secSet.add(normalizeSection(entry.split(':')[1]));
+                }
+              });
+            }
+          });
+          totalSecs += Math.max(secSet.size, 1);
+        } else {
+          // TA: Count ONLY sections specifically assigned to this TA!
+          const rawMyAss = Array.isArray(freshCurrentUser?.assigned_subjects) ? freshCurrentUser.assigned_subjects : [];
+          rawMyAss.forEach(entry => {
+            if (typeof entry === 'string' && entry.startsWith(sub.id + ':')) {
+              secSet.add(normalizeSection(entry.split(':')[1]));
+            }
+          });
+          if (secSet.size === 0 && (sub.instructor_id === user.user_id || sub.instructor_name === user.name)) {
+            secSet.add('S1');
           }
-        });
-        totalSecs += Math.max(secSet.size, 1);
+          totalSecs += secSet.size;
+        }
       });
 
       let visibleStudentsCount = allStudents.length;
@@ -264,20 +278,33 @@ export default function OverviewTab({ user }) {
       const globalConfigStr = 'CONFIG:' + JSON.stringify(updatedSettings.global || {});
       const subConfigStr = 'CONFIG_SUB:' + JSON.stringify(updatedSettings);
 
-      const { data: subData } = await supabase.from('subjects').select('id, excluded_students');
-      if (subData && subData.length > 0) {
-        await Promise.all(subData.map(async sub => {
-          const cleanExcluded = Array.isArray(sub.excluded_students) 
-            ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG:') && !x.startsWith('CONFIG_SUB:')) 
+      if (currentSubScope !== 'global') {
+        // Fast direct save to the specific subject (Works 100% for TAs under RLS)
+        const { data: targetSub } = await supabase.from('subjects').select('id, excluded_students').eq('id', currentSubScope).single();
+        if (targetSub) {
+          const cleanExcluded = Array.isArray(targetSub.excluded_students)
+            ? targetSub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG_SUB:') && !x.startsWith('CONFIG:'))
             : [];
-          cleanExcluded.push(globalConfigStr);
           cleanExcluded.push(subConfigStr);
-          return supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', sub.id);
-        }));
+          await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', currentSubScope);
+        }
+      } else {
+        // Global save
+        const { data: subData } = await supabase.from('subjects').select('id, excluded_students');
+        if (subData && subData.length > 0) {
+          await Promise.all(subData.map(async sub => {
+            const cleanExcluded = Array.isArray(sub.excluded_students) 
+              ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG:') && !x.startsWith('CONFIG_SUB:')) 
+              : [];
+            cleanExcluded.push(globalConfigStr);
+            cleanExcluded.push(subConfigStr);
+            return supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', sub.id);
+          }));
+        }
       }
 
       cacheManager.clear();
-      setSettingsMessage('✅ تم حفظ وتطبيق التعديل فوراً!');
+      setSettingsMessage('✅ تم حفظ وتطبيق التعديل فوراً للمادة!');
       setTimeout(() => setSettingsMessage(''), 3000);
     } catch (err) {
       console.error('Save visibility error:', err);
@@ -859,19 +886,33 @@ export default function OverviewTab({ user }) {
       const colsConfigStr = 'CONFIG_CUSTOM_COLS:' + JSON.stringify(updatedCols);
       const labelsConfigStr = 'CONFIG_COL_LABELS:' + JSON.stringify(updatedLabels);
 
-      const { data: subData } = await supabase.from('subjects').select('id, excluded_students');
-      if (subData && subData.length > 0) {
-        await Promise.all(subData.map(async sub => {
-          const cleanExcluded = Array.isArray(sub.excluded_students) 
-            ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG_CUSTOM_COLS:') && !x.startsWith('CONFIG_COL_LABELS:')) 
+      if (targetScope !== 'global') {
+        // Fast direct save to this specific subject
+        const { data: targetSub } = await supabase.from('subjects').select('id, excluded_students').eq('id', targetScope).single();
+        if (targetSub) {
+          const cleanExcluded = Array.isArray(targetSub.excluded_students)
+            ? targetSub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG_COL_LABELS:') && !x.startsWith('CONFIG_CUSTOM_COLS:'))
             : [];
           cleanExcluded.push(colsConfigStr);
           cleanExcluded.push(labelsConfigStr);
-          return supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', sub.id);
-        }));
+          await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', targetScope);
+        }
+      } else {
+        const { data: subData } = await supabase.from('subjects').select('id, excluded_students');
+        if (subData && subData.length > 0) {
+          await Promise.all(subData.map(async sub => {
+            const cleanExcluded = Array.isArray(sub.excluded_students) 
+              ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG_CUSTOM_COLS:') && !x.startsWith('CONFIG_COL_LABELS:')) 
+              : [];
+            cleanExcluded.push(colsConfigStr);
+            cleanExcluded.push(labelsConfigStr);
+            return supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', sub.id);
+          }));
+        }
       }
-      cacheManager.invalidate('admin_subjects_base');
-      setSettingsMessage('✅ تم تعديل وحفظ اسم الخانة بنجاح');
+
+      cacheManager.clear();
+      setSettingsMessage('✅ تم تعديل وحفظ اسم الخانة بنجاح للمادة!');
       setTimeout(() => setSettingsMessage(''), 3000);
       setEditingColumn(null);
     } catch (err) {
