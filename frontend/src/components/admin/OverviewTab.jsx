@@ -792,7 +792,17 @@ export default function OverviewTab({ user }) {
   };
 
   const getColLabel = (key, fallback) => {
-    return columnLabels[key] || fallback;
+    const scope = selectedSubjectForVisibility || 'global';
+    if (columnLabels[scope] && columnLabels[scope][key]) {
+      return columnLabels[scope][key];
+    }
+    if (columnLabels.global && columnLabels.global[key]) {
+      return columnLabels.global[key];
+    }
+    if (columnLabels[key] && typeof columnLabels[key] === 'string') {
+      return columnLabels[key];
+    }
+    return fallback;
   };
 
   const handleOpenAddColumnModal = () => {
