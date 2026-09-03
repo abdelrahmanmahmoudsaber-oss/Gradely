@@ -1,10 +1,3 @@
-  const normalizeSection = (sec) => {
-    if (!sec) return 'S1';
-    const s = sec.toString().trim().toUpperCase().replace(/\s+/g, '');
-    const match = s.match(/(\d+)/);
-    if (match) return 'S' + parseInt(match[1], 10);
-    return 'S1';
-  };
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { cacheManager } from '../../utils/dataCache';
@@ -16,6 +9,26 @@ import {
 } from 'lucide-react';
 
 export default function OverviewTab({ user }) {
+  const normalizeSection = (sec) => {
+    if (!sec) return 'S1';
+    const s = sec.toString().trim().toUpperCase().replace(/\s+/g, '');
+    const match = s.match(/(\d+)/);
+    if (match) return 'S' + parseInt(match[1], 10);
+    return 'S1';
+  };
+
+  const getSectionInstructorName = (subId, sec) => {
+    const secNorm = normalizeSection(sec || 'S1');
+    for (const adm of allAdminsList) {
+      if (Array.isArray(adm.assigned_subjects) && adm.assigned_subjects.includes(subId + ':' + secNorm)) {
+        return adm.name;
+      }
+    }
+    const subObj = allSubjectsList.find(s => s.id === subId);
+    if (subObj?.instructor_name) return subObj.instructor_name;
+    return 'المدير الرئيسي';
+  };
+
   const [stats, setStats] = useState({
     totalStudents: 0,
     totalAdmins: 0,
