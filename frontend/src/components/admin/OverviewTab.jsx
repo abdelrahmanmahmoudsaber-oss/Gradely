@@ -4,7 +4,8 @@ import { cacheManager } from '../../utils/dataCache';
 import { exportExcelFile, exportMultiSheetExcelFile } from '../../utils/excelHelper';
 import { 
   Users, BookOpen, Clock, Shield, Sliders, Eye, EyeOff, 
-  Download, Upload, Database, RefreshCw, CheckCircle2, AlertTriangle, FileSpreadsheet, Calendar
+  Download, Upload, Database, RefreshCw, CheckCircle2, AlertTriangle, FileSpreadsheet, Calendar,
+  Edit, Trash2
 } from 'lucide-react';
 
 export default function OverviewTab({ user }) {
