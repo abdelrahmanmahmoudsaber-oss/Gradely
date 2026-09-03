@@ -393,7 +393,7 @@ export default function SubjectsTab({ user }) {
           } else {
             await supabase.from('users').update({
               name: name,
-              year_level: y,
+              year_level: studentYear,
               section: s
             }).eq('user_id', id);
           }
