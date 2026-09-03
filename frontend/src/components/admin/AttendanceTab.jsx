@@ -96,7 +96,12 @@ export default function AttendanceTab({ user }) {
       if (isSuper) {
         accessibleSubjects = allSubList;
       } else {
-        accessibleSubjects = allSubList.filter(s => s.instructor_id === user.user_id || assignedSubIds.includes(s.id));
+        accessibleSubjects = allSubList.filter(s => 
+          s.instructor_id === user.user_id || 
+          s.instructor_name === user.name || 
+          (user.name && s.instructor_name && s.instructor_name.trim().toLowerCase() === user.name.trim().toLowerCase()) ||
+          assignedSubIds.includes(s.id)
+        );
       }
 
       setAllAdmins(allUsersList.filter(u => u.role === 'admin'));
@@ -399,20 +404,9 @@ export default function AttendanceTab({ user }) {
     else if (exportFilter === 'excused') targetStudents = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'excused');
 
     if (exportFormat === 'txt') {
-      let txt = `==================================================\n`;
-      txt += `كشف حضور وغياب — مادة: ${subName} (الفرقة ${yr})\n`;
-      txt += `السكشن: ${secName} | رقم الأسبوع: الأسبوع ${week}\n`;
-      txt += `تاريخ المحاضرة: ${sessionDate}\n`;
-      txt += `نوع التقرير: ${exportFilter === 'all' ? 'الكشف الكامل' : exportFilter === 'present' ? 'الحاضرون فقط' : exportFilter === 'absent' ? 'الغائبون فقط' : exportFilter === 'late' ? 'المتأخرون' : 'أصحاب الأعذار'}\n`;
-      txt += `إجمالي الطلاب في هذا الملف: ${targetStudents.length} طالب\n`;
-      txt += `==================================================\n\n`;
-
-      targetStudents.forEach((s, idx) => {
-        const st = attendanceRecords[s.user_id] || 'لم يرصد';
-        const stLabel = st === 'present' ? 'حاضر' : st === 'absent' ? 'غائب' : st === 'late' ? 'تأخير' : st === 'excused' ? 'عذر' : 'لم يرصد';
-        const rsn = excuseReasons[s.user_id] ? ` [السبب: ${excuseReasons[s.user_id]}]` : '';
-        txt += `${idx + 1}. [${s.user_id}] ${s.name} - سكشن ${normalizeSection(s.section || 'S1')} - (${stLabel})${rsn}\n`;
-      });
+      // Output clean, raw IDs line-by-line without brackets or extra text for direct 1-click copy/paste
+      const idLines = targetStudents.map(s => s.user_id.trim()).filter(Boolean);
+      const txt = idLines.join('\r\n');
 
       const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
       const url = URL.createObjectURL(blob);

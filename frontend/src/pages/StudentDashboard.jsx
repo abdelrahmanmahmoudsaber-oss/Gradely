@@ -105,7 +105,12 @@ export default function StudentDashboard({ user, onLogout }) {
       setGrades(cached.grades);
       if (cached.visibility) {
         setVisibility(cached.visibility);
-        if (!cached.currentSubVis.showAttendanceTab) setViewMode('grades');
+        const gVis = cached.visibility.global || cached.visibility;
+        if (gVis.showAttendanceTab !== false) {
+          setViewMode('attendance');
+        } else {
+          setViewMode('grades');
+        }
       }
       if (cached.subjects.length > 0) setSelectedSubjectId(cached.subjects[0].id);
       setLoading(false);
@@ -136,7 +141,10 @@ export default function StudentDashboard({ user, onLogout }) {
       if (parsed) currentVisibility = parsed;
 
       setVisibility(currentVisibility);
-      if (!currentVisibility.showAttendanceTab) {
+      const gVis = currentVisibility.global || currentVisibility;
+      if (gVis.showAttendanceTab !== false) {
+        setViewMode('attendance');
+      } else {
         setViewMode('grades');
       }
 

@@ -72,7 +72,12 @@ export default function GradesTab({ user }) {
       if (isSuper) {
         accessibleSubjects = allSubList;
       } else {
-        accessibleSubjects = allSubList.filter(s => s.instructor_id === user.user_id || assignedSubIds.includes(s.id));
+        accessibleSubjects = allSubList.filter(s => 
+          s.instructor_id === user.user_id || 
+          s.instructor_name === user.name || 
+          (user.name && s.instructor_name && s.instructor_name.trim().toLowerCase() === user.name.trim().toLowerCase()) ||
+          assignedSubIds.includes(s.id)
+        );
       }
 
       setAllAdmins(allUsersList.filter(u => u.role === 'admin'));

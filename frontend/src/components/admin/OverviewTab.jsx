@@ -33,6 +33,9 @@ export default function OverviewTab({ user }) {
 
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState('');
+  const [showCustomColumnModal, setShowCustomColumnModal] = useState(false);
+  const [newColumnName, setNewColumnName] = useState('');
+  const [customColumnsList, setCustomColumnsList] = useState([]);
 
   // Backup & Restore State
   const [backingUp, setBackingUp] = useState(false);
@@ -70,6 +73,11 @@ export default function OverviewTab({ user }) {
               try {
                 const parsed = JSON.parse(item.replace('CONFIG_SUB:', ''));
                 Object.assign(settings, parsed);
+              } catch (e) {}
+            } else if (item.startsWith('CONFIG_CUSTOM_COLS:')) {
+              try {
+                const cols = JSON.parse(item.replace('CONFIG_CUSTOM_COLS:', ''));
+                setCustomColumnsList(cols);
               } catch (e) {}
             }
           }
@@ -112,7 +120,12 @@ export default function OverviewTab({ user }) {
       if (isSuper) {
         accessibleSubjects = allSubList;
       } else {
-        accessibleSubjects = allSubList.filter(s => s.instructor_id === user.user_id || assignedSubIds.includes(s.id));
+        accessibleSubjects = allSubList.filter(s => 
+          s.instructor_id === user.user_id || 
+          s.instructor_name === user.name || 
+          (user.name && s.instructor_name && s.instructor_name.trim().toLowerCase() === user.name.trim().toLowerCase()) ||
+          assignedSubIds.includes(s.id)
+        );
       }
 
       const allStudents = allUsersList.filter(u => u.role === 'student');
@@ -373,6 +386,70 @@ export default function OverviewTab({ user }) {
     setTimeout(() => setBackupMessage(''), 3000);
   };
 
+  const handleAddCustomColumn = async (e) => {
+    e.preventDefault();
+    const trimName = newColumnName.trim();
+    if (!trimName) return;
+
+    const colKey = 'custom_' + Date.now();
+    const newColObj = { id: colKey, label: trimName, active: true };
+    const updatedCols = [...customColumnsList, newColObj];
+    setCustomColumnsList(updatedCols);
+    setNewColumnName('');
+
+    // Also enable it in current visibility
+    const updatedActiveVis = { ...currentActiveVisibility, [colKey]: true };
+    const updatedSettings = { ...visibilitySettings, [selectedSubjectForVisibility]: updatedActiveVis };
+    setVisibilitySettings(updatedSettings);
+
+    try {
+      const globalConfigStr = 'CONFIG:' + JSON.stringify(updatedSettings.global || {});
+      const subConfigStr = 'CONFIG_SUB:' + JSON.stringify(updatedSettings);
+      const colsConfigStr = 'CONFIG_CUSTOM_COLS:' + JSON.stringify(updatedCols);
+
+      const { data: subData } = await supabase.from('subjects').select('id, excluded_students');
+      if (subData && subData.length > 0) {
+        for (const sub of subData) {
+          const cleanExcluded = Array.isArray(sub.excluded_students) 
+            ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG:') && !x.startsWith('CONFIG_SUB:') && !x.startsWith('CONFIG_CUSTOM_COLS:')) 
+            : [];
+          cleanExcluded.push(globalConfigStr);
+          cleanExcluded.push(subConfigStr);
+          cleanExcluded.push(colsConfigStr);
+          await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', sub.id);
+        }
+      }
+      cacheManager.invalidate('admin_subjects_base');
+      setSettingsMessage('✅ تمت إضافة خانة الدرجة المخصصة بنجاح');
+      setTimeout(() => setSettingsMessage(''), 3000);
+      setShowCustomColumnModal(false);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteCustomColumn = async (colId) => {
+    const updatedCols = customColumnsList.filter(c => c.id !== colId);
+    setCustomColumnsList(updatedCols);
+
+    try {
+      const colsConfigStr = 'CONFIG_CUSTOM_COLS:' + JSON.stringify(updatedCols);
+      const { data: subData } = await supabase.from('subjects').select('id, excluded_students');
+      if (subData && subData.length > 0) {
+        for (const sub of subData) {
+          const cleanExcluded = Array.isArray(sub.excluded_students) 
+            ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG_CUSTOM_COLS:')) 
+            : [];
+          cleanExcluded.push(colsConfigStr);
+          await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', sub.id);
+        }
+      }
+      cacheManager.invalidate('admin_subjects_base');
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   if (loading) {
     return <div style={{padding:'3rem',textAlign:'center',color:'var(--text-muted)'}}>جاري تحميل مؤشرات النظام...</div>;
   }
@@ -475,6 +552,16 @@ export default function OverviewTab({ user }) {
             )}
           </div>
 
+          <div style={{display:'flex',justifyContent:'flex-end',marginBottom:'1rem'}}>
+            <button 
+              className="btn-secondary" 
+              onClick={() => setShowCustomColumnModal(true)}
+              style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'0.85rem',color:'var(--primary-hover)',borderColor:'rgba(79, 70, 229, 0.4)'}}
+            >
+              ➕ إضافة / تعديل خانة درجات جديدة
+            </button>
+          </div>
+
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))',gap:'1rem'}}>
             
             <div 
@@ -572,6 +659,40 @@ export default function OverviewTab({ user }) {
               {currentActiveVisibility.showTotal ? <Eye size={18} style={{color:'var(--success)'}} /> : <EyeOff size={18} style={{color:'var(--danger)'}} />}
             </div>
 
+            {customColumnsList.map(col => {
+              const isColActive = currentActiveVisibility[col.id] !== false;
+              return (
+                <div 
+                  key={col.id}
+                  onClick={() => handleToggleVisibility(col.id)}
+                  style={{
+                    background: isColActive ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
+                    border: isColActive ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                    borderRadius:'8px',padding:'12px 14px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',transition:'all 0.2s'
+                  }}
+                >
+                  <div>
+                    <div style={{fontWeight:700,fontSize:'0.9rem',color: isColActive ? 'var(--success)' : 'var(--text-muted)'}}>
+                      {col.label}
+                    </div>
+                    <div style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
+                      {isColActive ? 'ظاهر للطلاب' : 'مخفي'}
+                    </div>
+                  </div>
+                  <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                    {isColActive ? <Eye size={18} style={{color:'var(--success)'}} /> : <EyeOff size={18} style={{color:'var(--danger)'}} />}
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleDeleteCustomColumn(col.id); }} 
+                      style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',fontSize:'0.8rem',padding:'2px'}}
+                      title="حذف هذه الخانة"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
             <div 
               onClick={() => handleToggleVisibility('showAttendanceTab')}
               style={{
@@ -656,6 +777,43 @@ export default function OverviewTab({ user }) {
               <Upload size={18} /> {restoring ? 'جاري استعادة النظام...' : 'استعادة النظام من نسخة احتياطية (JSON)'}
               <input type="file" accept=".json" onChange={handleRestoreFromFile} style={{display:'none'}} disabled={restoring} />
             </label>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOM COLUMN MODAL */}
+      {showCustomColumnModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem'
+        }}>
+          <div className="panel fade-in" style={{maxWidth: '440px', width: '100%'}}>
+            <h3 style={{margin:'0 0 1rem 0',fontSize:'1.2rem',color:'var(--primary-hover)'}}>
+              ➕ إضافة خانة درجات جديدة
+            </h3>
+            <form onSubmit={handleAddCustomColumn} style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
+              <div>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'0.9rem',fontWeight:700}}>اسم الخانة الجديدة:</label>
+                <input 
+                  type="text" 
+                  className="input-field" 
+                  placeholder="مثال: درجة الميدترم، امتحان العملي، درجات الشفوي..." 
+                  value={newColumnName} 
+                  onChange={e => setNewColumnName(e.target.value)} 
+                  required 
+                  autoFocus 
+                  style={{width:'100%',padding:'10px'}}
+                />
+              </div>
+              <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
+                <button type="button" className="btn-secondary" onClick={() => setShowCustomColumnModal(false)}>
+                  إلغاء
+                </button>
+                <button type="submit" className="btn-primary">
+                  إضافة وتفعيل الخانة
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

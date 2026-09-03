@@ -47,6 +47,14 @@ export default function StudentReportTab({ user }) {
     return 'S1';
   };
 
+  const getStudentSubSection = (student, subId) => {
+    if (student && Array.isArray(student.assigned_subjects)) {
+      const match = student.assigned_subjects.find(entry => typeof entry === 'string' && entry.startsWith(subId + ':'));
+      if (match) return normalizeSection(match.split(':')[1]);
+    }
+    return normalizeSection(student?.section || 'S1');
+  };
+
   useEffect(() => {
     fetchInitialData();
   }, []);
@@ -85,7 +93,12 @@ export default function StudentReportTab({ user }) {
       if (isSuper) {
         accessibleSubjects = allSubList;
       } else {
-        accessibleSubjects = allSubList.filter(s => s.instructor_id === user.user_id || assignedSubIds.includes(s.id));
+        accessibleSubjects = allSubList.filter(s => 
+          s.instructor_id === user.user_id || 
+          s.instructor_name === user.name || 
+          (user.name && s.instructor_name && s.instructor_name.trim().toLowerCase() === user.name.trim().toLowerCase()) ||
+          assignedSubIds.includes(s.id)
+        );
       }
 
       setAllSubjects(accessibleSubjects);
@@ -270,9 +283,14 @@ export default function StudentReportTab({ user }) {
                         <span style={{fontSize:'0.9rem',color:'var(--text-muted)'}}>
                           المعيد: <strong style={{color:'var(--text-main)'}}>{sub.instructor_name || 'المدير الرئيسي'}</strong>
                         </span>
-                        <h4 style={{margin:0,fontSize:'1.3rem',fontWeight:800,color:'var(--primary-hover)'}}>
-                          {sub.name}
-                        </h4>
+                        <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                          <span className="badge" style={{background:'rgba(16, 185, 129, 0.15)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.3)',fontSize:'0.85rem',fontWeight:700}}>
+                            السكشن: {getStudentSubSection(selectedStudent, sub.id)}
+                          </span>
+                          <h4 style={{margin:0,fontSize:'1.3rem',fontWeight:800,color:'var(--primary-hover)'}}>
+                            {sub.name}
+                          </h4>
+                        </div>
                       </div>
 
                       {/* 5 Distinct Metric Cards */}

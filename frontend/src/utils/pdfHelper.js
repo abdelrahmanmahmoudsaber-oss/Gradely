@@ -32,6 +32,14 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
     return 'S1';
   };
 
+  const getStudentSubSection = (student, subId) => {
+    if (student && Array.isArray(student.assigned_subjects)) {
+      const match = student.assigned_subjects.find(entry => typeof entry === 'string' && entry.startsWith(subId + ':'));
+      if (match) return normalizeSection(match.split(':')[1]);
+    }
+    return normalizeSection(student?.section || 'S1');
+  };
+
   const currentDate = new Date().toLocaleDateString('ar-EG', {
     year: 'numeric',
     month: 'long',
@@ -118,7 +126,7 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
     subjectsHtml += `
       <div class="subject-block">
         <div class="subject-head">
-          <span class="sub-name">${idx + 1}. ${sub.name} (الفرقة ${normalizeYear(sub.year_level)})</span>
+          <span class="sub-name">${idx + 1}. ${sub.name} (الفرقة ${normalizeYear(sub.year_level)}) — <strong style="color: #059669;">سكشن ${getStudentSubSection(student, sub.id)}</strong></span>
           <span class="sub-instructor">المشرف / المعيد: <strong>${sub.instructor_name || 'المدير الرئيسي'}</strong></span>
         </div>
         ${gradesCardsHtml}
