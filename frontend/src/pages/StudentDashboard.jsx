@@ -149,28 +149,19 @@ export default function StudentDashboard({ user, onLogout }) {
       setViewMode('attendance');
 
       const studentSubjects = subData.filter(s => {
-        if (Array.isArray(s.enrolled_students)) {
-          return s.enrolled_students.includes(user.user_id);
-        }
-        return false;
+        const inEnrolled = Array.isArray(s.enrolled_students) && s.enrolled_students.includes(user.user_id);
+        const inAssigned = Array.isArray(user.assigned_subjects) && user.assigned_subjects.some(e => typeof e === 'string' && e.startsWith(s.id + ':'));
+        return inEnrolled || inAssigned;
       });
 
-      const cleanSubjects = studentSubjects.map(({ enrolled_students, excluded_students, ...rest }) => rest);
-
-      setSubjects(cleanSubjects);
+      // Keep excluded_students intact because it contains WEEK_DATE_W{week}:{date}
+      setSubjects(studentSubjects);
       setAttendance(attData);
       setGrades(grdData);
 
-      if (cleanSubjects.length > 0) {
-        setSelectedSubjectId(cleanSubjects[0].id);
+      if (studentSubjects.length > 0) {
+        setSelectedSubjectId(studentSubjects[0].id);
       }
-
-      cacheManager.set(cacheKey, {
-        subjects: cleanSubjects,
-        attendance: attData,
-        grades: grdData,
-        visibility: currentVisibility
-      });
 
     } catch (e) {
       console.error('Error fetching student dashboard data:', e);
