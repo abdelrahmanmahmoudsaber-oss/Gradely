@@ -1,3 +1,10 @@
+  const normalizeSection = (sec) => {
+    if (!sec) return 'S1';
+    const s = sec.toString().trim().toUpperCase().replace(/\s+/g, '');
+    const match = s.match(/(\d+)/);
+    if (match) return 'S' + parseInt(match[1], 10);
+    return 'S1';
+  };
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { cacheManager } from '../../utils/dataCache';
@@ -18,6 +25,7 @@ export default function OverviewTab({ user }) {
   });
   const [loading, setLoading] = useState(true);
   const [allSubjectsList, setAllSubjectsList] = useState([]);
+  const [allStudentsList, setAllStudentsList] = useState([]);
   const [selectedSubjectForVisibility, setSelectedSubjectForVisibility] = useState('global');
 
   // Student Dashboard Visibility Configuration
@@ -203,7 +211,7 @@ export default function OverviewTab({ user }) {
 
     setVisibilitySettings(updatedSettings);
     setSavingSettings(true);
-    setSettingsMessage('');
+    setSettingsMessage('جاري الحفظ...');
 
     try {
       const globalConfigStr = 'CONFIG:' + JSON.stringify(updatedSettings.global || {});
@@ -211,20 +219,19 @@ export default function OverviewTab({ user }) {
 
       const { data: subData } = await supabase.from('subjects').select('id, excluded_students');
       if (subData && subData.length > 0) {
-        for (const sub of subData) {
+        await Promise.all(subData.map(async sub => {
           const cleanExcluded = Array.isArray(sub.excluded_students) 
             ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG:') && !x.startsWith('CONFIG_SUB:')) 
             : [];
           cleanExcluded.push(globalConfigStr);
           cleanExcluded.push(subConfigStr);
-          await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', sub.id);
-        }
+          return supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', sub.id);
+        }));
       }
 
-      cacheManager.invalidate('admin_subjects_base');
-      cacheManager.invalidate('student_data_');
-      setSettingsMessage('✅ تم تحديث إعدادات ظهور البيانات بنجاح');
-      setTimeout(() => setSettingsMessage(''), 3500);
+      cacheManager.clear();
+      setSettingsMessage('✅ تم حفظ وتطبيق التعديل فوراً!');
+      setTimeout(() => setSettingsMessage(''), 3000);
     } catch (err) {
       console.error('Save visibility error:', err);
       setSettingsMessage('❌ فشل حفظ الإعدادات');
@@ -906,6 +913,130 @@ export default function OverviewTab({ user }) {
             <p className="text-muted" style={{margin:'0 0 4px 0',fontSize:'0.9rem'}}>حالة النظام والبيانات</p>
             <h3 style={{margin:0,fontSize:'1.3rem',fontWeight:800,color:'var(--success)'}}>{stats.lastUpdate}</h3>
           </div>
+        </div>
+      </div>
+
+      
+      {/* TA & INSTRUCTOR COURSES & SECTIONS MATRIX BREAKDOWN DASHBOARD */}
+      <div className="panel fade-in" style={{marginBottom:'2.5rem',border:'1px solid var(--border)',padding:'1.5rem'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',borderBottom:'1px solid var(--border)',paddingBottom:'1rem',flexWrap:'wrap',gap:'1rem'}}>
+          <div>
+            <h3 style={{margin:'0 0 4px 0',fontSize:'1.3rem',display:'flex',alignItems:'center',gap:'8px',color:'var(--primary-hover)'}}>
+              <BookOpen size={22} /> {isSuper ? 'توزيع المقررات والسكاشن وأعداد الطلاب (لوحة التحكم الشاملة)' : 'لوحة متابعة مقرراتي وسكاشني وأعداد الطلاب'}
+            </h3>
+            <p className="text-muted" style={{margin:0,fontSize:'0.85rem'}}>
+              {isSuper 
+                ? 'استعراض تفصيلي لكافة المواد المسجلة بالكلية، السكاشن التابعة لها، المعيد المسؤول عن كل سكشن، وعدد الطلاب بدقة:'
+                : 'نظرة سريعة على المواد والسكاشن المسندة إليك وتوزيع أعداد الطلاب في كل سكشن:'}
+            </p>
+          </div>
+          <span className="badge" style={{background:'rgba(79,70,229,0.1)',color:'var(--primary-hover)',padding:'6px 14px',borderRadius:'20px',fontWeight:700}}>
+            {(isSuper ? allSubjectsList : allSubjectsList.filter(s => {
+              const freshUser = (cacheManager.get('admin_users_base') || []).find(u => u.user_id === user.user_id) || user;
+              const rawAss = Array.isArray(freshUser?.assigned_subjects) ? freshUser.assigned_subjects : [];
+              const subIds = rawAss.map(e => e.split(':')[0]);
+              return s.instructor_id === user.user_id || s.instructor_name === user.name || subIds.includes(s.id);
+            })).length} مواد دراسية
+          </span>
+        </div>
+
+        {/* Subjects & Sections Breakdown Grid */}
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(320px, 1fr))',gap:'1.2rem'}}>
+          {(isSuper ? allSubjectsList : allSubjectsList.filter(s => {
+            const freshUser = (cacheManager.get('admin_users_base') || []).find(u => u.user_id === user.user_id) || user;
+            const rawAss = Array.isArray(freshUser?.assigned_subjects) ? freshUser.assigned_subjects : [];
+            const subIds = rawAss.map(e => e.split(':')[0]);
+            return s.instructor_id === user.user_id || s.instructor_name === user.name || subIds.includes(s.id);
+          })).map(sub => {
+            const enrolled = allStudentsList.filter(stu => {
+              const inSub = Array.isArray(sub.enrolled_students) && sub.enrolled_students.includes(stu.user_id);
+              const hasAss = Array.isArray(stu.assigned_subjects) && stu.assigned_subjects.some(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+              return inSub || hasAss;
+            });
+
+            const sectionsMap = {};
+            enrolled.forEach(stu => {
+              let sec = 'S1';
+              if (Array.isArray(stu.assigned_subjects)) {
+                const m = stu.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+                if (m) sec = normalizeSection(m.split(':')[1]);
+                else sec = normalizeSection(stu.section || 'S1');
+              } else {
+                sec = normalizeSection(stu.section || 'S1');
+              }
+              if (!sectionsMap[sec]) sectionsMap[sec] = [];
+              sectionsMap[sec].push(stu);
+            });
+
+            // Also include any sections from TA assignments that might have 0 students yet
+            allAdminsList.forEach(adm => {
+              if (Array.isArray(adm.assigned_subjects)) {
+                adm.assigned_subjects.forEach(entry => {
+                  if (typeof entry === 'string' && entry.startsWith(sub.id + ':')) {
+                    const sec = normalizeSection(entry.split(':')[1]);
+                    if (!sectionsMap[sec]) sectionsMap[sec] = [];
+                  }
+                });
+              }
+            });
+
+            const sortedSecKeys = Object.keys(sectionsMap).sort((a, b) => {
+              const numA = parseInt(a.replace(/\D/g, ''), 10) || 0;
+              const numB = parseInt(b.replace(/\D/g, ''), 10) || 0;
+              return numA - numB;
+            });
+
+            return (
+              <div key={sub.id} style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'10px',padding:'16px',display:'flex',flexDirection:'column',justifyContent:'space-between'}}>
+                <div>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'10px'}}>
+                    <h4 style={{margin:0,fontSize:'1.1rem',color:'var(--text-main)',fontWeight:800}}>
+                      {sub.name}
+                    </h4>
+                    <span style={{fontSize:'0.75rem',background:'rgba(255,255,255,0.06)',padding:'3px 8px',borderRadius:'4px',color:'var(--text-muted)'}}>
+                      الفرقة {sub.year_level || '1'}
+                    </span>
+                  </div>
+
+                  <div style={{fontSize:'0.85rem',color:'var(--text-muted)',marginBottom:'12px',display:'flex',justifyContent:'space-between'}}>
+                    <span>إجمالي الطلاب: <strong style={{color:'var(--text-main)'}}>{enrolled.length} طالب</strong></span>
+                    <span>السكاشن: <strong style={{color:'var(--primary-hover)'}}>{sortedSecKeys.length} سكشن</strong></span>
+                  </div>
+
+                  {/* Section Badges */}
+                  <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
+                    {sortedSecKeys.map(sec => {
+                      const count = sectionsMap[sec]?.length || 0;
+                      const ta = getSectionInstructorName(sub.id, sec);
+                      const isMySec = !isSuper && (ta === user.name || ta === user.user_id);
+                      return (
+                        <div 
+                          key={sec}
+                          style={{
+                            background: isMySec ? 'rgba(79, 70, 229, 0.15)' : 'rgba(255,255,255,0.02)',
+                            border: isMySec ? '1px solid var(--primary-hover)' : '1px solid rgba(255,255,255,0.06)',
+                            borderRadius:'6px',padding:'8px 12px',display:'flex',justifyContent:'space-between',alignItems:'center'
+                          }}
+                        >
+                          <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                            <span style={{fontWeight:800,color:'var(--primary-hover)',fontFamily:'monospace',fontSize:'0.9rem'}}>
+                              [{sec}] سكشن {sec.replace(/\D/g, '')}
+                            </span>
+                            <span style={{fontSize:'0.78rem',color:'var(--text-muted)'}}>
+                              • المعيد: <strong style={{color:'var(--text-main)'}}>{ta}</strong>
+                            </span>
+                          </div>
+                          <span style={{fontSize:'0.82rem',fontWeight:700,color:'var(--success)',background:'rgba(16,185,129,0.1)',padding:'2px 8px',borderRadius:'12px'}}>
+                            {count} طالب
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 

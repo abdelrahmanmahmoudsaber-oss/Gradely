@@ -160,8 +160,15 @@ export default function StudentDashboard({ user, onLogout }) {
   };
 
   const getSubVisibility = (subId) => {
-    if (!visibility) return { showQuiz1: true, showQuiz2: true, showProject: true, showAttendanceScore: true, showTotal: true, showAttendanceTab: true };
-    return visibility[subId] || visibility.global || visibility;
+    const defaultVis = { showQuiz1: true, showQuiz2: true, showProject: true, showAttendanceScore: true, showTotal: true, showAttendanceTab: true };
+    if (!visibility) return defaultVis;
+    const globalVis = visibility.global || {};
+    const subVis = visibility[subId] || {};
+    return {
+      ...defaultVis,
+      ...globalVis,
+      ...subVis
+    };
   };
 
   const fetchData = async () => {
