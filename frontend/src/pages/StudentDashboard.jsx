@@ -22,6 +22,7 @@ export default function StudentDashboard({ user, onLogout }) {
   const [subjects, setSubjects] = useState([]);
   const [allAdmins, setAllAdmins] = useState([]);
   const [columnLabels, setColumnLabels] = useState({});
+  const [customColumnsList, setCustomColumnsList] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [grades, setGrades] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -147,6 +148,11 @@ export default function StudentDashboard({ user, onLogout }) {
                 const parsed = JSON.parse(item.replace('CONFIG_SUB:', ''));
                 Object.assign(settings, parsed);
               } catch (e) {}
+            } else if (item.startsWith('CONFIG_CUSTOM_COLS:')) {
+              try {
+                const cols = JSON.parse(item.replace('CONFIG_CUSTOM_COLS:', ''));
+                if (Array.isArray(cols)) setCustomColumnsList(cols);
+              } catch (e) {}
             } else if (item.startsWith('CONFIG_COL_LABELS:')) {
               try {
                 const lbls = JSON.parse(item.replace('CONFIG_COL_LABELS:', ''));
@@ -210,7 +216,14 @@ export default function StudentDashboard({ user, onLogout }) {
         return inEnrolled || inAssigned;
       });
 
-      // Keep excluded_students intact because it contains WEEK_DATE_W{week}:{date}
+      // Sort subjects deterministically by year_level and name so order is 100% fixed and stable
+      studentSubjects.sort((a, b) => {
+        const yrA = parseInt(a.year_level, 10) || 1;
+        const yrB = parseInt(b.year_level, 10) || 1;
+        if (yrA !== yrB) return yrA - yrB;
+        return (a.name || '').localeCompare(b.name || '', 'ar');
+      });
+
       setSubjects(studentSubjects);
       setAttendance(attData);
       setGrades(grdData);
@@ -648,6 +661,18 @@ export default function StudentDashboard({ user, onLogout }) {
                           </h3>
                         </div>
                       )}
+
+                      {/* Custom Grade Columns (e.g. تاسك, كويز 3) */}
+                      {customColumnsList
+                        .filter(col => (col.scope === 'global' || col.scope === currentSubject.id) && currentSubVis[col.id] !== false)
+                        .map(col => (
+                          <div key={col.id} className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
+                            <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, col.id, col.label)}</span>
+                            <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
+                              {currentGrades[col.id] || 0}
+                            </h3>
+                          </div>
+                        ))}
                     </div>
 
                     {currentSubVis.showTotal && (

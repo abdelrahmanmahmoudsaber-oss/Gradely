@@ -9,6 +9,7 @@ export default function StudentReportTab({ user }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [allStudents, setAllStudents] = useState([]);
   const [allSubjects, setAllSubjects] = useState([]);
+  const [allAdmins, setAllAdmins] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [studentAttendance, setStudentAttendance] = useState([]);
   const [studentGrades, setStudentGrades] = useState([]);
@@ -115,6 +116,8 @@ export default function StudentReportTab({ user }) {
       ]);
       const allUsersList = userRes.data || [];
       const allSubList = subRes.data || [];
+      const adminsList = allUsersList.filter(u => u.role === 'admin');
+      setAllAdmins(adminsList);
 
       const freshCurrentUser = allUsersList.find(u => u.user_id === user.user_id) || user;
       const rawAssigned = Array.isArray(freshCurrentUser?.assigned_subjects) ? freshCurrentUser.assigned_subjects : [];
