@@ -260,6 +260,41 @@ export default function GradesTab({ user }) {
     }
   };
 
+    // Download pre-filled grades template for the current subject and section
+  const handleDownloadGradesTemplate = () => {
+    if (!currentSub) return;
+    const templateData = displayedEnrolledStudents.map(stu => {
+      const g = grades[stu.user_id] || { quiz_1: 0, quiz_2: 0, project: 0, attendance_score: 0 };
+      const total = (g.quiz_1 || 0) + (g.quiz_2 || 0) + (g.project || 0) + (g.attendance_score || 0);
+      return {
+        'ID': stu.user_id,
+        'Name': stu.name,
+        'Section': getStudentSubSection(stu, selectedSubject),
+        'Quiz 1': g.quiz_1 || 0,
+        'Quiz 2': g.quiz_2 || 0,
+        'Project': g.project || 0,
+        'Attendance': g.attendance_score || 0,
+        'Total': total
+      };
+    });
+
+    if (templateData.length === 0) {
+      templateData.push({
+        'ID': '2200101',
+        'Name': 'اسم الطالب التجريبي',
+        'Section': 'S1',
+        'Quiz 1': 10,
+        'Quiz 2': 10,
+        'Project': 20,
+        'Attendance': 10,
+        'Total': 50
+      });
+    }
+
+    const secLabel = selectedSection !== 'all' ? ('_' + selectedSection) : '_All';
+    exportExcelFile(templateData, 'نموذج_رصد_درجات_' + currentSub.name.replace(/[^a-zA-Z0-9؀-ۿ]/g, '_') + secLabel + '.xlsx');
+  };
+
   const handleExport = async () => {
     if (!currentSub) return;
     const exportData = displayedEnrolledStudents.map(stu => {

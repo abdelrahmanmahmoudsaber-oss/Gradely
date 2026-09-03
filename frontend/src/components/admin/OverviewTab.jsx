@@ -225,6 +225,133 @@ export default function OverviewTab({ user }) {
   };
 
   // FULL COMPREHENSIVE BACKUP (ALL TABLES: USERS + SUBJECTS + ATTENDANCE + GRADES)
+  // GENERATE ADVANCED ATTENDANCE MATRIX WORKBOOK (PER-WEEK SPREADSHEET FOR FACULTY/TAs)
+  const handleAttendanceMatrixBackup = async () => {
+    try {
+      setBackingUp(true);
+      setBackupMessage('جاري استخراج كشوف الغياب التفصيلية لكافة الأسابيع...');
+
+      const [usersRes, subRes, attRes] = await Promise.all([
+        supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects'),
+        supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students'),
+        supabase.from('attendance').select('student_id, subject_id, week_number, status')
+      ]);
+
+      const allUsers = usersRes.data || [];
+      const allSubs = subRes.data || [];
+      const allAtt = attRes.data || [];
+
+      // Filter subjects accessible to current user (all for super, assigned for TA)
+      const freshCurrentUser = allUsers.find(u => u.user_id === user.user_id) || user;
+      const rawAssigned = Array.isArray(freshCurrentUser?.assigned_subjects) ? freshCurrentUser.assigned_subjects : [];
+      const assignedSubIds = rawAssigned.map(e => e.split(':')[0]);
+
+      let mySubs = [];
+      if (isSuper) {
+        mySubs = allSubs;
+      } else {
+        mySubs = allSubs.filter(s => 
+          s.instructor_id === user.user_id || 
+          s.instructor_name === user.name || 
+          assignedSubIds.includes(s.id)
+        );
+      }
+
+      if (mySubs.length === 0) {
+        setBackupMessage('❌ لا توجد مواد مسندة لتصدير كشوفها');
+        setBackingUp(false);
+        return;
+      }
+
+      // Group attendance records by: subId -> studentId -> weekNum -> status
+      const attMatrix = {};
+      allAtt.forEach(r => {
+        if (!attMatrix[r.subject_id]) attMatrix[r.subject_id] = {};
+        if (!attMatrix[r.subject_id][r.student_id]) attMatrix[r.subject_id][r.student_id] = {};
+        attMatrix[r.subject_id][r.student_id][r.week_number] = r.status;
+      });
+
+      const sheets = [];
+
+      mySubs.forEach(sub => {
+        const totalWeeks = sub.total_weeks || 12;
+        const subAtt = attMatrix[sub.id] || {};
+
+        // Find enrolled students for this subject
+        const enrolled = allUsers.filter(u => {
+          if (u.role !== 'student') return false;
+          const inSub = Array.isArray(sub.enrolled_students) && sub.enrolled_students.includes(u.user_id);
+          const hasAssigned = Array.isArray(u.assigned_subjects) && u.assigned_subjects.some(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+          return inSub || hasAssigned;
+        });
+
+        const rows = enrolled.map(stu => {
+          const stuSubSec = (() => {
+            if (Array.isArray(stu.assigned_subjects)) {
+              const m = stu.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+              if (m) return m.split(':')[1];
+            }
+            return stu.section || 'S1';
+          })();
+
+          const row = {
+            'الرقم الأكاديمي': stu.user_id,
+            'اسم الطالب': stu.name,
+            'السكشن': stuSubSec,
+            'الفرقة': stu.year_level || sub.year_level || '1'
+          };
+
+          let presentCount = 0;
+          let absentCount = 0;
+          let lateCount = 0;
+          let excusedCount = 0;
+
+          for (let w = 1; w <= totalWeeks; w++) {
+            const st = subAtt[stu.user_id]?.[w];
+            let label = 'لم يرصد';
+            if (st === 'present') { label = 'حاضر'; presentCount++; }
+            else if (st === 'absent') { label = 'غائب'; absentCount++; }
+            else if (st === 'late') { label = 'تأخير'; lateCount++; presentCount += 0.5; }
+            else if (st === 'excused') { label = 'عذر'; excusedCount++; }
+            row['أسبوع ' + w] = label;
+          }
+
+          const totalRecorded = presentCount + absentCount + (lateCount * 0.5);
+          const attRate = totalRecorded > 0 ? Math.round((presentCount / totalRecorded) * 100) + '%' : '0%';
+
+          row['إجمالي الحضور'] = presentCount;
+          row['إجمالي الغياب'] = absentCount;
+          row['تأخير / عذر'] = lateCount + excusedCount;
+          row['نسبة الالتزام'] = attRate;
+
+          return row;
+        });
+
+        // Clean sheet name (max 31 chars for excel)
+        let sheetName = sub.name.replace(/[:\/?*[\]]/g, '').slice(0, 28);
+        if (!sheetName) sheetName = 'مادة ' + sub.id.slice(0, 6);
+        sheets.push({ name: sheetName, data: rows });
+      });
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 10);
+      const filename = isSuper ? `كشوف_الغياب_الشاملة_لكافة_المواد_${timestamp}.xlsx` : `كشوف_الغياب_لمواد_المعيد_${timestamp}.xlsx`;
+
+      await exportMultiSheetExcelFile(sheets, filename);
+
+      const nowIso = new Date().toLocaleString('ar-EG');
+      setLastBackupDate(nowIso);
+      localStorage.setItem('gradely_last_backup', nowIso);
+
+      setBackupMessage('✅ تم استخراج وتصدير شيت كشوف الغياب المنظمة بنجاح!');
+      setTimeout(() => setBackupMessage(''), 5000);
+    } catch (err) {
+      console.error('Matrix backup error:', err);
+      setBackupMessage('❌ حدث خطأ أثناء إنشاء كشوف الغياب: ' + err.message);
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
   const handleFullBackup = async (format = 'json') => {
     if (!isSuper) return;
     setBackingUp(true);
@@ -919,13 +1046,22 @@ export default function OverviewTab({ user }) {
             </button>
 
             <button 
+              className="btn-primary" 
+              onClick={handleAttendanceMatrixBackup} 
+              disabled={backingUp || restoring}
+              style={{background:'var(--primary)',display:'flex',alignItems:'center',gap:'8px',padding:'10px 18px',fontSize:'0.95rem',fontWeight:800}}
+              title="تصدير كشف غياب منظم بنظام الجدول الأسبوعي لكل مادة (الأسابيع 1-12 ونسب الحضور)"
+            >
+              <FileSpreadsheet size={18} /> 📊 تصدير كشوف الغياب المنظمة (مصفوفة الأسابيع لكل مادة)
+            </button>
+            <button 
               className="btn-secondary" 
               onClick={() => handleFullBackup('excel')} 
               disabled={backingUp || restoring}
               style={{display:'flex',alignItems:'center',gap:'8px',padding:'10px 18px',fontSize:'0.95rem',color:'var(--success)',borderColor:'rgba(16,185,129,0.4)'}}
               title="شيت إكسيل متعدد الصفحات يحتوي على كافة المواد وغياب كل الأسابيع والدرجات"
             >
-              <FileSpreadsheet size={18} /> تحميل شيت إكسيل شامل (4 صفحات)
+              <Download size={18} /> تحميل نسخة النظام الشاملة (Excel)
             </button>
 
             <label className="btn-secondary" style={{display:'flex',alignItems:'center',gap:'8px',padding:'10px 18px',fontSize:'0.95rem',cursor:'pointer',borderColor:'#f59e0b',color:'#f59e0b'}}>
