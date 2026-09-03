@@ -14,17 +14,27 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
 
   // Fetch the full user profile from the DB using the authenticated session.
-  // This is the AUTHORITATIVE source of role/identity — NOT localStorage.
   const fetchUserProfile = async (authUserId) => {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('users')
-      .select('id, user_id, name, role, year_level, assigned_subjects, auth_id, created_at')
+      .select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at')
       .eq('auth_id', authUserId)
       .single();
 
     if (error || !data) {
-      console.error('Profile fetch failed:', error?.message);
-      return null;
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (authUser && authUser.email) {
+        const uId = authUser.email.replace('@gradely.app', '').trim();
+        const res = await supabase
+          .from('users')
+          .select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at')
+          .eq('user_id', uId)
+          .single();
+        if (res.data) {
+          data = res.data;
+          supabase.from('users').update({ auth_id: authUserId }).eq('id', res.data.id).then();
+        }
+      }
     }
     return data;
   };
