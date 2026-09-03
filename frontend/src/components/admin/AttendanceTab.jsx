@@ -232,7 +232,55 @@ export default function AttendanceTab({ user }) {
     return 'المدير الرئيسي';
   };
 
-  const availableSections = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
+  // Dynamically calculate actual existing sections for the selected subject
+  const getSubjectAvailableSections = () => {
+    if (!selectedSubject) return ['S1'];
+    const secSet = new Set();
+    
+    // 1. From enrolled students of this subject
+    enrolledStudents.forEach(stu => {
+      const s = getStudentSubSection(stu, selectedSubject);
+      if (s) secSet.add(s);
+    });
+
+    // 2. From TA assignments for this subject
+    allAdmins.forEach(adm => {
+      if (Array.isArray(adm.assigned_subjects)) {
+        adm.assigned_subjects.forEach(entry => {
+          if (typeof entry === 'string' && entry.startsWith(selectedSubject + ':')) {
+            const sec = normalizeSection(entry.split(':')[1]);
+            if (sec) secSet.add(sec);
+          }
+        });
+      }
+    });
+
+    let list = Array.from(secSet);
+    if (list.length === 0) list = ['S1'];
+    
+    list.sort((a, b) => {
+      const numA = parseInt(a.replace(/\D/g, ''), 10) || 0;
+      const numB = parseInt(b.replace(/\D/g, ''), 10) || 0;
+      return numA - numB;
+    });
+
+    // If current user is a TA (not super admin), only show their assigned sections for this subject
+    if (!isSuper) {
+      const myUser = allAdmins.find(u => u.user_id === user.user_id) || user;
+      const myAssigned = Array.isArray(myUser?.assigned_subjects) ? myUser.assigned_subjects : [];
+      const mySecsForThisSub = myAssigned
+        .filter(e => typeof e === 'string' && e.startsWith(selectedSubject + ':'))
+        .map(e => normalizeSection(e.split(':')[1]));
+
+      if (mySecsForThisSub.length > 0) {
+        list = list.filter(sec => mySecsForThisSub.includes(sec));
+      }
+    }
+
+    return list;
+  };
+
+  const availableSections = getSubjectAvailableSections();
 
   const handleExcludeStudent = async (studentId, studentName) => {
     if (!isSuper) {
