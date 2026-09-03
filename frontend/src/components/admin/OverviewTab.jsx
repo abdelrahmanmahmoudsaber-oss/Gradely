@@ -841,21 +841,36 @@ export default function OverviewTab({ user }) {
       const colsConfigStr = 'CONFIG_CUSTOM_COLS:' + JSON.stringify(updatedCols);
       const labelsConfigStr = 'CONFIG_COL_LABELS:' + JSON.stringify(columnLabels);
 
-      const { data: subData } = await supabase.from('subjects').select('id, excluded_students');
-      if (subData && subData.length > 0) {
-        for (const sub of subData) {
-          const cleanExcluded = Array.isArray(sub.excluded_students) 
-            ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG:') && !x.startsWith('CONFIG_SUB:') && !x.startsWith('CONFIG_CUSTOM_COLS:') && !x.startsWith('CONFIG_COL_LABELS:')) 
+      if (targetScopeKey !== 'global') {
+        // Direct single subject save for TA and Super Admin (Works 100% under RLS)
+        const { data: targetSub } = await supabase.from('subjects').select('id, excluded_students').eq('id', targetScopeKey).single();
+        if (targetSub) {
+          const cleanExcluded = Array.isArray(targetSub.excluded_students)
+            ? targetSub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG_SUB:') && !x.startsWith('CONFIG_CUSTOM_COLS:') && !x.startsWith('CONFIG_COL_LABELS:'))
             : [];
-          cleanExcluded.push(globalConfigStr);
           cleanExcluded.push(subConfigStr);
           cleanExcluded.push(colsConfigStr);
           cleanExcluded.push(labelsConfigStr);
-          await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', sub.id);
+          await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', targetScopeKey);
+        }
+      } else {
+        const { data: subData } = await supabase.from('subjects').select('id, excluded_students');
+        if (subData && subData.length > 0) {
+          await Promise.all(subData.map(async sub => {
+            const cleanExcluded = Array.isArray(sub.excluded_students) 
+              ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG:') && !x.startsWith('CONFIG_SUB:') && !x.startsWith('CONFIG_CUSTOM_COLS:') && !x.startsWith('CONFIG_COL_LABELS:')) 
+              : [];
+            cleanExcluded.push(globalConfigStr);
+            cleanExcluded.push(subConfigStr);
+            cleanExcluded.push(colsConfigStr);
+            cleanExcluded.push(labelsConfigStr);
+            return supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', sub.id);
+          }));
         }
       }
-      cacheManager.invalidate('admin_subjects_base');
-      setSettingsMessage('✅ تمت إضافة خانة الدرجة المخصصة بنجاح وتطبيقها حسب النطاق المحدد');
+
+      cacheManager.clear();
+      setSettingsMessage('✅ تمت إضافة وتطبيق الخانة المخصصة بنجاح لهذه المادة!');
       setTimeout(() => setSettingsMessage(''), 3000);
       setShowCustomColumnModal(false);
     } catch (err) {
