@@ -93,6 +93,8 @@ export default function OverviewTab({ user }) {
         showAttendanceTab: true
       }
     };
+    const mergedLabels = {};
+    let mergedCols = [];
 
     for (const sub of subList) {
       if (Array.isArray(sub.excluded_students)) {
@@ -108,18 +110,20 @@ export default function OverviewTab({ user }) {
             } else if (item.startsWith('CONFIG_CUSTOM_COLS:')) {
               try {
                 const cols = JSON.parse(item.replace('CONFIG_CUSTOM_COLS:', ''));
-                setCustomColumnsList(cols);
+                if (Array.isArray(cols)) mergedCols = [...mergedCols, ...cols];
               } catch (e) {}
             } else if (item.startsWith('CONFIG_COL_LABELS:')) {
               try {
                 const lbls = JSON.parse(item.replace('CONFIG_COL_LABELS:', ''));
-                setColumnLabels(lbls);
+                Object.assign(mergedLabels, lbls);
               } catch (e) {}
             }
           }
         });
       }
     }
+    setColumnLabels(mergedLabels);
+    if (mergedCols.length > 0) setCustomColumnsList(mergedCols);
     return settings;
   };
 
