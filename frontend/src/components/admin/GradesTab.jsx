@@ -355,14 +355,49 @@ export default function GradesTab({ user }) {
 
   return (
     <div className="fade-in">
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'2rem',flexWrap:'wrap',gap:'1rem'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem',flexWrap:'wrap',gap:'1rem',borderBottom:'1px solid var(--border)',paddingBottom:'1.2rem'}}>
         <div>
-          <button className="btn-primary" onClick={saveGrades} disabled={saving || !selectedSubject} style={{padding:'10px 20px',fontSize:'1rem',fontWeight:700}}>
+          <h2 style={{margin:0,fontSize:'1.6rem',fontWeight:800}}>الدرجات التفصيلية</h2>
+          <p className="text-muted" style={{margin:'5px 0 0 0',fontSize:'0.9rem'}}>
+            الطلاب المعروضون: <strong style={{color:'var(--text-main)'}}>{displayedEnrolledStudents.length} طالب</strong> {selectedSection !== 'all' ? '(سكشن ' + selectedSection + ')' : '(جميع السكاشن)'}
+          </p>
+        </div>
+        
+        <div style={{display:'flex',gap:'10px',flexWrap:'wrap',alignItems:'center'}}>
+          <button 
+            className="btn-secondary" 
+            onClick={handleDownloadGradesTemplate} 
+            disabled={!selectedSubject || displayedEnrolledStudents.length === 0}
+            style={{color:'var(--primary-hover)',borderColor:'rgba(79, 70, 229, 0.4)',display:'inline-flex',alignItems:'center',gap:'8px',padding:'8px 14px',fontSize:'0.9rem',fontWeight:700}}
+            title="تحميل كشف رصد إكسيل جاهز يحتوي على أسماء وأكواد طلاب هذه المادة لرصد درجاتهم وإعادة رفعه"
+          >
+            <Download size={17} /> 📥 تحميل نموذج رصد درجات المادة (.xlsx)
+          </button>
+
+          <label className="btn-secondary" style={{cursor:'pointer',display:'inline-flex',alignItems:'center',gap:'8px',padding:'8px 14px',fontSize:'0.9rem',color:'#f59e0b',borderColor:'rgba(245, 158, 11, 0.4)'}}>
+            <Upload size={17} /> {importing ? 'جاري الاستيراد...' : 'استيراد درجات من Excel'}
+            <input type="file" accept=".xlsx, .xls" onChange={handleImport} style={{display:'none'}} disabled={importing || !selectedSubject} />
+          </label>
+
+          <button 
+            className="btn-secondary" 
+            onClick={handleExport} 
+            disabled={!selectedSubject || displayedEnrolledStudents.length === 0} 
+            style={{color:'var(--success)',borderColor:'rgba(16, 185, 129, 0.4)',display:'inline-flex',alignItems:'center',gap:'8px',padding:'8px 14px',fontSize:'0.9rem'}}
+          >
+            <Download size={17} /> تصدير إكسيل
+          </button>
+
+          <button 
+            className="btn-primary" 
+            onClick={saveGrades} 
+            disabled={saving || !selectedSubject} 
+            style={{padding:'9px 20px',fontSize:'0.95rem',fontWeight:800,display:'inline-flex',alignItems:'center',gap:'8px',background:'var(--primary)'}}
+          >
             <Save size={18} /> {saving ? 'جاري الحفظ...' : 'حفظ التعديلات'}
           </button>
         </div>
       </div>
-
       {message && (
         <div style={{
           background: message.startsWith('✅') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.15)',
