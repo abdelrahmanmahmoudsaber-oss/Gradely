@@ -121,22 +121,6 @@ export default function StudentDashboard({ user, onLogout }) {
   };
 
   const fetchData = async () => {
-    const cacheKey = 'student_data_' + user.user_id;
-    const cached = cacheManager.get(cacheKey);
-    if (cached) {
-      setSubjects(cached.subjects);
-      setAttendance(cached.attendance);
-      setGrades(cached.grades);
-      if (cached.visibility) {
-        setVisibility(cached.visibility);
-        const gVis = cached.visibility.global || cached.visibility;
-        setViewMode('attendance');
-      }
-      if (cached.subjects.length > 0) setSelectedSubjectId(cached.subjects[0].id);
-      setLoading(false);
-      return;
-    }
-
     try {
       const [subRes, attRes, grdRes] = await Promise.all([
         supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, enrolled_students, excluded_students'),
@@ -560,11 +544,14 @@ export default function StudentDashboard({ user, onLogout }) {
                       <div key={w} style={{background: bg, border: '1px solid ' + border, borderRadius: '6px', padding: '10px 6px', textAlign: 'center'}}>
                         <div style={{fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '2px'}}>الأسبوع {w}</div>
                         <div style={{fontWeight: 'bold', color: statusColor, fontSize: '0.85rem'}}>{statusLabel}</div>
-                        {record?.session_date && (
-                          <div style={{fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px', fontFamily: 'monospace'}}>
-                            {record.session_date}
-                          </div>
-                        )}
+                        {(() => {
+                          const wDate = getSubjectWeekDate(currentSubject, w);
+                          return wDate ? (
+                            <div style={{fontSize: '0.72rem', color: '#60a5fa', marginTop: '4px', fontFamily: 'monospace', fontWeight: 700}}>
+                              📅 {wDate}
+                            </div>
+                          ) : null;
+                        })()}
                       </div>
                     );
                   })}
