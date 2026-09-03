@@ -5,6 +5,7 @@ import { cacheManager } from '../../utils/dataCache';
 import { Download, Upload, Save, Users, Filter, BookOpen, AlertCircle } from 'lucide-react';
 
 export default function GradesTab({ user }) {
+  const isSuper = !user || user.user_id === 'admin';
   const [loading, setLoading] = useState(true);
   const [subjects, setSubjects] = useState([]);
   const [allStudents, setAllStudents] = useState([]);
@@ -210,18 +211,6 @@ export default function GradesTab({ user }) {
       const numB = parseInt(b.replace(/\D/g, ''), 10) || 0;
       return numA - numB;
     });
-
-    if (!isSuper) {
-      const myUser = allAdmins.find(u => u.user_id === user.user_id) || user;
-      const myAssigned = Array.isArray(myUser?.assigned_subjects) ? myUser.assigned_subjects : [];
-      const mySecsForThisSub = myAssigned
-        .filter(e => typeof e === 'string' && e.startsWith(selectedSubject + ':'))
-        .map(e => normalizeSection(e.split(':')[1]));
-
-      if (mySecsForThisSub.length > 0) {
-        list = list.filter(sec => mySecsForThisSub.includes(sec));
-      }
-    }
 
     return list;
   };

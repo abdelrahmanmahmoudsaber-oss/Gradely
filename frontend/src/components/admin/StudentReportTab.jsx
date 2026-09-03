@@ -72,6 +72,18 @@ export default function StudentReportTab({ user }) {
     return entry ? entry.replace(prefix, '') : '';
   };
 
+  const getSectionInstructorName = (subId, sec) => {
+    const secNorm = normalizeSection(sec || 'S1');
+    for (const adm of allAdmins) {
+      if (Array.isArray(adm.assigned_subjects) && adm.assigned_subjects.includes(subId + ':' + secNorm)) {
+        return adm.name;
+      }
+    }
+    const subObj = allSubjects.find(s => s.id === subId);
+    if (subObj?.instructor_name) return subObj.instructor_name;
+    return 'المدير الرئيسي';
+  };
+
   const getStudentSubSection = (student, subId) => {
     if (student && Array.isArray(student.assigned_subjects)) {
       const match = student.assigned_subjects.find(entry => typeof entry === 'string' && entry.startsWith(subId + ':'));
@@ -280,7 +292,7 @@ export default function StudentReportTab({ user }) {
                       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',flexWrap:'wrap',gap:'0.8rem'}}>
                         <div style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
                           <span style={{fontSize:'0.9rem',color:'var(--text-muted)'}}>
-                            المعيد: <strong style={{color:'var(--text-main)'}}>{sub.instructor_name || 'المدير الرئيسي'}</strong>
+                            المعيد: <strong style={{color:'var(--text-main)'}}>{getSectionInstructorName(sub.id, getStudentSubSection(selectedStudent, sub.id))}</strong>
                           </span>
                           <span className="badge" style={{background:'rgba(79, 70, 229, 0.1)',color:'var(--primary-hover)',border:'1px solid rgba(79, 70, 229, 0.25)',fontSize:'0.8rem'}}>
                             فرقة المقرر: {normalizeYear(sub.year_level)}

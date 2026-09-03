@@ -265,17 +265,7 @@ export default function AttendanceTab({ user }) {
     });
 
     // If current user is a TA (not super admin), only show their assigned sections for this subject
-    if (!isSuper) {
-      const myUser = allAdmins.find(u => u.user_id === user.user_id) || user;
-      const myAssigned = Array.isArray(myUser?.assigned_subjects) ? myUser.assigned_subjects : [];
-      const mySecsForThisSub = myAssigned
-        .filter(e => typeof e === 'string' && e.startsWith(selectedSubject + ':'))
-        .map(e => normalizeSection(e.split(':')[1]));
-
-      if (mySecsForThisSub.length > 0) {
-        list = list.filter(sec => mySecsForThisSub.includes(sec));
-      }
-    }
+// Showing all existing sections for full visibility across TAs
 
     return list;
   };

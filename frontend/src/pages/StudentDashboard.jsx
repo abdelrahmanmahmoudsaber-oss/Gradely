@@ -20,6 +20,8 @@ const SUBJECT_COLORS = [
 
 export default function StudentDashboard({ user, onLogout }) {
   const [subjects, setSubjects] = useState([]);
+  const [allAdmins, setAllAdmins] = useState([]);
+  const [columnLabels, setColumnLabels] = useState({});
   const [attendance, setAttendance] = useState([]);
   const [grades, setGrades] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -85,6 +87,25 @@ export default function StudentDashboard({ user, onLogout }) {
     return entry ? entry.replace(prefix, '') : '';
   };
 
+  const getSectionInstructorName = (subId, sec) => {
+    const secNorm = normalizeSection(sec || 'S1');
+    for (const adm of allAdmins) {
+      if (Array.isArray(adm.assigned_subjects) && adm.assigned_subjects.includes(subId + ':' + secNorm)) {
+        return adm.name;
+      }
+    }
+    const subObj = subjects.find(s => s.id === subId);
+    if (subObj?.instructor_name) return subObj.instructor_name;
+    return 'المدير الرئيسي';
+  };
+
+  const getColLabel = (subId, key, defaultLabel) => {
+    if (columnLabels[subId] && columnLabels[subId][key]) return columnLabels[subId][key];
+    if (columnLabels.global && columnLabels.global[key]) return columnLabels.global[key];
+    if (columnLabels[key] && typeof columnLabels[key] === 'string') return columnLabels[key];
+    return defaultLabel;
+  };
+
   const getStudentSubSection = (student, subId) => {
     if (student && Array.isArray(student.assigned_subjects)) {
       const match = student.assigned_subjects.find(entry => typeof entry === 'string' && entry.startsWith(subId + ':'));
@@ -125,6 +146,11 @@ export default function StudentDashboard({ user, onLogout }) {
                 const parsed = JSON.parse(item.replace('CONFIG_SUB:', ''));
                 Object.assign(settings, parsed);
               } catch (e) {}
+            } else if (item.startsWith('CONFIG_COL_LABELS:')) {
+              try {
+                const lbls = JSON.parse(item.replace('CONFIG_COL_LABELS:', ''));
+                setColumnLabels(lbls);
+              } catch (e) {}
             }
           }
         });
@@ -140,11 +166,14 @@ export default function StudentDashboard({ user, onLogout }) {
 
   const fetchData = async () => {
     try {
-      const [subRes, attRes, grdRes] = await Promise.all([
+      const [subRes, attRes, grdRes, adminRes] = await Promise.all([
         supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, enrolled_students, excluded_students'),
         supabase.from('attendance').select('subject_id, week_number, status').eq('student_id', user.user_id).order('week_number', { ascending: true }),
-        supabase.from('grades').select('subject_id, quiz_1, quiz_2, project, attendance_score, final_grade').eq('student_id', user.user_id)
+        supabase.from('grades').select('subject_id, quiz_1, quiz_2, project, attendance_score, final_grade').eq('student_id', user.user_id),
+        supabase.from('users').select('id, user_id, name, role, assigned_subjects').eq('role', 'admin')
       ]);
+
+      setAllAdmins(adminRes.data || []);
 
       const subData = subRes.data || [];
       const attData = attRes.data || [];
@@ -448,7 +477,7 @@ export default function StudentDashboard({ user, onLogout }) {
                       </span>
                     </div>
                     <div style={{fontSize:'0.8rem',color:'var(--text-muted)',display:'flex',flexDirection:'column',gap:'2px'}}>
-                      <div>المعيد: <strong style={{color:'var(--text-main)'}}>{sub.instructor_name || 'المدير الرئيسي'}</strong></div>
+                      <div>المعيد: <strong style={{color:'var(--text-main)'}}>{getSectionInstructorName(sub.id, getStudentSubSection(user, sub.id))}</strong></div>
                       <div>السكشن: <strong style={{color:'var(--success)'}}>{getStudentSubSection(user, sub.id)}</strong></div>
                     </div>
                   </div>
@@ -467,7 +496,7 @@ export default function StudentDashboard({ user, onLogout }) {
                   {currentSubject.name}
                 </h2>
                 <p className="text-muted" style={{margin: 0, fontSize: '0.85rem'}}>
-                  المعيد: <strong style={{color:'var(--text-main)'}}>{currentSubject.instructor_name || 'المدير الرئيسي'}</strong> | السكشن: <strong style={{color:'var(--success)'}}>{getStudentSubSection(user, currentSubject.id)}</strong>
+                  المعيد: <strong style={{color:'var(--text-main)'}}>{getSectionInstructorName(currentSubject.id, getStudentSubSection(user, currentSubject.id))}</strong> | السكشن: <strong style={{color:'var(--success)'}}>{getStudentSubSection(user, currentSubject.id)}</strong>
                 </p>
               </div>
 
@@ -577,7 +606,7 @@ export default function StudentDashboard({ user, onLogout }) {
                     <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem', marginBottom: '1.5rem'}}>
                       {currentSubVis.showQuiz1 && (
                         <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
-                          <span className="text-muted" style={{fontSize: '0.8rem'}}>كويز 1</span>
+                          <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, 'showQuiz1', 'كويز 1')}</span>
                           <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
                             {currentGrades.quiz_1 || 0}
                           </h3>
@@ -586,7 +615,7 @@ export default function StudentDashboard({ user, onLogout }) {
 
                       {currentSubVis.showQuiz2 && (
                         <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
-                          <span className="text-muted" style={{fontSize: '0.8rem'}}>كويز 2</span>
+                          <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, 'showQuiz2', 'كويز 2')}</span>
                           <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
                             {currentGrades.quiz_2 || 0}
                           </h3>

@@ -174,13 +174,19 @@ export default function OverviewTab({ user }) {
     }
   };
 
-  const currentActiveVisibility = visibilitySettings[selectedSubjectForVisibility] || visibilitySettings.global || {
+  const defaultVis = {
     showQuiz1: true,
     showQuiz2: true,
     showProject: true,
     showAttendanceScore: true,
     showTotal: true,
     showAttendanceTab: true
+  };
+
+  const currentActiveVisibility = {
+    ...defaultVis,
+    ...(visibilitySettings.global || {}),
+    ...(visibilitySettings[selectedSubjectForVisibility] || {})
   };
 
   const handleToggleVisibility = async (key) => {
@@ -776,7 +782,17 @@ export default function OverviewTab({ user }) {
     const newLabel = editLabelInput.trim();
     if (!newLabel) return;
 
-    const updatedLabels = { ...columnLabels, [editingColumn.id]: newLabel };
+    const colId = editingColumn.id;
+    const targetScope = selectedSubjectForVisibility || 'global';
+    const updatedLabels = { ...columnLabels };
+
+    if (targetScope !== 'global') {
+      if (!updatedLabels[targetScope]) updatedLabels[targetScope] = {};
+      updatedLabels[targetScope][colId] = newLabel;
+    } else {
+      updatedLabels[colId] = newLabel;
+    }
+
     setColumnLabels(updatedLabels);
 
     let updatedCols = customColumnsList;
