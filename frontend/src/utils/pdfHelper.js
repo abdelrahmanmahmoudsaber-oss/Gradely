@@ -126,7 +126,7 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
     subjectsHtml += `
       <div class="subject-block">
         <div class="subject-head">
-          <span class="sub-name">${idx + 1}. ${sub.name} (الفرقة ${normalizeYear(sub.year_level)}) — <strong style="color: #059669;">سكشن ${getStudentSubSection(student, sub.id)}</strong></span>
+          <span class="sub-name">${idx + 1}. ${sub.name} (فرقة المقرر: ${normalizeYear(sub.year_level)}) — <strong style="color: #059669;">السكشن: ${getStudentSubSection(student, sub.id)}</strong></span>
           <span class="sub-instructor">المشرف / المعيد: <strong>${sub.instructor_name || 'المدير الرئيسي'}</strong></span>
         </div>
         ${gradesCardsHtml}

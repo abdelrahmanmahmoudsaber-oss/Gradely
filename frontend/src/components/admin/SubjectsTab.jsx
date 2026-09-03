@@ -161,7 +161,7 @@ export default function SubjectsTab({ user }) {
     const payload = {
       name: trimName,
       total_weeks: parseInt(totalWeeks, 10) || 12,
-      year_level: yearLevel,
+      year_level: studentYearearLevel,
       instructor_id: instructorId || null,
       instructor_name: instName || null
     };
@@ -315,8 +315,12 @@ export default function SubjectsTab({ user }) {
         const subName = (getVal(row, 'Subject', 'المادة', 'اسم المادة'))?.toString().trim();
         const id = (getVal(row, 'ID', 'رقم الجلوس', 'الكود'))?.toString().trim();
         const name = (getVal(row, 'Name', 'الاسم', 'اسم الطالب'))?.toString().trim();
-        const yRaw = getVal(row, 'Year', 'YEAR', 'الفرقة', 'السنة', 'Level', 'المستوى');
-        const y = normalizeYear(yRaw || '1');
+        // Separate Student Level (فرقة الطالب) vs Course Level (فرقة المادة)
+        const stuLevelRaw = getVal(row, 'StudentLevel', 'Student_Level', 'Student Level', 'StudentYear', 'Student_Year', 'فرقة الطالب', 'مستوى الطالب', 'Year', 'YEAR', 'الفرقة', 'السنة', 'Level', 'المستوى');
+        const courseLevelRaw = getVal(row, 'CourseLevel', 'Course_Level', 'Course Level', 'CourseYear', 'Course_Year', 'فرقة المادة', 'فرقة المقرر', 'مستوى المادة', 'مستوى المقرر', 'Year', 'YEAR', 'الفرقة', 'السنة', 'Level', 'المستوى');
+        
+        const studentYear = normalizeYear(stuLevelRaw || '1');
+        const courseYear = normalizeYear(courseLevelRaw || stuLevelRaw || '1');
         const sRaw = getVal(row, 'Section', 'السكشن', 'سكشن', 'Sec');
         const s = normalizeSection(sRaw || 'S1');
         const pass = (getVal(row, 'Password', 'كلمة السر') || id)?.toString().trim();
@@ -336,7 +340,7 @@ export default function SubjectsTab({ user }) {
               name: name,
               password: pass,
               role: 'student',
-              year_level: y,
+              year_level: studentYear,
               section: s,
               auth_id: null
             });
@@ -350,7 +354,7 @@ export default function SubjectsTab({ user }) {
 
           if (subName) {
             if (!subjectsMap[subName]) {
-              subjectsMap[subName] = { year: y, taName: ta || '', students: [], sectionTAs: {} };
+              subjectsMap[subName] = { year: courseYear, taName: ta || '', students: [], sectionTAs: {} };
             }
             if (!subjectsMap[subName].students.includes(id)) {
               subjectsMap[subName].students.push(id);

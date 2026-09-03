@@ -346,7 +346,7 @@ export default function StudentDashboard({ user, onLogout }) {
             أهلاً بك، <span style={{color: 'var(--primary-hover)'}}>{user.name}</span> 👋
           </h1>
           <p className="text-muted" style={{fontSize: '0.95rem', margin: 0}}>
-            الرقم الأكاديمي: <strong>{user.user_id}</strong> | الفرقة: <strong>الفرقة {normalizeYear(user.year_level)}</strong> | السكشن: <strong style={{color:'var(--success)'}}>{getStudentSubSection(user, currentSubject.id)}</strong>
+            الرقم الأكاديمي: <strong>{user.user_id}</strong> | فرقة الطالب: <strong>الفرقة {normalizeYear(user.year_level)}</strong>
           </p>
         </div>
 
@@ -444,7 +444,7 @@ export default function StudentDashboard({ user, onLogout }) {
                         {sub.name}
                       </h4>
                       <span className="badge" style={{background: color.bg, color: color.text, border: '1px solid ' + color.border, fontSize:'0.75rem'}}>
-                        فرقة {normalizeYear(sub.year_level)}
+                        مستوى المقرر: فرقة {normalizeYear(sub.year_level)}
                       </span>
                     </div>
                     <div style={{fontSize:'0.8rem',color:'var(--text-muted)',display:'flex',flexDirection:'column',gap:'2px'}}>

@@ -258,10 +258,10 @@ export default function StudentReportTab({ user }) {
                     {selectedStudent.user_id}
                   </span>
                   <span className="badge" style={{background:'rgba(79, 70, 229, 0.12)',color:'var(--primary-hover)',border:'1px solid rgba(79, 70, 229, 0.25)',padding:'6px 12px',fontSize:'0.9rem',fontWeight:700}}>
-                    الفرقة {normalizeYear(selectedStudent.year_level)}
+                    فرقة الطالب: {normalizeYear(selectedStudent.year_level)}
                   </span>
                   <span className="badge" style={{background:'rgba(16, 185, 129, 0.12)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.25)',padding:'6px 12px',fontSize:'0.9rem',fontWeight:700}}>
-                    {normalizeSection(selectedStudent.section || 'S1')}
+                    السكشن الأساسي: {normalizeSection(selectedStudent.section || 'S1')}
                   </span>
                 </div>
               </div>
@@ -280,11 +280,16 @@ export default function StudentReportTab({ user }) {
                       
                       {/* Subject Top Row: Title on right, TA on left */}
                       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',flexWrap:'wrap',gap:'0.8rem'}}>
-                        <span style={{fontSize:'0.9rem',color:'var(--text-muted)'}}>
-                          المعيد: <strong style={{color:'var(--text-main)'}}>{sub.instructor_name || 'المدير الرئيسي'}</strong>
-                        </span>
+                        <div style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
+                          <span style={{fontSize:'0.9rem',color:'var(--text-muted)'}}>
+                            المعيد: <strong style={{color:'var(--text-main)'}}>{sub.instructor_name || 'المدير الرئيسي'}</strong>
+                          </span>
+                          <span className="badge" style={{background:'rgba(79, 70, 229, 0.1)',color:'var(--primary-hover)',border:'1px solid rgba(79, 70, 229, 0.25)',fontSize:'0.8rem'}}>
+                            فرقة المقرر: {normalizeYear(sub.year_level)}
+                          </span>
+                        </div>
                         <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
-                          <span className="badge" style={{background:'rgba(16, 185, 129, 0.15)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.3)',fontSize:'0.85rem',fontWeight:700}}>
+                          <span className="badge" style={{background:'rgba(16, 185, 129, 0.15)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.3)',fontSize:'0.9rem',fontWeight:800}}>
                             السكشن: {getStudentSubSection(selectedStudent, sub.id)}
                           </span>
                           <h4 style={{margin:0,fontSize:'1.3rem',fontWeight:800,color:'var(--primary-hover)'}}>
