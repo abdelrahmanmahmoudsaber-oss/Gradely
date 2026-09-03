@@ -47,7 +47,25 @@ export default function StudentReportTab({ user }) {
     return 'S1';
   };
 
-    const getSubjectWeekDate = (sub, weekNum) => {
+    const formatDisplayDate = (dateStr) => {
+    if (!dateStr) return '';
+    try {
+      const parts = dateStr.split('-');
+      if (parts.length === 3) {
+        const monthIndex = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        const months = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+        if (monthIndex >= 0 && monthIndex < 12) {
+          return day + ' ' + months[monthIndex];
+        }
+      }
+      return dateStr;
+    } catch (e) {
+      return dateStr;
+    }
+  };
+
+  const getSubjectWeekDate = (sub, weekNum) => {
     if (!sub || !Array.isArray(sub.excluded_students)) return '';
     const prefix = 'WEEK_DATE_W' + weekNum + ':';
     const entry = sub.excluded_students.find(e => typeof e === 'string' && e.startsWith(prefix));
@@ -78,19 +96,13 @@ export default function StudentReportTab({ user }) {
         cacheManager.invalidate('admin_subjects_base');
       }
 
-      let allUsersList = cacheManager.get('admin_users_base');
-      let allSubList = cacheManager.get('admin_subjects_base');
-
-      if (!allUsersList || !allSubList || forceRefresh) {
-        const [userRes, subRes] = await Promise.all([
-          supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects'),
-          supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students')
-        ]);
-        allUsersList = userRes.data || [];
-        allSubList = subRes.data || [];
-        cacheManager.set('admin_users_base', allUsersList);
-        cacheManager.set('admin_subjects_base', allSubList);
-      }
+      // Direct live fetch so all newly saved week dates and student assignments are real-time
+      const [userRes, subRes] = await Promise.all([
+        supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects'),
+        supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students')
+      ]);
+      const allUsersList = userRes.data || [];
+      const allSubList = subRes.data || [];
 
       const freshCurrentUser = allUsersList.find(u => u.user_id === user.user_id) || user;
       const rawAssigned = Array.isArray(freshCurrentUser?.assigned_subjects) ? freshCurrentUser.assigned_subjects : [];
@@ -340,7 +352,11 @@ export default function StudentReportTab({ user }) {
                               <div key={w} style={{background: stBg, border: '1px solid ' + stBorder, borderRadius: '6px', padding: '6px 4px', textAlign: 'center'}}>
                                 <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>أسبوع {w}</div>
                                 <div style={{fontWeight: 'bold', color: stColor, fontSize: '0.8rem', marginTop: '2px'}}>{stLabel}</div>
-                                {wDate && <div style={{fontSize:'0.65rem',color:'var(--text-muted)',marginTop:'2px'}}>{wDate}</div>}
+                                {wDate && (
+                                  <div style={{fontSize:'0.68rem',color:'#60a5fa',marginTop:'3px',background:'rgba(59, 130, 246, 0.08)',padding:'1px 4px',borderRadius:'4px',fontWeight:700}}>
+                                    {formatDisplayDate(wDate)}
+                                  </div>
+                                )}
                               </div>
                             );
                           })}

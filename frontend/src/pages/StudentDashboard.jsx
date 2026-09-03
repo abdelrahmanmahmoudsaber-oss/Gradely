@@ -60,7 +60,25 @@ export default function StudentDashboard({ user, onLogout }) {
     return '';
   };
 
-    const getSubjectWeekDate = (sub, weekNum) => {
+    const formatDisplayDate = (dateStr) => {
+    if (!dateStr) return '';
+    try {
+      const parts = dateStr.split('-');
+      if (parts.length === 3) {
+        const monthIndex = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        const months = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+        if (monthIndex >= 0 && monthIndex < 12) {
+          return day + ' ' + months[monthIndex];
+        }
+      }
+      return dateStr;
+    } catch (e) {
+      return dateStr;
+    }
+  };
+
+  const getSubjectWeekDate = (sub, weekNum) => {
     if (!sub || !Array.isArray(sub.excluded_students)) return '';
     const prefix = 'WEEK_DATE_W' + weekNum + ':';
     const entry = sub.excluded_students.find(e => typeof e === 'string' && e.startsWith(prefix));
@@ -538,8 +556,8 @@ export default function StudentDashboard({ user, onLogout }) {
                         {(() => {
                           const wDate = getSubjectWeekDate(currentSubject, w);
                           return wDate ? (
-                            <div style={{fontSize: '0.72rem', color: '#60a5fa', marginTop: '4px', fontFamily: 'monospace', fontWeight: 700}}>
-                              📅 {wDate}
+                            <div style={{fontSize: '0.75rem', color: '#60a5fa', marginTop: '5px', background: 'rgba(59, 130, 246, 0.1)', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', fontWeight: 700}}>
+                              🗓️ {formatDisplayDate(wDate)}
                             </div>
                           ) : null;
                         })()}

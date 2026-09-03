@@ -32,7 +32,25 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
     return 'S1';
   };
 
-    const getSubjectWeekDate = (sub, weekNum) => {
+    const formatDisplayDate = (dateStr) => {
+    if (!dateStr) return '';
+    try {
+      const parts = dateStr.split('-');
+      if (parts.length === 3) {
+        const monthIndex = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        const months = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+        if (monthIndex >= 0 && monthIndex < 12) {
+          return day + ' ' + months[monthIndex];
+        }
+      }
+      return dateStr;
+    } catch (e) {
+      return dateStr;
+    }
+  };
+
+  const getSubjectWeekDate = (sub, weekNum) => {
     if (!sub || !Array.isArray(sub.excluded_students)) return '';
     const prefix = 'WEEK_DATE_W' + weekNum + ':';
     const entry = sub.excluded_students.find(e => typeof e === 'string' && e.startsWith(prefix));
@@ -100,7 +118,7 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
         let statusText = '—';
         let statusClass = 'unrecorded';
         const wDate = getSubjectWeekDate(sub, w);
-        let dateHint = wDate ? `<div class="w-date">${wDate}</div>` : '';
+        let dateHint = wDate ? `<div class="w-date" style="color:#2563eb;font-weight:bold;font-size:0.65rem;">${formatDisplayDate(wDate)}</div>` : '';
         
         if (record) {
           if (record.status === 'present') { statusText = 'حاضر ✓'; statusClass = 'present'; }
