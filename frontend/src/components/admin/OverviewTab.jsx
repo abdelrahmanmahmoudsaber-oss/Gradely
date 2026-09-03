@@ -5,7 +5,7 @@ import { exportExcelFile, exportMultiSheetExcelFile, generateMultiSheetExcelBase
 import { 
   Users, BookOpen, Clock, Shield, Sliders, Eye, EyeOff, 
   Download, Upload, Database, RefreshCw, CheckCircle2, AlertTriangle, FileSpreadsheet, Calendar,
-  Edit, Trash2
+  Edit, Trash2, LayoutDashboard
 } from 'lucide-react';
 
 export default function OverviewTab({ user }) {
