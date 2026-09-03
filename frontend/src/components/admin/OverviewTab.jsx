@@ -136,6 +136,10 @@ export default function OverviewTab({ user }) {
           (user.name && s.instructor_name && s.instructor_name.trim().toLowerCase() === user.name.trim().toLowerCase()) ||
           assignedSubIds.includes(s.id)
         );
+        // Default TA to their first accessible subject if currently global
+        if (accessibleSubjects.length > 0 && selectedSubjectForVisibility === 'global') {
+          setSelectedSubjectForVisibility(accessibleSubjects[0].id);
+        }
       }
 
       const allStudents = allUsersList.filter(u => u.role === 'student');
@@ -177,7 +181,6 @@ export default function OverviewTab({ user }) {
   };
 
   const handleToggleVisibility = async (key) => {
-    if (!isSuper) return;
     const currentSubScope = selectedSubjectForVisibility;
     const updatedSubScope = {
       ...currentActiveVisibility,
@@ -580,9 +583,8 @@ export default function OverviewTab({ user }) {
         </div>
       </div>
 
-      {/* SUPER ADMIN: STUDENT DASHBOARD VISIBILITY CONTROLS (PER SUBJECT) */}
-      {isSuper && (
-        <div className="panel fade-in" style={{border:'1px solid var(--primary)',marginBottom:'2.5rem',padding:'1.5rem'}}>
+      {/* STUDENT DASHBOARD VISIBILITY & ASSESSMENT CONTROLS (SUPER ADMIN & TAs) */}
+      <div className="panel fade-in" style={{border:'1px solid var(--primary)',marginBottom:'2.5rem',padding:'1.5rem'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',flexWrap:'wrap',gap:'1rem',borderBottom:'1px solid var(--border)',paddingBottom:'1rem'}}>
             <div>
               <h3 style={{margin:'0 0 4px 0',fontSize:'1.3rem',display:'flex',alignItems:'center',gap:'8px',color:'var(--primary-hover)'}}>
@@ -608,8 +610,13 @@ export default function OverviewTab({ user }) {
               onChange={e => setSelectedSubjectForVisibility(e.target.value)}
               style={{maxWidth:'320px',padding:'8px 12px',fontWeight:'bold'}}
             >
-              <option value="global">🌐 الإعداد الافتراضي العام (كافة المواد)</option>
-              {allSubjectsList.map(s => (
+              {isSuper && <option value="global">🌐 الإعداد الافتراضي العام (كافة المواد)</option>}
+              {(isSuper ? allSubjectsList : allSubjectsList.filter(s => {
+                const freshUser = (cacheManager.get('admin_users_base') || []).find(u => u.user_id === user.user_id) || user;
+                const rawAss = Array.isArray(freshUser?.assigned_subjects) ? freshUser.assigned_subjects : [];
+                const subIds = rawAss.map(e => e.split(':')[0]);
+                return s.instructor_id === user.user_id || s.instructor_name === user.name || subIds.includes(s.id);
+              })).map(s => (
                 <option key={s.id} value={s.id}>
                   📚 مادة: {s.name} (الفرقة {s.year_level})
                 </option>
@@ -852,7 +859,6 @@ export default function OverviewTab({ user }) {
 
           </div>
         </div>
-      )}
 
       {/* SUPER ADMIN: FULL SYSTEM BACKUP & RESTORE TOOL */}
       {isSuper && (
