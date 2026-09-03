@@ -289,7 +289,7 @@ export default function SubjectsTab({ user }) {
     }
   };
 
-    const downloadSampleExcel = () => {
+      const downloadSampleExcel = () => {
     const sampleData = [
       {
         'Subject': 'Introduction to Operation Research and Decision Support systems',
@@ -342,7 +342,11 @@ export default function SubjectsTab({ user }) {
 
     try {
       const rows = await parseExcelFile(file);
-      const subjectsMap = {};
+      if (!rows || rows.length === 0) {
+        setMessage('❌ الملف فارغ أو لا يحتوي على صفوف بيانات');
+        setImporting(false);
+        return;
+      }
 
       // Helper: case-insensitive column getter
       const getVal = (row, ...keys) => {
@@ -354,167 +358,214 @@ export default function SubjectsTab({ user }) {
         return undefined;
       };
 
-      // Track per-student { subjectName: section }
-      const studentSubjectSections = {};
+      // 1. Fetch all existing subjects and users in ONE single query each
+      const [existingSubsRes, existingUsersRes] = await Promise.all([
+        supabase.from('subjects').select('*'),
+        supabase.from('users').select('id, user_id, name, year_level, section, assigned_subjects, role')
+      ]);
+
+      const existingSubsList = existingSubsRes.data || [];
+      const existingUsersList = existingUsersRes.data || [];
+      const userMap = {};
+      existingUsersList.forEach(u => { userMap[u.user_id] = u; });
+
+      const subjectsMap = {}; // { subName: { year, taName, students: Set, sectionTAs: {} } }
+      const studentMap = {};  // { id: { user_id, name, year_level, section, password, subSections: { subName: sec } } }
 
       for (const row of rows) {
-        const subName = (getVal(row, 'Subject', 'المادة', 'اسم المادة'))?.toString().trim();
-        const id = (getVal(row, 'ID', 'رقم الجلوس', 'الكود'))?.toString().trim();
-        const name = (getVal(row, 'Name', 'الاسم', 'اسم الطالب'))?.toString().trim();
-        // Separate Student Level (فرقة الطالب) vs Course Level (فرقة المادة)
+        const id = (getVal(row, 'ID', 'الرقم الأكاديمي', 'الكود', 'رقم الجلوس', 'كود الطالب'))?.toString().trim();
+        const name = (getVal(row, 'Name', 'الاسم', 'اسم الطالب', 'طالب'))?.toString().trim();
+        
+        // Skip completely empty rows or headers
+        if (!id || !name) continue;
+
+        const subName = (getVal(row, 'Subject', 'المادة', 'اسم المادة', 'المقرر', 'اسم المقرر'))?.toString().trim();
         const stuLevelRaw = getVal(row, 'StudentLevel', 'Student_Level', 'Student Level', 'StudentYear', 'Student_Year', 'فرقة الطالب', 'مستوى الطالب', 'Year', 'YEAR', 'الفرقة', 'السنة', 'Level', 'المستوى');
         const courseLevelRaw = getVal(row, 'CourseLevel', 'Course_Level', 'Course Level', 'CourseYear', 'Course_Year', 'فرقة المادة', 'فرقة المقرر', 'مستوى المادة', 'مستوى المقرر', 'Year', 'YEAR', 'الفرقة', 'السنة', 'Level', 'المستوى');
         
         const studentYear = normalizeYear(stuLevelRaw || '1');
         const courseYear = normalizeYear(courseLevelRaw || stuLevelRaw || '1');
+        
         const sRaw = getVal(row, 'Section', 'السكشن', 'سكشن', 'Sec');
         const s = normalizeSection(sRaw || 'S1');
-        const pass = (getVal(row, 'Password', 'كلمة السر') || id)?.toString().trim();
-        const ta = (getVal(row, 'TA', 'المعيد', 'اسم المعيد', 'المشرف'))?.toString().trim();
+        const pass = (getVal(row, 'Password', 'كلمة السر', 'الباسورد') || id)?.toString().trim();
+        const ta = (getVal(row, 'TA', 'المعيد', 'اسم المعيد', 'المشرف', 'مشرف'))?.toString().trim();
 
-        if (id && name) {
-          // Track per-subject section for this student
-          if (subName) {
-            if (!studentSubjectSections[id]) studentSubjectSections[id] = {};
-            studentSubjectSections[id][subName] = s;
-          }
+        if (!studentMap[id]) {
+          studentMap[id] = {
+            user_id: id,
+            name: name,
+            year_level: studentYear,
+            section: s,
+            password: pass,
+            subSections: {}
+          };
+        } else {
+          studentMap[id].name = name;
+          if (stuLevelRaw) studentMap[id].year_level = studentYear;
+        }
 
-          const { data: existingUser } = await supabase.from('users').select('id').eq('user_id', id).single();
-          if (!existingUser) {
-            await supabase.from('users').insert({
-              user_id: id,
-              name: name,
-              password: pass,
-              role: 'student',
-              year_level: studentYear,
-              section: s,
-              auth_id: null
-            });
-          } else {
-            await supabase.from('users').update({
-              name: name,
-              year_level: studentYear,
-              section: s
-            }).eq('user_id', id);
-          }
+        if (subName) {
+          studentMap[id].subSections[subName] = s;
 
-          if (subName) {
-            if (!subjectsMap[subName]) {
-              subjectsMap[subName] = { year: courseYear, taName: ta || '', students: [], sectionTAs: {} };
-            }
-            if (!subjectsMap[subName].students.includes(id)) {
-              subjectsMap[subName].students.push(id);
-            }
-            if (ta && s) {
-              subjectsMap[subName].sectionTAs[s] = ta;
-            }
+          if (!subjectsMap[subName]) {
+            subjectsMap[subName] = {
+              year: courseYear,
+              taName: ta || '',
+              students: new Set(),
+              sectionTAs: {}
+            };
           }
+          subjectsMap[subName].students.add(id);
+          if (courseLevelRaw) subjectsMap[subName].year = courseYear;
+          if (ta && s) subjectsMap[subName].sectionTAs[s] = ta;
         }
       }
 
-      // Create/update subjects
+      // 2. Create or Update Subjects in DB
       const subNameToId = {};
+      const subjectUpdates = [];
+
       for (const sName of Object.keys(subjectsMap)) {
         const item = subjectsMap[sName];
         let mainTaObj = instructorsList.find(t => t.name?.toLowerCase().includes(item.taName?.toLowerCase()) || t.user_id === item.taName);
-        
-        let createdOrUpdatedSubId = null;
-        const { data: existingSub } = await supabase.from('subjects').select('*').eq('name', sName).single();
-        
+        const existingSub = existingSubsList.find(s => s.name.toLowerCase().trim() === sName.toLowerCase().trim());
+        const stuArray = [...item.students];
+
         if (existingSub) {
-          createdOrUpdatedSubId = existingSub.id;
+          subNameToId[sName.toLowerCase().trim()] = existingSub.id;
           const currentEnrolled = Array.isArray(existingSub.enrolled_students) ? existingSub.enrolled_students : [];
-          const merged = [...new Set([...currentEnrolled, ...item.students])];
-          await supabase.from('subjects').update({
-            enrolled_students: merged,
-            included_students: merged,
-            year_level: item.year,
-            instructor_id: mainTaObj ? mainTaObj.user_id : existingSub.instructor_id,
-            instructor_name: mainTaObj ? mainTaObj.name : existingSub.instructor_name
-          }).eq('id', existingSub.id);
+          const merged = [...new Set([...currentEnrolled, ...stuArray])];
+          
+          subjectUpdates.push(
+            supabase.from('subjects').update({
+              enrolled_students: merged,
+              included_students: merged,
+              year_level: item.year,
+              instructor_id: mainTaObj ? mainTaObj.user_id : existingSub.instructor_id,
+              instructor_name: mainTaObj ? mainTaObj.name : existingSub.instructor_name
+            }).eq('id', existingSub.id)
+          );
         } else {
+          // Insert new subject
           const { data: newSub } = await supabase.from('subjects').insert({
             name: sName,
             year_level: item.year,
             total_weeks: 12,
             instructor_id: mainTaObj ? mainTaObj.user_id : null,
             instructor_name: mainTaObj ? mainTaObj.name : null,
-            enrolled_students: item.students,
-            included_students: item.students
+            enrolled_students: stuArray,
+            included_students: stuArray
           }).select().single();
-          if (newSub) createdOrUpdatedSubId = newSub.id;
-        }
 
-        if (createdOrUpdatedSubId) {
-          subNameToId[sName.toLowerCase().trim()] = createdOrUpdatedSubId;
-        }
-
-        // Link section TAs in users.assigned_subjects
-        if (createdOrUpdatedSubId) {
-          for (const secKey of Object.keys(item.sectionTAs)) {
-            const taStr = item.sectionTAs[secKey];
-            const taFound = instructorsList.find(t => t.name?.toLowerCase().includes(taStr?.toLowerCase()) || t.user_id === taStr);
-            if (taFound) {
-              const currentArr = Array.isArray(taFound.assigned_subjects) ? taFound.assigned_subjects : [];
-              const entry = createdOrUpdatedSubId + ':' + secKey;
-              if (!currentArr.includes(entry)) {
-                await supabase.from('users').update({ assigned_subjects: [...currentArr, entry] }).eq('id', taFound.id);
-              }
-            }
-          }
-
-          // Also link main TA
-          if (mainTaObj) {
-            const currentArr = Array.isArray(mainTaObj.assigned_subjects) ? mainTaObj.assigned_subjects : [];
-            // Check if any entry for this subject already exists
-            const hasEntry = currentArr.some(e => typeof e === 'string' && e.startsWith(createdOrUpdatedSubId + ':'));
-            if (!hasEntry) {
-              // Add for all sections of this subject
-              const subSections = new Set();
-              item.students.forEach(stuId => {
-                const stuSec = studentSubjectSections[stuId]?.[sName];
-                if (stuSec) subSections.add(stuSec);
-              });
-              if (subSections.size === 0) subSections.add('S1');
-              const newEntries = [...subSections].map(sec => createdOrUpdatedSubId + ':' + sec);
-              const merged = [...currentArr, ...newEntries];
-              await supabase.from('users').update({ assigned_subjects: merged }).eq('id', mainTaObj.id);
-              mainTaObj.assigned_subjects = merged;
-            }
+          if (newSub) {
+            subNameToId[sName.toLowerCase().trim()] = newSub.id;
           }
         }
       }
 
-      // Update per-subject sections on student records
-      for (const [stuId, subSecs] of Object.entries(studentSubjectSections)) {
-        const entries = [];
-        for (const [subName, sec] of Object.entries(subSecs)) {
-          const subId = subNameToId[subName.toLowerCase().trim()];
-          if (subId) entries.push(subId + ':' + sec);
+      // Execute all subject updates in parallel
+      if (subjectUpdates.length > 0) {
+        await Promise.all(subjectUpdates);
+      }
+
+      // 3. Link TAs in users.assigned_subjects
+      for (const sName of Object.keys(subjectsMap)) {
+        const item = subjectsMap[sName];
+        const subId = subNameToId[sName.toLowerCase().trim()];
+        if (!subId) continue;
+
+        // Section TAs
+        for (const secKey of Object.keys(item.sectionTAs)) {
+          const taStr = item.sectionTAs[secKey];
+          const taFound = instructorsList.find(t => t.name?.toLowerCase().includes(taStr?.toLowerCase()) || t.user_id === taStr);
+          if (taFound) {
+            const currentArr = Array.isArray(taFound.assigned_subjects) ? taFound.assigned_subjects : [];
+            const entry = subId + ':' + secKey;
+            if (!currentArr.includes(entry)) {
+              const updated = [...currentArr, entry];
+              await supabase.from('users').update({ assigned_subjects: updated }).eq('id', taFound.id);
+              taFound.assigned_subjects = updated;
+            }
+          }
         }
-        if (entries.length > 0) {
-          const { data: stuData } = await supabase.from('users').select('assigned_subjects').eq('user_id', stuId).single();
-          const current = Array.isArray(stuData?.assigned_subjects) ? stuData.assigned_subjects : [];
-          const subIdsInEntries = new Set(entries.map(e => e.split(':')[0]));
-          const kept = current.filter(e => {
-            const eSubId = typeof e === 'string' ? e.split(':')[0] : '';
-            return !subIdsInEntries.has(eSubId);
-          });
-          const merged = [...kept, ...entries];
-          await supabase.from('users').update({ assigned_subjects: merged }).eq('user_id', stuId);
+
+        // Main TA
+        let mainTaObj = instructorsList.find(t => t.name?.toLowerCase().includes(item.taName?.toLowerCase()) || t.user_id === item.taName);
+        if (mainTaObj) {
+          const currentArr = Array.isArray(mainTaObj.assigned_subjects) ? mainTaObj.assigned_subjects : [];
+          const hasEntry = currentArr.some(e => typeof e === 'string' && e.startsWith(subId + ':'));
+          if (!hasEntry) {
+            const subSections = new Set();
+            item.students.forEach(stuId => {
+              const stuSec = studentMap[stuId]?.subSections[sName];
+              if (stuSec) subSections.add(stuSec);
+            });
+            if (subSections.size === 0) subSections.add('S1');
+            const newEntries = [...subSections].map(sec => subId + ':' + sec);
+            const merged = [...currentArr, ...newEntries];
+            await supabase.from('users').update({ assigned_subjects: merged }).eq('id', mainTaObj.id);
+            mainTaObj.assigned_subjects = merged;
+          }
         }
       }
+
+      // 4. Batch Prepare & Upsert all students with per-subject assigned_subjects
+      const studentsToUpsert = [];
+
+      for (const [id, sData] of Object.entries(studentMap)) {
+        const existingUser = userMap[id];
+        const currentAssigned = Array.isArray(existingUser?.assigned_subjects) ? existingUser.assigned_subjects : [];
+        
+        // Build new subject:section entries
+        const newEntries = [];
+        for (const [sName, sec] of Object.entries(sData.subSections)) {
+          const subId = subNameToId[sName.toLowerCase().trim()];
+          if (subId) newEntries.push(subId + ':' + sec);
+        }
+
+        // Merge without duplicating
+        const subIdsInNew = new Set(newEntries.map(e => e.split(':')[0]));
+        const keptOld = currentAssigned.filter(e => typeof e === 'string' && !subIdsInNew.has(e.split(':')[0]));
+        const mergedAssigned = [...keptOld, ...newEntries];
+
+        studentsToUpsert.push({
+          user_id: id,
+          name: sData.name,
+          role: 'student',
+          year_level: sData.year_level,
+          section: sData.section,
+          assigned_subjects: mergedAssigned,
+          password: sData.password,
+          auth_id: existingUser ? existingUser.auth_id : null
+        });
+      }
+
+      // Upsert students in ultra-fast chunks of 100
+      const CHUNK_SIZE = 100;
+      for (let i = 0; i < studentsToUpsert.length; i += CHUNK_SIZE) {
+        const chunk = studentsToUpsert.slice(i, i + CHUNK_SIZE);
+        const { error: upsertErr } = await supabase.from('users').upsert(chunk, { onConflict: 'user_id' });
+        if (upsertErr) {
+          console.error('Batch upsert error:', upsertErr);
+        }
+      }
+
+      // Invalidate caches
+      cacheManager.invalidate('admin_users_base');
+      cacheManager.invalidate('admin_subjects_base');
 
       fetchInitial();
-      setMessage('✅ تم استيراد المواد والطلاب وتوزيع السكاشن والمعيدين بنجاح!');
+      setMessage('✅ تم استيراد ومعالجة ' + studentsToUpsert.length + ' طالب و ' + Object.keys(subjectsMap).length + ' مادة دراسية بنجاح فائق!');
       setShowExcelImport(false);
     } catch (err) {
       console.error('Excel import error:', err);
       setMessage('❌ ' + (err.message || 'حدث خطأ أثناء معالجة ملف الإكسيل'));
+    } finally {
+      setImporting(false);
+      setFile(null);
+      setTimeout(() => setMessage(''), 6000);
     }
-    setImporting(false);
-    setFile(null);
-    setTimeout(() => setMessage(''), 5000);
   };
 
   const toggleSelectAllSubjects = () => {

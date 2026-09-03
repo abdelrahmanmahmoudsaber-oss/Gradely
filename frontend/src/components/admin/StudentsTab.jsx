@@ -268,25 +268,43 @@ export default function StudentsTab({ user }) {
     }
   };
 
-    const downloadSampleExcel = () => {
+      const downloadSampleExcel = () => {
     const sampleData = [
       {
+        'Subject': 'Introduction to Operation Research and Decision Support systems',
         'ID': '2200304',
         'Name': 'roshdy ahmed roshdy',
+        'Section': '2',
+        'CourseLevel': '2',
         'StudentLevel': '2',
-        'Section': 'S1',
-        'Password': '123456',
-        'Subject': 'Introduction to Operation Research and Decision Support systems',
-        'CourseLevel': '2'
+        'Password': '123456'
       },
       {
+        'Subject': 'Microcontrollers',
         'ID': '2200304',
         'Name': 'roshdy ahmed roshdy',
+        'Section': '1',
+        'CourseLevel': '3',
         'StudentLevel': '2',
-        'Section': 'S1',
-        'Password': '123456',
-        'Subject': 'Microcontrollers',
-        'CourseLevel': '3'
+        'Password': '123456'
+      },
+      {
+        'Subject': 'Advanced Software Engineering',
+        'ID': '2200304',
+        'Name': 'roshdy ahmed roshdy',
+        'Section': '1',
+        'CourseLevel': '3',
+        'StudentLevel': '2',
+        'Password': '123456'
+      },
+      {
+        'Subject': 'Logic Design',
+        'ID': '2200304',
+        'Name': 'roshdy ahmed roshdy',
+        'Section': '3',
+        'CourseLevel': '1',
+        'StudentLevel': '2',
+        'Password': '123456'
       }
     ];
     exportExcelFile(sampleData, 'نموذج_استيراد_الطلاب_Gradely.xlsx');
@@ -301,7 +319,11 @@ export default function StudentsTab({ user }) {
 
     try {
       const rows = await parseExcelFile(file);
-      let count = 0;
+      if (!rows || rows.length === 0) {
+        setMessage('❌ الملف فارغ أو لا يحتوي على صفوف بيانات');
+        setImporting(false);
+        return;
+      }
 
       // Helper: case-insensitive column getter
       const getVal = (row, ...keys) => {
@@ -313,91 +335,103 @@ export default function StudentsTab({ user }) {
         return undefined;
       };
 
-      // Build per-student subject-section map: { userId: { subjectName: section } }
-      const studentSubjectSections = {};
+      // 1. Single query to fetch existing users and subjects
+      const [existingUsersRes, existingSubsRes] = await Promise.all([
+        supabase.from('users').select('id, user_id, name, year_level, section, assigned_subjects, auth_id'),
+        supabase.from('subjects').select('id, name')
+      ]);
+
+      const existingUsersList = existingUsersRes.data || [];
+      const existingSubsList = existingSubsRes.data || [];
+      const userMap = {};
+      existingUsersList.forEach(u => { userMap[u.user_id] = u; });
+
+      const subNameToId = {};
+      existingSubsList.forEach(s => { subNameToId[s.name.toLowerCase().trim()] = s.id; });
+
+      const studentMap = {};
 
       for (const row of rows) {
-        const id = (getVal(row, 'ID', 'الرقم الأكاديمي', 'الكود', 'رقم الجلوس'))?.toString().trim();
-        const n = (getVal(row, 'Name', 'الاسم', 'اسم الطالب'))?.toString().trim();
-        
-        // Separate Student Level (فرقة الطالب) vs Course Level (فرقة المادة)
+        const id = (getVal(row, 'ID', 'الرقم الأكاديمي', 'الكود', 'رقم الجلوس', 'كود الطالب'))?.toString().trim();
+        const n = (getVal(row, 'Name', 'الاسم', 'اسم الطالب', 'طالب'))?.toString().trim();
+        if (!id || !n) continue;
+
         const stuLevelRaw = getVal(row, 'StudentLevel', 'Student_Level', 'Student Level', 'StudentYear', 'Student_Year', 'فرقة الطالب', 'مستوى الطالب', 'Year', 'YEAR', 'الفرقة', 'السنة', 'Level', 'المستوى');
         const courseLevelRaw = getVal(row, 'CourseLevel', 'Course_Level', 'Course Level', 'CourseYear', 'Course_Year', 'فرقة المادة', 'فرقة المقرر', 'مستوى المادة', 'مستوى المقرر', 'Year', 'YEAR', 'الفرقة', 'السنة', 'Level', 'المستوى');
         
         const studentYear = normalizeYear(stuLevelRaw || '1');
-        const courseYear = normalizeYear(courseLevelRaw || stuLevelRaw || '1');
-        
         const sRaw = getVal(row, 'Section', 'السكشن', 'سكشن', 'Sec');
         const s = normalizeSection(sRaw || 'S1');
-        const pass = (getVal(row, 'Password', 'كلمة السر') || id)?.toString().trim();
-        const subjectName = (getVal(row, 'Subject', 'المادة', 'اسم المادة'))?.toString().trim();
+        const pass = (getVal(row, 'Password', 'كلمة السر', 'الباسورد') || id)?.toString().trim();
+        const subjectName = (getVal(row, 'Subject', 'المادة', 'اسم المادة', 'المقرر'))?.toString().trim();
 
-        if (id && n) {
-          // Track per-subject section
-          if (subjectName) {
-            if (!studentSubjectSections[id]) studentSubjectSections[id] = {};
-            studentSubjectSections[id][subjectName] = s;
-          }
+        if (!studentMap[id]) {
+          studentMap[id] = {
+            user_id: id,
+            name: n,
+            year_level: studentYear,
+            section: s,
+            password: pass,
+            subSections: {}
+          };
+        } else {
+          studentMap[id].name = n;
+          if (stuLevelRaw) studentMap[id].year_level = studentYear;
+        }
 
-          const { data: existingUser } = await supabase.from('users').select('id, assigned_subjects').eq('user_id', id).single();
-          if (!existingUser) {
-            await supabase.from('users').insert({
-              user_id: id,
-              name: n,
-              password: pass,
-              role: 'student',
-              year_level: studentYear,
-              section: s,
-              auth_id: null
-            });
-            count++;
-          } else {
-            await supabase.from('users').update({
-              name: n,
-              year_level: studentYear,
-              section: s
-            }).eq('user_id', id);
-            count++;
-          }
+        if (subjectName) {
+          studentMap[id].subSections[subjectName] = s;
         }
       }
 
-      // Update per-subject sections in assigned_subjects for students
-      if (Object.keys(studentSubjectSections).length > 0) {
-        const { data: allSubs } = await supabase.from('subjects').select('id, name');
-        const subNameToId = {};
-        (allSubs || []).forEach(sub => { subNameToId[sub.name.toLowerCase().trim()] = sub.id; });
+      // 2. Prepare array for batch upsert
+      const studentsToUpsert = [];
 
-        for (const [stuId, subSecs] of Object.entries(studentSubjectSections)) {
-          const entries = [];
-          for (const [subName, sec] of Object.entries(subSecs)) {
-            const subId = subNameToId[subName.toLowerCase().trim()];
-            if (subId) entries.push(subId + ':' + sec);
-          }
-          if (entries.length > 0) {
-            const { data: stuData } = await supabase.from('users').select('assigned_subjects').eq('user_id', stuId).single();
-            const current = Array.isArray(stuData?.assigned_subjects) ? stuData.assigned_subjects : [];
-            const subIdsInEntries = new Set(entries.map(e => e.split(':')[0]));
-            const kept = current.filter(e => {
-              const eSubId = typeof e === 'string' ? e.split(':')[0] : '';
-              return !subIdsInEntries.has(eSubId);
-            });
-            const merged = [...kept, ...entries];
-            await supabase.from('users').update({ assigned_subjects: merged }).eq('user_id', stuId);
-          }
+      for (const [id, sData] of Object.entries(studentMap)) {
+        const existingUser = userMap[id];
+        const currentAssigned = Array.isArray(existingUser?.assigned_subjects) ? existingUser.assigned_subjects : [];
+        
+        const newEntries = [];
+        for (const [sName, sec] of Object.entries(sData.subSections)) {
+          const subId = subNameToId[sName.toLowerCase().trim()];
+          if (subId) newEntries.push(subId + ':' + sec);
         }
+
+        const subIdsInNew = new Set(newEntries.map(e => e.split(':')[0]));
+        const keptOld = currentAssigned.filter(e => typeof e === 'string' && !subIdsInNew.has(e.split(':')[0]));
+        const mergedAssigned = [...keptOld, ...newEntries];
+
+        studentsToUpsert.push({
+          user_id: id,
+          name: sData.name,
+          role: 'student',
+          year_level: sData.year_level,
+          section: sData.section,
+          assigned_subjects: mergedAssigned,
+          password: sData.password,
+          auth_id: existingUser ? existingUser.auth_id : null
+        });
       }
 
-      setMessage('✅ تم استيراد وتحديث بيانات ' + count + ' طالب بنجاح');
-      setShowExcelImport(false);
-      setFile(null);
+      // 3. Ultra-fast Chunked Upsert
+      const CHUNK_SIZE = 100;
+      for (let i = 0; i < studentsToUpsert.length; i += CHUNK_SIZE) {
+        const chunk = studentsToUpsert.slice(i, i + CHUNK_SIZE);
+        const { error: upsertErr } = await supabase.from('users').upsert(chunk, { onConflict: 'user_id' });
+        if (upsertErr) console.error('Batch upsert error:', upsertErr);
+      }
+
+      cacheManager.invalidate('admin_users_base');
       fetchData();
+      setMessage('✅ تم استيراد وتحديث بيانات ' + studentsToUpsert.length + ' طالب بنجاح فائق!');
+      setShowExcelImport(false);
     } catch (err) {
       console.error(err);
       setMessage('❌ حدث خطأ أثناء قراءة ملف الإكسيل، يرجى التأكد من التنسيق');
     } finally {
       setImporting(false);
-      setTimeout(() => setMessage(''), 5000);
+      setFile(null);
+      setTimeout(() => setMessage(''), 6000);
     }
   };
 
