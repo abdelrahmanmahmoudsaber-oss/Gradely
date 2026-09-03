@@ -9,26 +9,6 @@ import {
 } from 'lucide-react';
 
 export default function OverviewTab({ user }) {
-  const normalizeSection = (sec) => {
-    if (!sec) return 'S1';
-    const s = sec.toString().trim().toUpperCase().replace(/\s+/g, '');
-    const match = s.match(/(\d+)/);
-    if (match) return 'S' + parseInt(match[1], 10);
-    return 'S1';
-  };
-
-  const getSectionInstructorName = (subId, sec) => {
-    const secNorm = normalizeSection(sec || 'S1');
-    for (const adm of allAdminsList) {
-      if (Array.isArray(adm.assigned_subjects) && adm.assigned_subjects.includes(subId + ':' + secNorm)) {
-        return adm.name;
-      }
-    }
-    const subObj = allSubjectsList.find(s => s.id === subId);
-    if (subObj?.instructor_name) return subObj.instructor_name;
-    return 'المدير الرئيسي';
-  };
-
   const [stats, setStats] = useState({
     totalStudents: 0,
     totalAdmins: 0,
@@ -60,7 +40,28 @@ export default function OverviewTab({ user }) {
   const [newColumnScope, setNewColumnScope] = useState('global');
   const [customColumnsList, setCustomColumnsList] = useState([]);
   const [columnLabels, setColumnLabels] = useState({}); // { [colKey]: 'Custom Label' }
-  const [editingColumn, setEditingColumn] = useState(null); // { id, label, scope, isDefault }
+  const [editingColumn, setEditingColumn] = useState(null);
+  const normalizeSection = (sec) => {
+    if (!sec) return 'S1';
+    const s = sec.toString().trim().toUpperCase().replace(/\s+/g, '');
+    const match = s.match(/(\d+)/);
+    if (match) return 'S' + parseInt(match[1], 10);
+    return 'S1';
+  };
+
+  const getSectionInstructorName = (subId, sec) => {
+    const secNorm = normalizeSection(sec || 'S1');
+    const admins = Array.isArray(allAdminsList) ? allAdminsList : [];
+    for (const adm of admins) {
+      if (Array.isArray(adm.assigned_subjects) && adm.assigned_subjects.includes(subId + ':' + secNorm)) {
+        return adm.name;
+      }
+    }
+    const subjects = Array.isArray(allSubjectsList) ? allSubjectsList : [];
+    const subObj = subjects.find(s => s.id === subId);
+    if (subObj?.instructor_name) return subObj.instructor_name;
+    return 'المدير الرئيسي';
+  };
   const [editLabelInput, setEditLabelInput] = useState('');
 
   // Backup & Restore State

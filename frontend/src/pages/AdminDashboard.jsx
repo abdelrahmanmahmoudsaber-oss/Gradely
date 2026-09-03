@@ -11,7 +11,7 @@ export default function AdminDashboard({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const isSuperAdmin = user.user_id === 'admin';
+  const isSuperAdmin = !user || user.user_id === 'admin';
 
   const getPageTitle = () => {
     switch(activeTab) {
@@ -91,10 +91,10 @@ export default function AdminDashboard({ user, onLogout }) {
         <div style={{padding: '1.2rem 1.5rem'}}>
           <div style={{display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--bg)', padding: '12px', borderRadius: '10px', border: '1px solid var(--border)'}}>
             <div style={{width: '42px', height: '42px', borderRadius: '50%', background: 'rgba(79, 70, 229, 0.25)', color: 'var(--primary-hover)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.1rem'}}>
-              {user.name.charAt(0)}
+              {(user?.name || user?.user_id || 'U').charAt(0)}
             </div>
             <div style={{minWidth: 0}}>
-              <div style={{fontWeight: 800, fontSize: '0.95rem', color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{user.name}</div>
+              <div style={{fontWeight: 800, fontSize: '0.95rem', color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{user?.name || user?.user_id || 'المسؤول'}</div>
               <div style={{fontSize: '0.8rem', fontWeight: 700, marginTop: '2px', color: isSuperAdmin ? 'var(--success)' : '#60a5fa'}}>
                 {isSuperAdmin ? 'مدير النظام' : 'معيد / مشرف'}
               </div>
