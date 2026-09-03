@@ -4,7 +4,7 @@ import { parseExcelFile } from '../../utils/excelHelper';
 import { cacheManager } from '../../utils/dataCache';
 import { BookOpen, Upload, Plus, Trash2, Edit, Users, UserCheck, X, CheckSquare, Square, Shield, Layers } from 'lucide-react';
 
-const SECTIONS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
+const DEFAULT_SECTIONS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
 
 export default function SubjectsTab({ user }) {
   const [subjects, setSubjects] = useState([]);
@@ -20,6 +20,7 @@ export default function SubjectsTab({ user }) {
   const [yearLevel, setYearLevel] = useState('1');
   const [instructorId, setInstructorId] = useState('');
   const [sectionInstructors, setSectionInstructors] = useState({}); // { 'S1': 'ta_id_1', 'S2': 'ta_id_2' }
+  const [modalCustomSections, setModalCustomSections] = useState([]);
 
   const [file, setFile] = useState(null);
   const [importing, setImporting] = useState(false);
@@ -30,13 +31,25 @@ export default function SubjectsTab({ user }) {
 
   const normalizeYear = (yr) => {
     if (!yr) return '1';
-    return yr.toString()
-      .replace('الفرقة ', '')
-      .replace('الأولى', '1')
-      .replace('الثانية', '2')
-      .replace('الثالثة', '3')
-      .replace('الرابعة', '4')
-      .trim();
+    const s = yr.toString().trim();
+    // Direct number
+    const numMatch = s.match(/\d+/);
+    if (numMatch) {
+      const n = parseInt(numMatch[0], 10);
+      if (n >= 1 && n <= 6) return String(n);
+    }
+    // Arabic text
+    if (/أول|الأولى/i.test(s)) return '1';
+    if (/ثاني|الثانية/i.test(s)) return '2';
+    if (/ثالث|الثالثة/i.test(s)) return '3';
+    if (/رابع|الرابعة/i.test(s)) return '4';
+    // English text
+    const lower = s.toLowerCase();
+    if (lower.includes('first') || lower.includes('one')) return '1';
+    if (lower.includes('second') || lower.includes('two')) return '2';
+    if (lower.includes('third') || lower.includes('three')) return '3';
+    if (lower.includes('fourth') || lower.includes('four')) return '4';
+    return '1';
   };
 
   const normalizeSection = (sec) => {
@@ -79,6 +92,55 @@ export default function SubjectsTab({ user }) {
       }
     });
     return secMap;
+  };
+
+  const getSubjectModalSections = () => {
+    const secs = new Set();
+    Object.keys(sectionInstructors).forEach(s => { if (s) secs.add(s); });
+    if (editingId) {
+      const sub = subjects.find(s => s.id === editingId);
+      if (sub && Array.isArray(sub.enrolled_students)) {
+        sub.enrolled_students.forEach(uid => {
+          const stu = allUsers.find(u => u.user_id === uid);
+          if (stu) {
+            let sSec = null;
+            if (Array.isArray(stu.assigned_subjects)) {
+              const match = stu.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+              if (match) sSec = match.split(':')[1];
+            }
+            if (!sSec) sSec = stu.section;
+            if (sSec) secs.add(normalizeSection(sSec));
+          }
+        });
+      }
+    }
+    modalCustomSections.forEach(s => { if (s) secs.add(s); });
+    if (secs.size === 0) secs.add('S1');
+    return [...secs].sort((a, b) => {
+      const numA = parseInt(a.replace(/\D/g, '') || '0', 10);
+      const numB = parseInt(b.replace(/\D/g, '') || '0', 10);
+      return numA - numB;
+    });
+  };
+
+  const handleAddModalSection = () => {
+    const current = getSubjectModalSections();
+    let maxNum = 0;
+    current.forEach(s => {
+      const n = parseInt(s.replace(/\D/g, '') || '0', 10);
+      if (n > maxNum) maxNum = n;
+    });
+    const newSec = 'S' + (maxNum + 1);
+    setModalCustomSections(prev => [...prev, newSec]);
+  };
+
+  const handleRemoveModalSection = (sec) => {
+    setModalCustomSections(prev => prev.filter(s => s !== sec));
+    setSectionInstructors(prev => {
+      const next = { ...prev };
+      delete next[sec];
+      return next;
+    });
   };
 
   const handleSectionTAChange = (sec, taId) => {
@@ -141,7 +203,7 @@ export default function SubjectsTab({ user }) {
         }
 
         // If TA is assigned specific sections
-        SECTIONS.forEach(sec => {
+        DEFAULT_SECTIONS.forEach(sec => {
           if (sectionInstructors[sec] === ta.user_id) {
             newEntriesForThisSub.push(targetSubjectId + ':' + sec);
           }
@@ -236,16 +298,37 @@ export default function SubjectsTab({ user }) {
       const rows = await parseExcelFile(file);
       const subjectsMap = {};
 
+      // Helper: case-insensitive column getter
+      const getVal = (row, ...keys) => {
+        for (const k of keys) {
+          for (const rk of Object.keys(row)) {
+            if (rk.toLowerCase().trim() === k.toLowerCase().trim()) return row[rk];
+          }
+        }
+        return undefined;
+      };
+
+      // Track per-student { subjectName: section }
+      const studentSubjectSections = {};
+
       for (const row of rows) {
-        const subName = (row['Subject'] || row['المادة'] || row['اسم المادة'])?.toString().trim();
-        const id = (row['ID'] || row['رقم الجلوس'] || row['الكود'])?.toString().trim();
-        const name = (row['Name'] || row['الاسم'] || row['اسم الطالب'])?.toString().trim();
-        const y = normalizeYear(row['Year'] || row['الفرقة'] || row['السنة'] || '1');
-        const s = normalizeSection(row['Section'] || row['السكشن'] || row['سكشن'] || row['Sec'] || 'S1');
-        const pass = (row['Password'] || row['كلمة السر'] || id)?.toString().trim();
-        const ta = (row['TA'] || row['المعيد'] || row['اسم المعيد'] || row['المشرف'])?.toString().trim();
+        const subName = (getVal(row, 'Subject', 'المادة', 'اسم المادة'))?.toString().trim();
+        const id = (getVal(row, 'ID', 'رقم الجلوس', 'الكود'))?.toString().trim();
+        const name = (getVal(row, 'Name', 'الاسم', 'اسم الطالب'))?.toString().trim();
+        const yRaw = getVal(row, 'Year', 'YEAR', 'الفرقة', 'السنة', 'Level', 'المستوى');
+        const y = normalizeYear(yRaw || '1');
+        const sRaw = getVal(row, 'Section', 'السكشن', 'سكشن', 'Sec');
+        const s = normalizeSection(sRaw || 'S1');
+        const pass = (getVal(row, 'Password', 'كلمة السر') || id)?.toString().trim();
+        const ta = (getVal(row, 'TA', 'المعيد', 'اسم المعيد', 'المشرف'))?.toString().trim();
 
         if (id && name) {
+          // Track per-subject section for this student
+          if (subName) {
+            if (!studentSubjectSections[id]) studentSubjectSections[id] = {};
+            studentSubjectSections[id][subName] = s;
+          }
+
           const { data: existingUser } = await supabase.from('users').select('id').eq('user_id', id).single();
           if (!existingUser) {
             await supabase.from('users').insert({
@@ -279,6 +362,8 @@ export default function SubjectsTab({ user }) {
         }
       }
 
+      // Create/update subjects
+      const subNameToId = {};
       for (const sName of Object.keys(subjectsMap)) {
         const item = subjectsMap[sName];
         let mainTaObj = instructorsList.find(t => t.name?.toLowerCase().includes(item.taName?.toLowerCase()) || t.user_id === item.taName);
@@ -293,6 +378,7 @@ export default function SubjectsTab({ user }) {
           await supabase.from('subjects').update({
             enrolled_students: merged,
             included_students: merged,
+            year_level: item.year,
             instructor_id: mainTaObj ? mainTaObj.user_id : existingSub.instructor_id,
             instructor_name: mainTaObj ? mainTaObj.name : existingSub.instructor_name
           }).eq('id', existingSub.id);
@@ -309,6 +395,10 @@ export default function SubjectsTab({ user }) {
           if (newSub) createdOrUpdatedSubId = newSub.id;
         }
 
+        if (createdOrUpdatedSubId) {
+          subNameToId[sName.toLowerCase().trim()] = createdOrUpdatedSubId;
+        }
+
         // Link section TAs in users.assigned_subjects
         if (createdOrUpdatedSubId) {
           for (const secKey of Object.keys(item.sectionTAs)) {
@@ -322,6 +412,46 @@ export default function SubjectsTab({ user }) {
               }
             }
           }
+
+          // Also link main TA
+          if (mainTaObj) {
+            const currentArr = Array.isArray(mainTaObj.assigned_subjects) ? mainTaObj.assigned_subjects : [];
+            // Check if any entry for this subject already exists
+            const hasEntry = currentArr.some(e => typeof e === 'string' && e.startsWith(createdOrUpdatedSubId + ':'));
+            if (!hasEntry) {
+              // Add for all sections of this subject
+              const subSections = new Set();
+              item.students.forEach(stuId => {
+                const stuSec = studentSubjectSections[stuId]?.[sName];
+                if (stuSec) subSections.add(stuSec);
+              });
+              if (subSections.size === 0) subSections.add('S1');
+              const newEntries = [...subSections].map(sec => createdOrUpdatedSubId + ':' + sec);
+              const merged = [...currentArr, ...newEntries];
+              await supabase.from('users').update({ assigned_subjects: merged }).eq('id', mainTaObj.id);
+              mainTaObj.assigned_subjects = merged;
+            }
+          }
+        }
+      }
+
+      // Update per-subject sections on student records
+      for (const [stuId, subSecs] of Object.entries(studentSubjectSections)) {
+        const entries = [];
+        for (const [subName, sec] of Object.entries(subSecs)) {
+          const subId = subNameToId[subName.toLowerCase().trim()];
+          if (subId) entries.push(subId + ':' + sec);
+        }
+        if (entries.length > 0) {
+          const { data: stuData } = await supabase.from('users').select('assigned_subjects').eq('user_id', stuId).single();
+          const current = Array.isArray(stuData?.assigned_subjects) ? stuData.assigned_subjects : [];
+          const subIdsInEntries = new Set(entries.map(e => e.split(':')[0]));
+          const kept = current.filter(e => {
+            const eSubId = typeof e === 'string' ? e.split(':')[0] : '';
+            return !subIdsInEntries.has(eSubId);
+          });
+          const merged = [...kept, ...entries];
+          await supabase.from('users').update({ assigned_subjects: merged }).eq('user_id', stuId);
         }
       }
 
@@ -448,18 +578,28 @@ export default function SubjectsTab({ user }) {
 
               {/* Section-by-Section TA Assignment */}
               <div style={{background:'var(--bg)',padding:'1.2rem',borderRadius:'10px',border:'1px solid var(--border)'}}>
-                <label style={{display:'block',marginBottom:'10px',fontSize:'0.95rem',color:'var(--success)',fontWeight:'bold'}}>
-                  🎯 توزيع معيدي السكاشن (يمكن تعيين معيد مختلف لكل سكشن):
-                </label>
-                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))',gap:'10px'}}>
-                  {SECTIONS.map(sec => (
-                    <div key={sec} style={{display:'flex',alignItems:'center',gap:'8px'}}>
-                      <span className="badge" style={{background:'rgba(16, 185, 129, 0.1)',color:'var(--success)',minWidth:'45px',textAlign:'center'}}>{sec}</span>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'10px',flexWrap:'wrap',gap:'8px'}}>
+                  <label style={{margin:0,fontSize:'0.95rem',color:'var(--success)',fontWeight:'bold'}}>
+                    🎯 توزيع معيدي السكاشن (حسب سكاشن المادة الفعلية):
+                  </label>
+                  <button 
+                    type="button" 
+                    className="btn-secondary" 
+                    onClick={handleAddModalSection}
+                    style={{padding:'4px 10px',fontSize:'0.8rem',color:'var(--primary-hover)',borderColor:'var(--primary)'}}
+                  >
+                    + إضافة سكشن
+                  </button>
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(250px, 1fr))',gap:'10px'}}>
+                  {getSubjectModalSections().map(sec => (
+                    <div key={sec} style={{display:'flex',alignItems:'center',gap:'8px',background:'rgba(255,255,255,0.02)',padding:'6px 8px',borderRadius:'6px',border:'1px solid rgba(255,255,255,0.05)'}}>
+                      <span className="badge" style={{background:'rgba(16, 185, 129, 0.1)',color:'var(--success)',minWidth:'40px',textAlign:'center'}}>{sec}</span>
                       <select 
                         className="input-field" 
                         value={sectionInstructors[sec] || ''} 
                         onChange={e => handleSectionTAChange(sec, e.target.value)}
-                        style={{padding:'6px 10px',fontSize:'0.85rem'}}
+                        style={{padding:'6px 8px',fontSize:'0.85rem',flex:1}}
                       >
                         <option value="">-- نفس المشرف الرئيسي --</option>
                         <option value="admin">المدير الرئيسي</option>
@@ -469,6 +609,16 @@ export default function SubjectsTab({ user }) {
                           </option>
                         ))}
                       </select>
+                      {getSubjectModalSections().length > 1 && (
+                        <button 
+                          type="button" 
+                          onClick={() => handleRemoveModalSection(sec)}
+                          style={{background:'none',border:'none',color:'var(--danger)',cursor:'pointer',padding:'2px 4px',fontSize:'1rem'}}
+                          title="حذف هذا السكشن"
+                        >
+                          ✕
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>

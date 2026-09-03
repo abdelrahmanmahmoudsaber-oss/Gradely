@@ -42,13 +42,22 @@ export default function StudentDashboard({ user, onLogout }) {
 
   const normalizeYear = (yr) => {
     if (!yr) return '';
-    return yr.toString()
-      .replace('الفرقة ', '')
-      .replace('الأولى', '1')
-      .replace('الثانية', '2')
-      .replace('الثالثة', '3')
-      .replace('الرابعة', '4')
-      .trim();
+    const s = yr.toString().trim();
+    const numMatch = s.match(/\d+/);
+    if (numMatch) {
+      const n = parseInt(numMatch[0], 10);
+      if (n >= 1 && n <= 6) return String(n);
+    }
+    if (/أول|الأولى/i.test(s)) return '1';
+    if (/ثاني|الثانية/i.test(s)) return '2';
+    if (/ثالث|الثالثة/i.test(s)) return '3';
+    if (/رابع|الرابعة/i.test(s)) return '4';
+    const lower = s.toLowerCase();
+    if (lower.includes('first') || lower.includes('one')) return '1';
+    if (lower.includes('second') || lower.includes('two')) return '2';
+    if (lower.includes('third') || lower.includes('three')) return '3';
+    if (lower.includes('fourth') || lower.includes('four')) return '4';
+    return '';
   };
 
   const getStudentSubSection = (student, subId) => {
@@ -458,7 +467,7 @@ export default function StudentDashboard({ user, onLogout }) {
                   {currentSubject.name}
                 </h2>
                 <p className="text-muted" style={{margin: 0, fontSize: '0.85rem'}}>
-                  المعيد: <strong style={{color:'var(--text-main)'}}>{currentSubject.instructor_name || 'المدير الرئيسي'}</strong> | السكشن: <strong style={{color:'var(--success)'}}>{normalizeSection(user.section || 'S1')}</strong>
+                  المعيد: <strong style={{color:'var(--text-main)'}}>{currentSubject.instructor_name || 'المدير الرئيسي'}</strong> | السكشن: <strong style={{color:'var(--success)'}}>{getStudentSubSection(user, currentSubject.id)}</strong>
                 </p>
               </div>
 

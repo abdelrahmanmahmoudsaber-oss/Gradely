@@ -40,13 +40,25 @@ export default function StudentsTab({ user }) {
 
   const normalizeYear = (yr) => {
     if (!yr) return '1';
-    return yr.toString()
-      .replace('الفرقة ', '')
-      .replace('الأولى', '1')
-      .replace('الثانية', '2')
-      .replace('الثالثة', '3')
-      .replace('الرابعة', '4')
-      .trim();
+    const s = yr.toString().trim();
+    // Direct number
+    const numMatch = s.match(/\d+/);
+    if (numMatch) {
+      const n = parseInt(numMatch[0], 10);
+      if (n >= 1 && n <= 6) return String(n);
+    }
+    // Arabic text
+    if (/أول|الأولى/i.test(s)) return '1';
+    if (/ثاني|الثانية/i.test(s)) return '2';
+    if (/ثالث|الثالثة/i.test(s)) return '3';
+    if (/رابع|الرابعة/i.test(s)) return '4';
+    // English text
+    const lower = s.toLowerCase();
+    if (lower.includes('first') || lower.includes('one')) return '1';
+    if (lower.includes('second') || lower.includes('two')) return '2';
+    if (lower.includes('third') || lower.includes('three')) return '3';
+    if (lower.includes('fourth') || lower.includes('four')) return '4';
+    return '1';
   };
 
   const normalizeSection = (sec) => {
@@ -267,15 +279,37 @@ export default function StudentsTab({ user }) {
       const rows = await parseExcelFile(file);
       let count = 0;
 
+      // Helper: case-insensitive column getter
+      const getVal = (row, ...keys) => {
+        for (const k of keys) {
+          for (const rk of Object.keys(row)) {
+            if (rk.toLowerCase().trim() === k.toLowerCase().trim()) return row[rk];
+          }
+        }
+        return undefined;
+      };
+
+      // Build per-student subject-section map: { userId: { subjectName: section } }
+      const studentSubjectSections = {};
+
       for (const row of rows) {
-        const id = (row['ID'] || row['الرقم الأكاديمي'] || row['الكود'])?.toString().trim();
-        const n = (row['Name'] || row['الاسم'] || row['اسم الطالب'])?.toString().trim();
-        const y = normalizeYear(row['Year'] || row['الفرقة'] || row['السنة'] || '1');
-        const s = normalizeSection(row['Section'] || row['السكشن'] || row['سكشن'] || row['Sec'] || 'S1');
-        const pass = (row['Password'] || row['كلمة السر'] || id)?.toString().trim();
+        const id = (getVal(row, 'ID', 'الرقم الأكاديمي', 'الكود', 'رقم الجلوس'))?.toString().trim();
+        const n = (getVal(row, 'Name', 'الاسم', 'اسم الطالب'))?.toString().trim();
+        const yRaw = getVal(row, 'Year', 'YEAR', 'الفرقة', 'السنة', 'Level', 'المستوى');
+        const y = normalizeYear(yRaw || '1');
+        const sRaw = getVal(row, 'Section', 'السكشن', 'سكشن', 'Sec');
+        const s = normalizeSection(sRaw || 'S1');
+        const pass = (getVal(row, 'Password', 'كلمة السر') || id)?.toString().trim();
+        const subjectName = (getVal(row, 'Subject', 'المادة', 'اسم المادة'))?.toString().trim();
 
         if (id && n) {
-          const { data: existingUser } = await supabase.from('users').select('id').eq('user_id', id).single();
+          // Track per-subject section
+          if (subjectName) {
+            if (!studentSubjectSections[id]) studentSubjectSections[id] = {};
+            studentSubjectSections[id][subjectName] = s;
+          }
+
+          const { data: existingUser } = await supabase.from('users').select('id, assigned_subjects').eq('user_id', id).single();
           if (!existingUser) {
             await supabase.from('users').insert({
               user_id: id,
@@ -294,6 +328,32 @@ export default function StudentsTab({ user }) {
               section: s
             }).eq('user_id', id);
             count++;
+          }
+        }
+      }
+
+      // Update per-subject sections in assigned_subjects for students
+      if (Object.keys(studentSubjectSections).length > 0) {
+        const { data: allSubs } = await supabase.from('subjects').select('id, name');
+        const subNameToId = {};
+        (allSubs || []).forEach(sub => { subNameToId[sub.name.toLowerCase().trim()] = sub.id; });
+
+        for (const [stuId, subSecs] of Object.entries(studentSubjectSections)) {
+          const entries = [];
+          for (const [subName, sec] of Object.entries(subSecs)) {
+            const subId = subNameToId[subName.toLowerCase().trim()];
+            if (subId) entries.push(subId + ':' + sec);
+          }
+          if (entries.length > 0) {
+            const { data: stuData } = await supabase.from('users').select('assigned_subjects').eq('user_id', stuId).single();
+            const current = Array.isArray(stuData?.assigned_subjects) ? stuData.assigned_subjects : [];
+            const subIdsInEntries = new Set(entries.map(e => e.split(':')[0]));
+            const kept = current.filter(e => {
+              const eSubId = typeof e === 'string' ? e.split(':')[0] : '';
+              return !subIdsInEntries.has(eSubId);
+            });
+            const merged = [...kept, ...entries];
+            await supabase.from('users').update({ assigned_subjects: merged }).eq('user_id', stuId);
           }
         }
       }
@@ -603,20 +663,36 @@ export default function StudentsTab({ user }) {
                         <span style={{color:'var(--text-muted)',fontSize:'0.85rem'}}>كامل الصلاحيات (جميع المواد)</span>
                       ) : (
                         <div style={{display:'flex',gap:'5px',flexWrap:'wrap'}}>
-                          {Array.isArray(adm.assigned_subjects) && adm.assigned_subjects.length > 0 ? (
-                            adm.assigned_subjects.map(subEntry => {
-                              const subId = subEntry.split(':')[0];
-                              const sec = subEntry.includes(':') ? subEntry.split(':')[1] : null;
-                              const s = allSubjects.find(x => x.id === subId);
-                              return s ? (
-                                <span key={subEntry} className="badge" style={{background:'var(--bg)',border:'1px solid var(--border)'}}>
-                                  {s.name} {sec ? '(' + sec + ')' : ''}
-                                </span>
-                              ) : null;
-                            })
-                          ) : (
-                            <span style={{color:'var(--danger)',fontSize:'0.85rem'}}>لم تُعيّن مواد بعد</span>
-                          )}
+                          {(() => {
+                            const subjectEntries = [];
+                            const seenSubIds = new Set();
+                            if (Array.isArray(adm.assigned_subjects)) {
+                              adm.assigned_subjects.forEach(subEntry => {
+                                if (typeof subEntry !== 'string' || subEntry.startsWith('CONFIG') || subEntry.startsWith('VISIBILITY')) return;
+                                const subId = subEntry.split(':')[0];
+                                const sec = subEntry.includes(':') ? subEntry.split(':')[1] : null;
+                                const s = allSubjects.find(x => x.id === subId);
+                                if (s) {
+                                  seenSubIds.add(subId);
+                                  subjectEntries.push({ name: s.name, sec, key: subEntry });
+                                }
+                              });
+                            }
+                            allSubjects.forEach(s => {
+                              if (!seenSubIds.has(s.id) && (s.instructor_id === adm.user_id || s.instructor_name === adm.name)) {
+                                seenSubIds.add(s.id);
+                                subjectEntries.push({ name: s.name, sec: null, key: 'instr-' + s.id });
+                              }
+                            });
+                            if (subjectEntries.length === 0) {
+                              return <span style={{color:'var(--danger)',fontSize:'0.85rem'}}>لم تُعيّن مواد بعد</span>;
+                            }
+                            return subjectEntries.map(entry => (
+                              <span key={entry.key} className="badge" style={{background:'var(--bg)',border:'1px solid var(--border)'}}>
+                                {entry.name} {entry.sec ? '(' + entry.sec + ')' : ''}
+                              </span>
+                            ));
+                          })()}
                         </div>
                       )}
                     </td>
@@ -806,26 +882,43 @@ export default function StudentsTab({ user }) {
                     المواد والسكاشن المصرّح للمعيد بالوصول إليها:
                   </label>
                   <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px',maxHeight:'200px',overflowY:'auto',display:'flex',flexDirection:'column',gap:'10px'}}>
-                    {allSubjects.map(sub => (
-                      <div key={sub.id} style={{borderBottom:'1px solid rgba(255,255,255,0.05)',paddingBottom:'8px'}}>
-                        <div style={{fontWeight:700,fontSize:'0.9rem',marginBottom:'4px'}}>{sub.name} (فرقة {normalizeYear(sub.year_level)})</div>
-                        <div style={{display:'flex',gap:'10px',flexWrap:'wrap'}}>
-                          {['S1', 'S2', 'S3', 'S4', 'S5', 'S6'].map(sec => {
-                            const isAssigned = assignedSubjects.includes(sub.id + ':' + sec);
-                            return (
-                              <label key={sec} style={{display:'flex',alignItems:'center',gap:'4px',fontSize:'0.8rem',cursor:'pointer'}}>
-                                <input 
-                                  type="checkbox" 
-                                  checked={isAssigned}
-                                  onChange={() => toggleAssignedSubject(sub.id, sec)}
-                                />
-                                {sec}
-                              </label>
-                            );
-                          })}
+                    {allSubjects.map(sub => {
+                      const enrolled = Array.isArray(sub.enrolled_students) ? sub.enrolled_students : [];
+                      const actualSections = new Set();
+                      enrolled.forEach(uid => {
+                        const stu = allUsers.find(u => u.user_id === uid && u.role === 'student');
+                        if (stu) {
+                          let sec = null;
+                          if (Array.isArray(stu.assigned_subjects)) {
+                            const match = stu.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+                            if (match) sec = match.split(':')[1];
+                          }
+                          if (!sec) sec = stu.section || 'S1';
+                          actualSections.add(normalizeSection(sec));
+                        }
+                      });
+                      const sectionsList = actualSections.size > 0 ? [...actualSections].sort() : ['S1'];
+                      return (
+                        <div key={sub.id} style={{borderBottom:'1px solid rgba(255,255,255,0.05)',paddingBottom:'8px'}}>
+                          <div style={{fontWeight:700,fontSize:'0.9rem',marginBottom:'4px'}}>{sub.name} (فرقة {normalizeYear(sub.year_level)})</div>
+                          <div style={{display:'flex',gap:'10px',flexWrap:'wrap'}}>
+                            {sectionsList.map(sec => {
+                              const isAssigned = assignedSubjects.includes(sub.id + ':' + sec);
+                              return (
+                                <label key={sec} style={{display:'flex',alignItems:'center',gap:'4px',fontSize:'0.8rem',cursor:'pointer'}}>
+                                  <input 
+                                    type="checkbox" 
+                                    checked={isAssigned}
+                                    onChange={() => toggleAssignedSubject(sub.id, sec)}
+                                  />
+                                  {sec}
+                                </label>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
