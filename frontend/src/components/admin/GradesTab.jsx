@@ -30,6 +30,14 @@ export default function GradesTab({ user }) {
       .trim();
   };
 
+  const getStudentSubSection = (student, subId) => {
+    if (student && Array.isArray(student.assigned_subjects)) {
+      const match = student.assigned_subjects.find(entry => typeof entry === 'string' && entry.startsWith(subId + ':'));
+      if (match) return normalizeSection(match.split(':')[1]);
+    }
+    return normalizeSection(student?.section || 'S1');
+  };
+
   const normalizeSection = (sec) => {
     if (!sec) return 'S1';
     const s = sec.toString().trim().toUpperCase().replace(/\s+/g, '');
@@ -158,7 +166,7 @@ export default function GradesTab({ user }) {
 
   const displayedEnrolledStudents = enrolledStudents.filter(stu => {
     if (selectedSection === 'all') return true;
-    return normalizeSection(stu.section || 'S1') === normalizeSection(selectedSection);
+    return getStudentSubSection(stu, selectedSubject) === normalizeSection(selectedSection);
   });
 
   const getSectionInstructorName = (subId, sec) => {
@@ -260,7 +268,7 @@ export default function GradesTab({ user }) {
       return {
         'ID': stu.user_id,
         'Name': stu.name,
-        'Section': normalizeSection(stu.section || 'S1'),
+        'Section': getStudentSubSection(stu, selectedSubject),
         'Quiz 1': g.quiz_1 || 0,
         'Quiz 2': g.quiz_2 || 0,
         'Project': g.project || 0,
@@ -405,7 +413,7 @@ export default function GradesTab({ user }) {
                     <td style={{padding:'14px 16px'}}>{stu.name}</td>
                     <td style={{padding:'14px 16px'}}>
                       <span className="badge" style={{background:'rgba(16, 185, 129, 0.1)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.2)'}}>
-                        {normalizeSection(stu.section || 'S1')}
+                        {getStudentSubSection(stu, selectedSubject)}
                       </span>
                     </td>
                     <td style={{padding:'10px 14px',textAlign:'center'}}>

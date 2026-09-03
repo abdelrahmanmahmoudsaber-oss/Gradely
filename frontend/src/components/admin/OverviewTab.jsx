@@ -35,7 +35,11 @@ export default function OverviewTab({ user }) {
   const [settingsMessage, setSettingsMessage] = useState('');
   const [showCustomColumnModal, setShowCustomColumnModal] = useState(false);
   const [newColumnName, setNewColumnName] = useState('');
+  const [newColumnScope, setNewColumnScope] = useState('global');
   const [customColumnsList, setCustomColumnsList] = useState([]);
+  const [columnLabels, setColumnLabels] = useState({}); // { [colKey]: 'Custom Label' }
+  const [editingColumn, setEditingColumn] = useState(null); // { id, label, scope, isDefault }
+  const [editLabelInput, setEditLabelInput] = useState('');
 
   // Backup & Restore State
   const [backingUp, setBackingUp] = useState(false);
@@ -78,6 +82,11 @@ export default function OverviewTab({ user }) {
               try {
                 const cols = JSON.parse(item.replace('CONFIG_CUSTOM_COLS:', ''));
                 setCustomColumnsList(cols);
+              } catch (e) {}
+            } else if (item.startsWith('CONFIG_COL_LABELS:')) {
+              try {
+                const lbls = JSON.parse(item.replace('CONFIG_COL_LABELS:', ''));
+                setColumnLabels(lbls);
               } catch (e) {}
             }
           }
@@ -386,41 +395,60 @@ export default function OverviewTab({ user }) {
     setTimeout(() => setBackupMessage(''), 3000);
   };
 
+  const getColLabel = (key, fallback) => {
+    return columnLabels[key] || fallback;
+  };
+
+  const handleOpenAddColumnModal = () => {
+    setNewColumnName('');
+    setNewColumnScope(selectedSubjectForVisibility || 'global');
+    setShowCustomColumnModal(true);
+  };
+
   const handleAddCustomColumn = async (e) => {
     e.preventDefault();
     const trimName = newColumnName.trim();
     if (!trimName) return;
 
     const colKey = 'custom_' + Date.now();
-    const newColObj = { id: colKey, label: trimName, active: true };
+    const newColObj = { 
+      id: colKey, 
+      label: trimName, 
+      scope: newColumnScope || 'global',
+      active: true 
+    };
     const updatedCols = [...customColumnsList, newColObj];
     setCustomColumnsList(updatedCols);
     setNewColumnName('');
 
-    // Also enable it in current visibility
-    const updatedActiveVis = { ...currentActiveVisibility, [colKey]: true };
-    const updatedSettings = { ...visibilitySettings, [selectedSubjectForVisibility]: updatedActiveVis };
+    // Enable in visibility settings
+    const targetScopeKey = newColumnScope || 'global';
+    const currentScopeVis = visibilitySettings[targetScopeKey] || {};
+    const updatedScopeVis = { ...currentScopeVis, [colKey]: true };
+    const updatedSettings = { ...visibilitySettings, [targetScopeKey]: updatedScopeVis };
     setVisibilitySettings(updatedSettings);
 
     try {
       const globalConfigStr = 'CONFIG:' + JSON.stringify(updatedSettings.global || {});
       const subConfigStr = 'CONFIG_SUB:' + JSON.stringify(updatedSettings);
       const colsConfigStr = 'CONFIG_CUSTOM_COLS:' + JSON.stringify(updatedCols);
+      const labelsConfigStr = 'CONFIG_COL_LABELS:' + JSON.stringify(columnLabels);
 
       const { data: subData } = await supabase.from('subjects').select('id, excluded_students');
       if (subData && subData.length > 0) {
         for (const sub of subData) {
           const cleanExcluded = Array.isArray(sub.excluded_students) 
-            ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG:') && !x.startsWith('CONFIG_SUB:') && !x.startsWith('CONFIG_CUSTOM_COLS:')) 
+            ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG:') && !x.startsWith('CONFIG_SUB:') && !x.startsWith('CONFIG_CUSTOM_COLS:') && !x.startsWith('CONFIG_COL_LABELS:')) 
             : [];
           cleanExcluded.push(globalConfigStr);
           cleanExcluded.push(subConfigStr);
           cleanExcluded.push(colsConfigStr);
+          cleanExcluded.push(labelsConfigStr);
           await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', sub.id);
         }
       }
       cacheManager.invalidate('admin_subjects_base');
-      setSettingsMessage('✅ تمت إضافة خانة الدرجة المخصصة بنجاح');
+      setSettingsMessage('✅ تمت إضافة خانة الدرجة المخصصة بنجاح وتطبيقها حسب النطاق المحدد');
       setTimeout(() => setSettingsMessage(''), 3000);
       setShowCustomColumnModal(false);
     } catch (err) {
@@ -428,7 +456,47 @@ export default function OverviewTab({ user }) {
     }
   };
 
+  const handleSaveEditColumn = async (e) => {
+    e.preventDefault();
+    if (!editingColumn) return;
+    const newLabel = editLabelInput.trim();
+    if (!newLabel) return;
+
+    const updatedLabels = { ...columnLabels, [editingColumn.id]: newLabel };
+    setColumnLabels(updatedLabels);
+
+    let updatedCols = customColumnsList;
+    if (!editingColumn.isDefault) {
+      updatedCols = customColumnsList.map(c => c.id === editingColumn.id ? { ...c, label: newLabel, scope: editingColumn.scope } : c);
+      setCustomColumnsList(updatedCols);
+    }
+
+    try {
+      const colsConfigStr = 'CONFIG_CUSTOM_COLS:' + JSON.stringify(updatedCols);
+      const labelsConfigStr = 'CONFIG_COL_LABELS:' + JSON.stringify(updatedLabels);
+
+      const { data: subData } = await supabase.from('subjects').select('id, excluded_students');
+      if (subData && subData.length > 0) {
+        for (const sub of subData) {
+          const cleanExcluded = Array.isArray(sub.excluded_students) 
+            ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG_CUSTOM_COLS:') && !x.startsWith('CONFIG_COL_LABELS:')) 
+            : [];
+          cleanExcluded.push(colsConfigStr);
+          cleanExcluded.push(labelsConfigStr);
+          await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', sub.id);
+        }
+      }
+      cacheManager.invalidate('admin_subjects_base');
+      setSettingsMessage('✅ تم تعديل وحفظ اسم الخانة بنجاح');
+      setTimeout(() => setSettingsMessage(''), 3000);
+      setEditingColumn(null);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleDeleteCustomColumn = async (colId) => {
+    if (!window.confirm('هل تريد حذف هذه الخانة المخصصة نهائياً؟')) return;
     const updatedCols = customColumnsList.filter(c => c.id !== colId);
     setCustomColumnsList(updatedCols);
 
@@ -445,6 +513,7 @@ export default function OverviewTab({ user }) {
         }
       }
       cacheManager.invalidate('admin_subjects_base');
+      setEditingColumn(null);
     } catch (err) {
       console.error(err);
     }
@@ -555,7 +624,7 @@ export default function OverviewTab({ user }) {
           <div style={{display:'flex',justifyContent:'flex-end',marginBottom:'1rem'}}>
             <button 
               className="btn-secondary" 
-              onClick={() => setShowCustomColumnModal(true)}
+              onClick={handleOpenAddColumnModal}
               style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'0.85rem',color:'var(--primary-hover)',borderColor:'rgba(79, 70, 229, 0.4)'}}
             >
               ➕ إضافة / تعديل خانة درجات جديدة
@@ -573,8 +642,17 @@ export default function OverviewTab({ user }) {
               }}
             >
               <div>
-                <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showQuiz1 ? 'var(--success)' : 'var(--text-muted)'}}>
-                  كويز 1
+                <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                  <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showQuiz1 ? 'var(--success)' : 'var(--text-muted)'}}>
+                    {getColLabel('showQuiz1', 'كويز 1')}
+                  </div>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setEditingColumn({ id: 'showQuiz1', label: getColLabel('showQuiz1', 'كويز 1'), isDefault: true }); setEditLabelInput(getColLabel('showQuiz1', 'كويز 1')); }}
+                    style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',padding:'2px',display:'flex'}}
+                    title="تعديل اسم الخانة"
+                  >
+                    <Edit size={13} />
+                  </button>
                 </div>
                 <div style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
                   {currentActiveVisibility.showQuiz1 ? 'ظاهر للطلاب' : 'مخفي'}
@@ -592,8 +670,17 @@ export default function OverviewTab({ user }) {
               }}
             >
               <div>
-                <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showQuiz2 ? 'var(--success)' : 'var(--text-muted)'}}>
-                  كويز 2
+                <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                  <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showQuiz2 ? 'var(--success)' : 'var(--text-muted)'}}>
+                    {getColLabel('showQuiz2', 'كويز 2')}
+                  </div>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setEditingColumn({ id: 'showQuiz2', label: getColLabel('showQuiz2', 'كويز 2'), isDefault: true }); setEditLabelInput(getColLabel('showQuiz2', 'كويز 2')); }}
+                    style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',padding:'2px',display:'flex'}}
+                    title="تعديل اسم الخانة"
+                  >
+                    <Edit size={13} />
+                  </button>
                 </div>
                 <div style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
                   {currentActiveVisibility.showQuiz2 ? 'ظاهر للطلاب' : 'مخفي'}
@@ -611,8 +698,17 @@ export default function OverviewTab({ user }) {
               }}
             >
               <div>
-                <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showProject ? 'var(--success)' : 'var(--text-muted)'}}>
-                  المشروع / العملي
+                <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                  <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showProject ? 'var(--success)' : 'var(--text-muted)'}}>
+                    {getColLabel('showProject', 'المشروع / العملي')}
+                  </div>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setEditingColumn({ id: 'showProject', label: getColLabel('showProject', 'المشروع / العملي'), isDefault: true }); setEditLabelInput(getColLabel('showProject', 'المشروع / العملي')); }}
+                    style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',padding:'2px',display:'flex'}}
+                    title="تعديل اسم الخانة"
+                  >
+                    <Edit size={13} />
+                  </button>
                 </div>
                 <div style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
                   {currentActiveVisibility.showProject ? 'ظاهر للطلاب' : 'مخفي'}
@@ -630,8 +726,17 @@ export default function OverviewTab({ user }) {
               }}
             >
               <div>
-                <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showAttendanceScore ? 'var(--success)' : 'var(--text-muted)'}}>
-                  درجة الحضور
+                <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                  <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showAttendanceScore ? 'var(--success)' : 'var(--text-muted)'}}>
+                    {getColLabel('showAttendanceScore', 'درجة الحضور')}
+                  </div>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setEditingColumn({ id: 'showAttendanceScore', label: getColLabel('showAttendanceScore', 'درجة الحضور'), isDefault: true }); setEditLabelInput(getColLabel('showAttendanceScore', 'درجة الحضور')); }}
+                    style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',padding:'2px',display:'flex'}}
+                    title="تعديل اسم الخانة"
+                  >
+                    <Edit size={13} />
+                  </button>
                 </div>
                 <div style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
                   {currentActiveVisibility.showAttendanceScore ? 'ظاهر للطلاب' : 'مخفي'}
@@ -649,8 +754,17 @@ export default function OverviewTab({ user }) {
               }}
             >
               <div>
-                <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showTotal ? 'var(--success)' : 'var(--text-muted)'}}>
-                  المجموع الكلي
+                <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                  <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showTotal ? 'var(--success)' : 'var(--text-muted)'}}>
+                    {getColLabel('showTotal', 'المجموع الكلي')}
+                  </div>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setEditingColumn({ id: 'showTotal', label: getColLabel('showTotal', 'المجموع الكلي'), isDefault: true }); setEditLabelInput(getColLabel('showTotal', 'المجموع الكلي')); }}
+                    style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',padding:'2px',display:'flex'}}
+                    title="تعديل اسم الخانة"
+                  >
+                    <Edit size={13} />
+                  </button>
                 </div>
                 <div style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
                   {currentActiveVisibility.showTotal ? 'ظاهر للطلاب' : 'مخفي'}
@@ -659,38 +773,52 @@ export default function OverviewTab({ user }) {
               {currentActiveVisibility.showTotal ? <Eye size={18} style={{color:'var(--success)'}} /> : <EyeOff size={18} style={{color:'var(--danger)'}} />}
             </div>
 
-            {customColumnsList.map(col => {
-              const isColActive = currentActiveVisibility[col.id] !== false;
-              return (
-                <div 
-                  key={col.id}
-                  onClick={() => handleToggleVisibility(col.id)}
-                  style={{
-                    background: isColActive ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
-                    border: isColActive ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
-                    borderRadius:'8px',padding:'12px 14px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',transition:'all 0.2s'
-                  }}
-                >
-                  <div>
-                    <div style={{fontWeight:700,fontSize:'0.9rem',color: isColActive ? 'var(--success)' : 'var(--text-muted)'}}>
-                      {col.label}
+            {customColumnsList
+              .filter(col => col.scope === 'global' || col.scope === selectedSubjectForVisibility)
+              .map(col => {
+                const isColActive = currentActiveVisibility[col.id] !== false;
+                const displayLabel = getColLabel(col.id, col.label);
+                const scopeSub = allSubjectsList.find(s => s.id === col.scope);
+                return (
+                  <div 
+                    key={col.id}
+                    onClick={() => handleToggleVisibility(col.id)}
+                    style={{
+                      background: isColActive ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.08)',
+                      border: isColActive ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                      borderRadius:'8px',padding:'12px 14px',cursor:'pointer',display:'flex',justifyContent:'space-between',alignItems:'center',transition:'all 0.2s'
+                    }}
+                  >
+                    <div>
+                      <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                        <div style={{fontWeight:700,fontSize:'0.9rem',color: isColActive ? 'var(--success)' : 'var(--text-muted)'}}>
+                          {displayLabel}
+                        </div>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); setEditingColumn({ id: col.id, label: displayLabel, scope: col.scope, isDefault: false }); setEditLabelInput(displayLabel); }}
+                          style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',padding:'2px',display:'flex'}}
+                          title="تعديل اسم الخانة"
+                        >
+                          <Edit size={13} />
+                        </button>
+                      </div>
+                      <div style={{fontSize:'0.75rem',color:'var(--text-muted)',display:'flex',alignItems:'center',gap:'4px'}}>
+                        <span>{isColActive ? 'ظاهر للطلاب' : 'مخفي'}</span>
+                        <span style={{color:'var(--primary-hover)'}}>({col.scope === 'global' ? 'عام' : scopeSub ? scopeSub.name : 'مخصص'})</span>
+                      </div>
                     </div>
-                    <div style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
-                      {isColActive ? 'ظاهر للطلاب' : 'مخفي'}
+                    <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                      {isColActive ? <Eye size={18} style={{color:'var(--success)'}} /> : <EyeOff size={18} style={{color:'var(--danger)'}} />}
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); handleDeleteCustomColumn(col.id); }} 
+                        style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',fontSize:'0.85rem',padding:'2px'}}
+                        title="حذف هذه الخانة نهائياً"
+                      >
+                        ✕
+                      </button>
                     </div>
                   </div>
-                  <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-                    {isColActive ? <Eye size={18} style={{color:'var(--success)'}} /> : <EyeOff size={18} style={{color:'var(--danger)'}} />}
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); handleDeleteCustomColumn(col.id); }} 
-                      style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',fontSize:'0.8rem',padding:'2px'}}
-                      title="حذف هذه الخانة"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-              );
+                );
             })}
 
             <div 
@@ -702,8 +830,17 @@ export default function OverviewTab({ user }) {
               }}
             >
               <div>
-                <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showAttendanceTab ? 'var(--success)' : 'var(--text-muted)'}}>
-                  سجل الأسابيع
+                <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                  <div style={{fontWeight:700,fontSize:'0.9rem',color: currentActiveVisibility.showAttendanceTab ? 'var(--success)' : 'var(--text-muted)'}}>
+                    {getColLabel('showAttendanceTab', 'سجل الأسابيع')}
+                  </div>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setEditingColumn({ id: 'showAttendanceTab', label: getColLabel('showAttendanceTab', 'سجل الأسابيع'), isDefault: true }); setEditLabelInput(getColLabel('showAttendanceTab', 'سجل الأسابيع')); }}
+                    style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',padding:'2px',display:'flex'}}
+                    title="تعديل اسم الخانة"
+                  >
+                    <Edit size={13} />
+                  </button>
                 </div>
                 <div style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
                   {currentActiveVisibility.showAttendanceTab ? 'ظاهر للطلاب' : 'مخفي'}
@@ -781,15 +918,15 @@ export default function OverviewTab({ user }) {
         </div>
       )}
 
-      {/* CUSTOM COLUMN MODAL */}
+      {/* ADD CUSTOM COLUMN MODAL */}
       {showCustomColumnModal && (
         <div style={{
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem'
         }}>
-          <div className="panel fade-in" style={{maxWidth: '440px', width: '100%'}}>
-            <h3 style={{margin:'0 0 1rem 0',fontSize:'1.2rem',color:'var(--primary-hover)'}}>
-              ➕ إضافة خانة درجات جديدة
+          <div className="panel fade-in" style={{maxWidth: '480px', width: '100%'}}>
+            <h3 style={{margin:'0 0 1rem 0',fontSize:'1.2rem',color:'var(--primary-hover)',fontWeight:800}}>
+              ➕ إضافة خانة درجات / أعمال سنة جديدة
             </h3>
             <form onSubmit={handleAddCustomColumn} style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
               <div>
@@ -797,7 +934,7 @@ export default function OverviewTab({ user }) {
                 <input 
                   type="text" 
                   className="input-field" 
-                  placeholder="مثال: درجة الميدترم، امتحان العملي، درجات الشفوي..." 
+                  placeholder="مثال: امتحان العملي، الميدترم، درجات الشفوي، كويز 3..." 
                   value={newColumnName} 
                   onChange={e => setNewColumnName(e.target.value)} 
                   required 
@@ -805,13 +942,103 @@ export default function OverviewTab({ user }) {
                   style={{width:'100%',padding:'10px'}}
                 />
               </div>
-              <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
+
+              <div>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'0.9rem',fontWeight:700}}>تطبيق هذه الخانة على:</label>
+                <select 
+                  className="input-field" 
+                  value={newColumnScope} 
+                  onChange={e => setNewColumnScope(e.target.value)}
+                  style={{width:'100%',padding:'10px',fontWeight:'bold'}}
+                >
+                  <option value="global">🌐 الإعداد العام (كافة المواد)</option>
+                  {allSubjectsList.map(s => (
+                    <option key={s.id} value={s.id}>
+                      📚 مادة محددة فقط: {s.name} (الفرقة {s.year_level})
+                    </option>
+                  ))}
+                </select>
+                <span style={{fontSize:'0.75rem',color:'var(--text-muted)',marginTop:'4px',display:'block'}}>
+                  عند تحديد مادة محددة، ستظهر هذه الخانة فقط لطلاب تلك المادة دون التأثير على باقي المواد.
+                </span>
+              </div>
+
+              <div style={{display:'flex',gap:'10px',justifyContent:'flex-end',marginTop:'0.5rem'}}>
                 <button type="button" className="btn-secondary" onClick={() => setShowCustomColumnModal(false)}>
                   إلغاء
                 </button>
                 <button type="submit" className="btn-primary">
                   إضافة وتفعيل الخانة
                 </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT COLUMN MODAL */}
+      {editingColumn && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem'
+        }}>
+          <div className="panel fade-in" style={{maxWidth: '460px', width: '100%'}}>
+            <h3 style={{margin:'0 0 1rem 0',fontSize:'1.2rem',color:'var(--primary-hover)',fontWeight:800}}>
+              ✏️ تعديل اسم وبيانات الخانة
+            </h3>
+            <form onSubmit={handleSaveEditColumn} style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
+              <div>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'0.9rem',fontWeight:700}}>الاسم المعروض للطلاب:</label>
+                <input 
+                  type="text" 
+                  className="input-field" 
+                  value={editLabelInput} 
+                  onChange={e => setEditLabelInput(e.target.value)} 
+                  required 
+                  autoFocus 
+                  style={{width:'100%',padding:'10px'}}
+                />
+              </div>
+
+              {!editingColumn.isDefault && (
+                <div>
+                  <label style={{display:'block',marginBottom:'6px',fontSize:'0.9rem',fontWeight:700}}>نطاق المادة:</label>
+                  <select 
+                    className="input-field" 
+                    value={editingColumn.scope || 'global'} 
+                    onChange={e => setEditingColumn(prev => ({ ...prev, scope: e.target.value }))}
+                    style={{width:'100%',padding:'10px'}}
+                  >
+                    <option value="global">🌐 الإعداد العام (كافة المواد)</option>
+                    {allSubjectsList.map(s => (
+                      <option key={s.id} value={s.id}>
+                        📚 مادة: {s.name} (الفرقة {s.year_level})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'0.5rem'}}>
+                {!editingColumn.isDefault ? (
+                  <button 
+                    type="button" 
+                    onClick={() => handleDeleteCustomColumn(editingColumn.id)} 
+                    className="btn-secondary" 
+                    style={{color:'var(--danger)',borderColor:'rgba(239, 68, 68, 0.3)'}}
+                  >
+                    <Trash2 size={16} /> حذف الخانة
+                  </button>
+                ) : <div />}
+
+                <div style={{display:'flex',gap:'10px'}}>
+                  <button type="button" className="btn-secondary" onClick={() => setEditingColumn(null)}>
+                    إلغاء
+                  </button>
+                  <button type="submit" className="btn-primary">
+                    حفظ التعديل
+                  </button>
+                </div>
               </div>
             </form>
           </div>

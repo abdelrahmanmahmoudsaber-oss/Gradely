@@ -56,6 +56,14 @@ export default function AttendanceTab({ user }) {
       .trim();
   };
 
+  const getStudentSubSection = (student, subId) => {
+    if (student && Array.isArray(student.assigned_subjects)) {
+      const match = student.assigned_subjects.find(entry => typeof entry === 'string' && entry.startsWith(subId + ':'));
+      if (match) return normalizeSection(match.split(':')[1]);
+    }
+    return normalizeSection(student?.section || 'S1');
+  };
+
   const normalizeSection = (sec) => {
     if (!sec) return 'S1';
     const s = sec.toString().trim().toUpperCase().replace(/\s+/g, '');
@@ -197,7 +205,7 @@ export default function AttendanceTab({ user }) {
   const displayedEnrolledStudents = enrolledStudents
     .filter(stu => {
       if (selectedSection === 'all') return true;
-      return normalizeSection(stu.section || 'S1') === normalizeSection(selectedSection);
+      return getStudentSubSection(stu, selectedSubject) === normalizeSection(selectedSection);
     })
     .filter(stu => {
       if (!studentSearch.trim()) return true;
@@ -427,7 +435,7 @@ export default function AttendanceTab({ user }) {
           'الرقم الأكاديمي': s.user_id,
           'اسم الطالب': s.name,
           'الفرقة': normalizeYear(s.year_level),
-          'السكشن': normalizeSection(s.section || 'S1'),
+          'السكشن': getStudentSubSection(s, selectedSubject),
           'الأسبوع': `الأسبوع ${week}`,
           'تاريخ المحاضرة': sessionDate,
           'الحالة': stLabel,
@@ -767,7 +775,7 @@ export default function AttendanceTab({ user }) {
                           }}
                         />
                         <span style={{fontSize:'0.9rem',fontWeight: isChecked ? 'bold' : 'normal'}}>
-                          {s.name} ({s.user_id}) - <strong style={{color:'var(--success)'}}>{normalizeSection(s.section || 'S1')}</strong>
+                          {s.name} ({s.user_id}) - <strong style={{color:'var(--success)'}}>{getStudentSubSection(s, selectedSubject)}</strong>
                         </span>
                       </label>
                     );

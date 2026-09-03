@@ -51,6 +51,14 @@ export default function StudentDashboard({ user, onLogout }) {
       .trim();
   };
 
+  const getStudentSubSection = (student, subId) => {
+    if (student && Array.isArray(student.assigned_subjects)) {
+      const match = student.assigned_subjects.find(entry => typeof entry === 'string' && entry.startsWith(subId + ':'));
+      if (match) return normalizeSection(match.split(':')[1]);
+    }
+    return normalizeSection(student?.section || 'S1');
+  };
+
   const normalizeSection = (sec) => {
     if (!sec) return 'S1';
     const s = sec.toString().trim().toUpperCase().replace(/\s+/g, '');
@@ -106,11 +114,7 @@ export default function StudentDashboard({ user, onLogout }) {
       if (cached.visibility) {
         setVisibility(cached.visibility);
         const gVis = cached.visibility.global || cached.visibility;
-        if (gVis.showAttendanceTab !== false) {
-          setViewMode('attendance');
-        } else {
-          setViewMode('grades');
-        }
+        setViewMode('attendance');
       }
       if (cached.subjects.length > 0) setSelectedSubjectId(cached.subjects[0].id);
       setLoading(false);
@@ -142,11 +146,7 @@ export default function StudentDashboard({ user, onLogout }) {
 
       setVisibility(currentVisibility);
       const gVis = currentVisibility.global || currentVisibility;
-      if (gVis.showAttendanceTab !== false) {
-        setViewMode('attendance');
-      } else {
-        setViewMode('grades');
-      }
+      setViewMode('attendance');
 
       const studentSubjects = subData.filter(s => {
         if (Array.isArray(s.enrolled_students)) {
@@ -337,7 +337,7 @@ export default function StudentDashboard({ user, onLogout }) {
             أهلاً بك، <span style={{color: 'var(--primary-hover)'}}>{user.name}</span> 👋
           </h1>
           <p className="text-muted" style={{fontSize: '0.95rem', margin: 0}}>
-            الرقم الأكاديمي: <strong>{user.user_id}</strong> | الفرقة: <strong>الفرقة {normalizeYear(user.year_level)}</strong> | السكشن: <strong style={{color:'var(--success)'}}>{normalizeSection(user.section || 'S1')}</strong>
+            الرقم الأكاديمي: <strong>{user.user_id}</strong> | الفرقة: <strong>الفرقة {normalizeYear(user.year_level)}</strong> | السكشن: <strong style={{color:'var(--success)'}}>{getStudentSubSection(user, currentSubject.id)}</strong>
           </p>
         </div>
 
@@ -440,7 +440,7 @@ export default function StudentDashboard({ user, onLogout }) {
                     </div>
                     <div style={{fontSize:'0.8rem',color:'var(--text-muted)',display:'flex',flexDirection:'column',gap:'2px'}}>
                       <div>المعيد: <strong style={{color:'var(--text-main)'}}>{sub.instructor_name || 'المدير الرئيسي'}</strong></div>
-                      <div>السكشن: <strong style={{color:'var(--success)'}}>{normalizeSection(user.section || 'S1')}</strong></div>
+                      <div>السكشن: <strong style={{color:'var(--success)'}}>{getStudentSubSection(user, sub.id)}</strong></div>
                     </div>
                   </div>
                 );
@@ -494,7 +494,7 @@ export default function StudentDashboard({ user, onLogout }) {
             </div>
 
             {/* Attendance View */}
-            {viewMode === 'attendance' && currentSubVis.showAttendanceTab && (
+            {viewMode === 'attendance' && (
               <div className="fade-in">
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',flexWrap:'wrap',gap:'0.8rem'}}>
                   <h4 style={{margin: 0, color: 'var(--text-muted)', fontSize:'0.95rem'}}>
@@ -557,7 +557,7 @@ export default function StudentDashboard({ user, onLogout }) {
             )}
 
             {/* Grades View (Dynamically respecting visibility toggles) */}
-            {(viewMode === 'grades' || !currentSubVis.showAttendanceTab) && (
+            {viewMode === 'grades' && (
               <div className="fade-in">
                 
                 {hasAnyGradeVisible ? (
