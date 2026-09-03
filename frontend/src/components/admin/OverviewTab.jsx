@@ -170,7 +170,37 @@ export default function OverviewTab({ user }) {
 
       const allStudents = allUsersList.filter(u => u.role === 'student');
       const allAdmins = allUsersList.filter(u => u.role === 'admin');
+      setAllStudentsList(allStudents);
       setAllAdminsList(allAdmins);
+
+      // Compute total sections across accessible subjects
+      let totalSecs = 0;
+      accessibleSubjects.forEach(sub => {
+        const secSet = new Set();
+        allStudents.forEach(stu => {
+          const inSub = Array.isArray(sub.enrolled_students) && sub.enrolled_students.includes(stu.user_id);
+          const hasAss = Array.isArray(stu.assigned_subjects) && stu.assigned_subjects.some(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+          if (inSub || hasAss) {
+            if (Array.isArray(stu.assigned_subjects)) {
+              const m = stu.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+              if (m) secSet.add(normalizeSection(m.split(':')[1]));
+              else secSet.add(normalizeSection(stu.section || 'S1'));
+            } else {
+              secSet.add(normalizeSection(stu.section || 'S1'));
+            }
+          }
+        });
+        allAdmins.forEach(adm => {
+          if (Array.isArray(adm.assigned_subjects)) {
+            adm.assigned_subjects.forEach(entry => {
+              if (typeof entry === 'string' && entry.startsWith(sub.id + ':')) {
+                secSet.add(normalizeSection(entry.split(':')[1]));
+              }
+            });
+          }
+        });
+        totalSecs += Math.max(secSet.size, 1);
+      });
 
       let visibleStudentsCount = allStudents.length;
       if (!isSuper) {
@@ -188,6 +218,7 @@ export default function OverviewTab({ user }) {
         totalAdmins: allAdmins.length,
         totalSubjects: accessibleSubjects.length,
         lowAttendanceCount: 0,
+        totalSections: totalSecs,
         lastUpdate: 'نشط الآن'
       });
 
@@ -830,14 +861,14 @@ export default function OverviewTab({ user }) {
 
       const { data: subData } = await supabase.from('subjects').select('id, excluded_students');
       if (subData && subData.length > 0) {
-        for (const sub of subData) {
+        await Promise.all(subData.map(async sub => {
           const cleanExcluded = Array.isArray(sub.excluded_students) 
             ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG_CUSTOM_COLS:') && !x.startsWith('CONFIG_COL_LABELS:')) 
             : [];
           cleanExcluded.push(colsConfigStr);
           cleanExcluded.push(labelsConfigStr);
-          await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', sub.id);
-        }
+          return supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', sub.id);
+        }));
       }
       cacheManager.invalidate('admin_subjects_base');
       setSettingsMessage('✅ تم تعديل وحفظ اسم الخانة بنجاح');
@@ -923,11 +954,11 @@ export default function OverviewTab({ user }) {
 
         <div className="panel" style={{display:'flex',alignItems:'center',gap:'1.2rem',borderTop:'4px solid #3b82f6'}}>
           <div style={{background:'rgba(59, 130, 246, 0.1)',padding:'1rem',borderRadius:'50%',color:'#3b82f6'}}>
-            <Clock size={28} />
+            <LayoutDashboard size={28} />
           </div>
           <div>
-            <p className="text-muted" style={{margin:'0 0 4px 0',fontSize:'0.9rem'}}>حالة النظام والبيانات</p>
-            <h3 style={{margin:0,fontSize:'1.3rem',fontWeight:800,color:'var(--success)'}}>{stats.lastUpdate}</h3>
+            <p className="text-muted" style={{margin:'0 0 4px 0',fontSize:'0.9rem'}}>إجمالي السكاشن الدراسية</p>
+            <h3 style={{margin:0,fontSize:'1.8rem',fontWeight:800,color:'var(--primary-hover)'}}>{stats.totalSections || 0} سكشن</h3>
           </div>
         </div>
       </div>

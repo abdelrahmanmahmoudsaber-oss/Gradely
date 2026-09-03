@@ -631,7 +631,7 @@ export default function StudentDashboard({ user, onLogout }) {
 
                       {currentSubVis.showProject && (
                         <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
-                          <span className="text-muted" style={{fontSize: '0.8rem'}}>المشروع</span>
+                          <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, 'showProject', 'المشروع')}</span>
                           <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
                             {currentGrades.project || 0}
                           </h3>
@@ -640,7 +640,7 @@ export default function StudentDashboard({ user, onLogout }) {
 
                       {currentSubVis.showAttendanceScore && (
                         <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
-                          <span className="text-muted" style={{fontSize: '0.8rem'}}>الحضور</span>
+                          <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, 'showAttendanceScore', 'الحضور')}</span>
                           <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--success)'}}>
                             {currentGrades.attendance_score || 0}
                           </h3>
