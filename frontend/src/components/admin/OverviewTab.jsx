@@ -405,7 +405,18 @@ export default function OverviewTab({ user }) {
 
   const handleOpenAddColumnModal = () => {
     setNewColumnName('');
-    setNewColumnScope(selectedSubjectForVisibility || 'global');
+    if (isSuper) {
+      setNewColumnScope(selectedSubjectForVisibility || 'global');
+    } else {
+      const mySubs = allSubjectsList.filter(s => {
+        const freshUser = (cacheManager.get('admin_users_base') || []).find(u => u.user_id === user.user_id) || user;
+        const rawAss = Array.isArray(freshUser?.assigned_subjects) ? freshUser.assigned_subjects : [];
+        const subIds = rawAss.map(e => e.split(':')[0]);
+        return s.instructor_id === user.user_id || s.instructor_name === user.name || subIds.includes(s.id);
+      });
+      const defaultSubId = (selectedSubjectForVisibility !== 'global' && selectedSubjectForVisibility) ? selectedSubjectForVisibility : (mySubs[0]?.id || '');
+      setNewColumnScope(defaultSubId);
+    }
     setShowCustomColumnModal(true);
   };
 
@@ -958,10 +969,15 @@ export default function OverviewTab({ user }) {
                   onChange={e => setNewColumnScope(e.target.value)}
                   style={{width:'100%',padding:'10px',fontWeight:'bold'}}
                 >
-                  <option value="global">🌐 الإعداد العام (كافة المواد)</option>
-                  {allSubjectsList.map(s => (
+                  {isSuper && <option value="global">🌐 الإعداد العام (كافة المواد)</option>}
+                  {(isSuper ? allSubjectsList : allSubjectsList.filter(s => {
+                    const freshUser = (cacheManager.get('admin_users_base') || []).find(u => u.user_id === user.user_id) || user;
+                    const rawAss = Array.isArray(freshUser?.assigned_subjects) ? freshUser.assigned_subjects : [];
+                    const subIds = rawAss.map(e => e.split(':')[0]);
+                    return s.instructor_id === user.user_id || s.instructor_name === user.name || subIds.includes(s.id);
+                  })).map(s => (
                     <option key={s.id} value={s.id}>
-                      📚 مادة محددة فقط: {s.name} (الفرقة {s.year_level})
+                      📚 مادة محددة: {s.name} (الفرقة {s.year_level})
                     </option>
                   ))}
                 </select>

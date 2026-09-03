@@ -155,9 +155,10 @@ export default function AttendanceTab({ user }) {
       return;
     }
 
+    // Fetch attendance records from database
     const { data } = await supabase
       .from('attendance')
-      .select('student_id, status, session_date, excuse_reason')
+      .select('student_id, status')
       .eq('subject_id', selectedSubject)
       .eq('week_number', week);
 
@@ -165,11 +166,19 @@ export default function AttendanceTab({ user }) {
     const excuses = {};
     let foundDate = sessionDate;
 
+    // Check saved week date in subject config
+    const targetSub = subjects.find(s => s.id === selectedSubject);
+    if (targetSub && Array.isArray(targetSub.excluded_students)) {
+      const datePrefix = 'WEEK_DATE_W' + week + ':';
+      const dateEntry = targetSub.excluded_students.find(e => typeof e === 'string' && e.startsWith(datePrefix));
+      if (dateEntry) {
+        foundDate = dateEntry.replace(datePrefix, '');
+      }
+    }
+
     if (data && data.length > 0) {
       data.forEach(r => { 
         recs[r.student_id] = r.status;
-        if (r.excuse_reason) excuses[r.student_id] = r.excuse_reason;
-        if (r.session_date) foundDate = r.session_date;
       });
     }
 
@@ -302,11 +311,11 @@ export default function AttendanceTab({ user }) {
   };
 
   // Instant 0ms Local Toggle + Non-blocking Background Upsert
-  const toggleAttendance = (studentId, newStatus) => {
+  // Instant 0ms Local Toggle + Non-blocking Database Upsert
+  const toggleAttendance = async (studentId, newStatus) => {
     const currentVal = attendanceRecords[studentId];
     const nextVal = currentVal === newStatus ? null : newStatus;
     
-    // If setting to excused, open excuse prompt
     if (nextVal === 'excused') {
       const studentObj = allStudents.find(s => s.user_id === studentId);
       setExcuseModalStudent(studentObj || { user_id: studentId, name: studentId });
@@ -319,19 +328,64 @@ export default function AttendanceTab({ user }) {
     cacheManager.invalidate('rep_' + studentId);
     cacheManager.invalidate('student_data_' + studentId);
     
-    setAutoSaveStatus('✓ تم الحفظ');
-    setTimeout(() => setAutoSaveStatus(''), 1500);
+    setAutoSaveStatus('💾 جاري الحفظ...');
 
-    supabase.from('attendance').upsert({
-      student_id: studentId,
-      subject_id: selectedSubject,
-      week_number: week,
-      status: nextVal || 'unrecorded',
-      session_date: sessionDate,
-      excuse_reason: nextVal === 'excused' ? (excuseReasons[studentId] || null) : null
-    }, { onConflict: 'student_id,subject_id,week_number' }).catch(err => {
-      console.error('Background save error:', err);
-    });
+    try {
+      const { error } = await supabase.from('attendance').upsert({
+        student_id: studentId,
+        subject_id: selectedSubject,
+        week_number: week,
+        status: nextVal || 'unrecorded'
+      }, { onConflict: 'student_id,subject_id,week_number' });
+
+      if (error) {
+        console.error('Attendance save error:', error);
+        setAutoSaveStatus('❌ فشل الحفظ');
+      } else {
+        setAutoSaveStatus('✓ تم الحفظ تلقائياً');
+        setTimeout(() => setAutoSaveStatus(''), 2000);
+      }
+    } catch (err) {
+      console.error('Attendance toggle error:', err);
+      setAutoSaveStatus('❌ خطأ في الحفظ');
+    }
+  };
+
+  // Manual Explicit Save All Attendance Records for this week
+  const handleManualSaveAttendance = async () => {
+    if (!selectedSubject) return;
+    setAutoSaveStatus('💾 جاري الحفظ الشامل...');
+    try {
+      const upsertRows = displayedEnrolledStudents.map(stu => ({
+        student_id: stu.user_id,
+        subject_id: selectedSubject,
+        week_number: week,
+        status: attendanceRecords[stu.user_id] || 'unrecorded'
+      }));
+
+      if (upsertRows.length > 0) {
+        const { error } = await supabase.from('attendance').upsert(upsertRows, { onConflict: 'student_id,subject_id,week_number' });
+        if (error) throw error;
+      }
+
+      // Also save week date in subject config
+      const targetSub = subjects.find(s => s.id === selectedSubject);
+      if (targetSub) {
+        const currentExcluded = Array.isArray(targetSub.excluded_students) ? targetSub.excluded_students : [];
+        const datePrefix = 'WEEK_DATE_W' + week + ':';
+        const kept = currentExcluded.filter(e => typeof e === 'string' && !e.startsWith(datePrefix));
+        const updatedExcluded = [...kept, datePrefix + sessionDate];
+        await supabase.from('subjects').update({ excluded_students: updatedExcluded }).eq('id', selectedSubject);
+        targetSub.excluded_students = updatedExcluded;
+        cacheManager.invalidate('admin_subjects_base');
+      }
+
+      setAutoSaveStatus('✅ تم حفظ كشف الغياب وتاريخ الأسبوع بنجاح!');
+      setTimeout(() => setAutoSaveStatus(''), 3500);
+    } catch (err) {
+      console.error('Manual save error:', err);
+      setAutoSaveStatus('❌ حدث خطأ أثناء الحفظ');
+    }
   };
 
   const handleSaveExcuseReason = () => {
@@ -554,7 +608,7 @@ export default function AttendanceTab({ user }) {
               const taName = selectedSubject ? getSectionInstructorName(selectedSubject, sec) : '';
               return (
                 <option key={sec} value={sec}>
-                  سكشن {sec} {taName ? '(' + taName + ')' : ''}
+                  [ {sec} ] سكشن {sec.replace('S','')} {taName ? '— ' + taName : ''}
                 </option>
               );
             })}
@@ -578,9 +632,19 @@ export default function AttendanceTab({ user }) {
             type="date" 
             className="input-field" 
             value={sessionDate} 
-            onChange={e => {
-              setSessionDate(e.target.value);
-              supabase.from('attendance').update({ session_date: e.target.value }).eq('subject_id', selectedSubject).eq('week_number', week);
+            onChange={async (e) => {
+              const newDate = e.target.value;
+              setSessionDate(newDate);
+              const targetSub = subjects.find(s => s.id === selectedSubject);
+              if (targetSub) {
+                const currentExcluded = Array.isArray(targetSub.excluded_students) ? targetSub.excluded_students : [];
+                const datePrefix = 'WEEK_DATE_W' + week + ':';
+                const kept = currentExcluded.filter(el => typeof el === 'string' && !el.startsWith(datePrefix));
+                const updatedExcluded = [...kept, datePrefix + newDate];
+                await supabase.from('subjects').update({ excluded_students: updatedExcluded }).eq('id', selectedSubject);
+                targetSub.excluded_students = updatedExcluded;
+                cacheManager.invalidate('admin_subjects_base');
+              }
             }} 
           />
         </div>
@@ -626,6 +690,14 @@ export default function AttendanceTab({ user }) {
 
           {/* Quick Actions & View Switcher */}
           <div style={{display:'flex',gap:'8px',alignItems:'center',flexWrap:'wrap'}}>
+            <button 
+              className="btn-primary" 
+              onClick={handleManualSaveAttendance}
+              style={{background:'var(--success)',borderColor:'var(--success)',fontSize:'0.85rem',padding:'6px 14px',fontWeight:800,display:'flex',alignItems:'center',gap:'6px'}}
+              title="حفظ كشف الحضور والغياب فوراً في قاعدة البيانات"
+            >
+              💾 حفظ كشف الغياب الآن
+            </button>
             <button 
               className="btn-secondary" 
               onClick={handleMarkAllPresent}
@@ -926,9 +998,7 @@ export default function AttendanceTab({ user }) {
                         <span className="badge" style={{background:'var(--bg)',border:'1px solid var(--border)',color:'var(--text-muted)',fontFamily:'monospace',fontSize:'0.8rem'}}>
                           {s.user_id}
                         </span>
-                        <span className="badge" style={{background:'rgba(16, 185, 129, 0.12)',border:'1px solid rgba(16, 185, 129, 0.25)',color:'var(--success)',fontWeight:700,fontSize:'0.8rem'}}>
-                          {normalizeSection(s.section || 'S1')}
-                        </span>
+                        {/* Removed profile section badge to prevent confusion */}
                         <span className="badge" style={{background:'rgba(79, 70, 229, 0.08)',color:'var(--primary-hover)',border:'1px solid rgba(79, 70, 229, 0.2)',fontSize:'0.75rem'}}>
                           فرقة {normalizeYear(s.year_level)}
                         </span>
