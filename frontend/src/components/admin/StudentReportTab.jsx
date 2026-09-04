@@ -322,22 +322,22 @@ export default function StudentReportTab({ user }) {
 
                         <div className="panel" style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px 6px',textAlign:'center'}}>
                           <div style={{fontSize:'0.85rem',color:'var(--text-muted)',fontWeight:600,marginBottom:'4px'}}>الحضور</div>
-                          <div style={{fontWeight:800,fontSize:'1.4rem',color:'var(--success)'}}>{g.attendance_score || 0}</div>
+                          <div style={{fontWeight:800,fontSize:'1.4rem',color:'var(--success)'}}>{g.attendance_score !== null && g.attendance_score !== undefined ? g.attendance_score : "لم ترصد"}</div>
                         </div>
 
                         <div className="panel" style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px 6px',textAlign:'center'}}>
                           <div style={{fontSize:'0.85rem',color:'var(--text-muted)',fontWeight:600,marginBottom:'4px'}}>المشروع</div>
-                          <div style={{fontWeight:800,fontSize:'1.4rem',color:'var(--text-main)'}}>{g.project || 0}</div>
+                          <div style={{fontWeight:800,fontSize:'1.4rem',color:'var(--text-main)'}}>{g.project !== null && g.project !== undefined ? g.project : "لم ترصد"}</div>
                         </div>
 
                         <div className="panel" style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px 6px',textAlign:'center'}}>
                           <div style={{fontSize:'0.85rem',color:'var(--text-muted)',fontWeight:600,marginBottom:'4px'}}>كويز 2</div>
-                          <div style={{fontWeight:800,fontSize:'1.4rem',color:'var(--text-main)'}}>{g.quiz_2 || 0}</div>
+                          <div style={{fontWeight:800,fontSize:'1.4rem',color:'var(--text-main)'}}>{g.quiz_2 !== null && g.quiz_2 !== undefined ? g.quiz_2 : "لم ترصد"}</div>
                         </div>
 
                         <div className="panel" style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px 6px',textAlign:'center'}}>
                           <div style={{fontSize:'0.85rem',color:'var(--text-muted)',fontWeight:600,marginBottom:'4px'}}>كويز 1</div>
-                          <div style={{fontWeight:800,fontSize:'1.4rem',color:'var(--text-main)'}}>{g.quiz_1 || 0}</div>
+                          <div style={{fontWeight:800,fontSize:'1.4rem',color:'var(--text-main)'}}>{g.quiz_1 !== null && g.quiz_1 !== undefined ? g.quiz_1 : "لم ترصد"}</div>
                         </div>
                       </div>
 

@@ -18,6 +18,20 @@ const SUBJECT_COLORS = [
   { bg: 'rgba(20, 184, 166, 0.15)', border: '#14b8a6', text: '#2dd4bf', tag: '#14b8a6' },
 ];
 
+const LinkedInOfficialIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ display: 'inline-block', verticalAlign: 'middle', borderRadius: '3px' }}>
+    <rect width="24" height="24" rx="4" fill="#0A66C2"/>
+    <path d="M7.4 9.6H4.6V18.6H7.4V9.6ZM6 4.6C5.1 4.6 4.4 5.3 4.4 6.2C4.4 7.1 5.1 7.8 6 7.8C6.9 7.8 7.6 7.1 7.6 6.2C7.6 5.3 6.9 4.6 6 4.6ZM19.4 13.7C19.4 10.8 17.8 9.4 15.6 9.4C13.8 9.4 13 10.4 12.5 11.2V9.6H9.7C9.7 10.4 9.7 18.6 9.7 18.6H12.5V13.6C12.5 13.3 12.5 13.1 12.6 12.9C12.9 12.2 13.5 11.5 14.5 11.5C15.8 11.5 16.3 12.5 16.3 14V18.6H19.4V13.7Z" fill="white"/>
+  </svg>
+);
+
+const renderGradeDisplay = (val) => {
+  if (val === null || val === undefined || val === '') {
+    return <span style={{fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 600}}>لم ترصد</span>;
+  }
+  return val;
+};
+
 export default function StudentDashboard({ user, onLogout }) {
   const [subjects, setSubjects] = useState([]);
   const [allAdmins, setAllAdmins] = useState([]);
@@ -637,7 +651,7 @@ export default function StudentDashboard({ user, onLogout }) {
                         <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
                           <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, 'showQuiz1', 'كويز 1')}</span>
                           <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
-                            {currentGrades.quiz_1 || 0}
+                            {renderGradeDisplay(currentGrades.quiz_1)}
                           </h3>
                         </div>
                       )}
@@ -646,7 +660,7 @@ export default function StudentDashboard({ user, onLogout }) {
                         <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
                           <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, 'showQuiz2', 'كويز 2')}</span>
                           <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
-                            {currentGrades.quiz_2 || 0}
+                            {renderGradeDisplay(currentGrades.quiz_2)}
                           </h3>
                         </div>
                       )}
@@ -655,7 +669,7 @@ export default function StudentDashboard({ user, onLogout }) {
                         <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
                           <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, 'showProject', 'المشروع')}</span>
                           <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
-                            {currentGrades.project || 0}
+                            {renderGradeDisplay(currentGrades.project)}
                           </h3>
                         </div>
                       )}
@@ -664,7 +678,7 @@ export default function StudentDashboard({ user, onLogout }) {
                         <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
                           <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, 'showAttendanceScore', 'الحضور')}</span>
                           <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--success)'}}>
-                            {currentGrades.attendance_score || 0}
+                            {renderGradeDisplay(currentGrades.attendance_score)}
                           </h3>
                         </div>
                       )}

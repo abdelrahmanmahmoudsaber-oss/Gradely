@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
-import { exportExcelFile } from '../../utils/excelHelper';
+import { exportExcelFile, parseAttendanceExcelFile, exportAttendanceTemplateExcel } from '../../utils/excelHelper';
 import { cacheManager } from '../../utils/dataCache';
 import { 
   Download, Users, UserPlus, UserMinus, UserCheck, CheckSquare, 
@@ -42,6 +42,12 @@ export default function AttendanceTab({ user }) {
   const [selectedStudentToAdd, setSelectedStudentToAdd] = useState('');
   const [selectedStudentsList, setSelectedStudentsList] = useState([]);
   const [pastedIds, setPastedIds] = useState('');
+
+  // Excel Attendance Import State
+  const [showImportAttendanceModal, setShowImportAttendanceModal] = useState(false);
+  const [importAttendanceFile, setImportAttendanceFile] = useState(null);
+  const [importAttendanceStatus, setImportAttendanceStatus] = useState('');
+  const [importingAttendance, setImportingAttendance] = useState(false);
 
   const isSuper = !user || user.user_id === 'admin';
 
@@ -562,6 +568,72 @@ export default function AttendanceTab({ user }) {
   });
   const countUnrecorded = displayedEnrolledStudents.length - (countPresent + countAbsent + countLate + countExcused);
 
+  const handleDownloadAttendanceTemplate = async () => {
+    if (!currentSub) return;
+    const targetStudents = displayedEnrolledStudents.length > 0 ? displayedEnrolledStudents : enrolledStudents;
+    await exportAttendanceTemplateExcel(targetStudents, currentSub.name, currentSub.total_weeks || 12);
+  };
+
+  const handleProcessAttendanceImport = async () => {
+    if (!importAttendanceFile || !selectedSubject) return;
+    try {
+      setImportingAttendance(true);
+      setImportAttendanceStatus('جاري قراءة ومعالجة شيت الإكسيل...');
+
+      const parsedRows = await parseAttendanceExcelFile(importAttendanceFile);
+      if (!parsedRows || parsedRows.length === 0) {
+        throw new Error('لم يتم العثور على بيانات صالحة في ملف الإكسيل.');
+      }
+
+      const upsertRows = [];
+      let matchedCount = 0;
+
+      parsedRows.forEach(rec => {
+        const matchedStudent = allStudents.find(s => 
+          (s.user_id && rec.studentId && s.user_id.trim() === rec.studentId.trim()) ||
+          (s.name && rec.studentName && s.name.trim().toLowerCase() === rec.studentName.trim().toLowerCase())
+        );
+
+        if (matchedStudent) {
+          matchedCount++;
+          Object.keys(rec.weekStatuses).forEach(wStr => {
+            const wNum = parseInt(wStr, 10);
+            upsertRows.push({
+              student_id: matchedStudent.user_id,
+              subject_id: selectedSubject,
+              week_number: wNum,
+              status: rec.weekStatuses[wStr]
+            });
+          });
+        }
+      });
+
+      if (upsertRows.length === 0) {
+        throw new Error('لم يتم العثور على طُلاب مطابقين بالأرقام الأكاديمية (ID) المسجلة في المادة.');
+      }
+
+      setImportAttendanceStatus(`جاري رصد وتسجيل ${upsertRows.length} سجل غياب لعدد ${matchedCount} طالب...`);
+
+      const { error } = await supabase.from('attendance').upsert(upsertRows, { onConflict: 'student_id,subject_id,week_number' });
+      if (error) throw error;
+
+      cacheManager.clear();
+      await fetchAttendance();
+
+      setMessage(`✅ تم استيراد ورصد الغياب بنجاح لـ ${matchedCount} طالب وتسميعها فوراً لجميع المعيدين والطلاب والتقرير الشامل!`);
+      setTimeout(() => setMessage(''), 5000);
+      setShowImportAttendanceModal(false);
+      setImportAttendanceFile(null);
+      setImportAttendanceStatus('');
+
+    } catch (err) {
+      console.error('Attendance import error:', err);
+      setImportAttendanceStatus('❌ خطأ: ' + (err.message || 'فشل معالجة شيت الإكسيل'));
+    } finally {
+      setImportingAttendance(false);
+    }
+  };
+
   if (loading) {
     return <div style={{padding:'3rem',textAlign:'center',color:'var(--text-muted)'}}>جاري تحميل سجل الغياب...</div>;
   }
@@ -591,6 +663,15 @@ export default function AttendanceTab({ user }) {
             </button>
           )}
 
+          <button 
+            className="btn-secondary" 
+            onClick={() => setShowImportAttendanceModal(true)} 
+            disabled={!selectedSubject}
+            style={{borderColor:'rgba(79, 70, 229, 0.4)',color:'var(--primary-hover)',display:'flex',alignItems:'center',gap:'8px',padding:'9px 16px',fontSize:'0.9rem'}}
+            title="استيراد ورصد الغياب كلياً من ملف Excel"
+          >
+            <FileSpreadsheet size={18} /> 📥 استيراد غياب من Excel
+          </button>
           <button 
             className="btn-primary" 
             onClick={() => setShowExportModal(true)} 
@@ -1313,6 +1394,85 @@ export default function AttendanceTab({ user }) {
         </div>
       )}
 
+
+      {/* Attendance Excel Import Modal */}
+      {showImportAttendanceModal && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.75)',backdropFilter:'blur(4px)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:'1rem'}}>
+          <div className="panel fade-in" style={{maxWidth:'580px',width:'100%',padding:'2rem',borderRadius:'16px',position:'relative'}}>
+            <button onClick={() => setShowImportAttendanceModal(false)} style={{position:'absolute',top:'16px',left:'16px',background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}}>
+              <X size={22} />
+            </button>
+
+            <h3 style={{margin:'0 0 8px 0',fontSize:'1.3rem',color:'var(--primary-hover)',display:'flex',alignItems:'center',gap:'8px'}}>
+              <FileSpreadsheet size={24} /> استيراد ورصد الغياب من ملف Excel
+            </h3>
+            <p className="text-muted" style={{margin:'0 0 1.2rem 0',fontSize:'0.88rem'}}>
+              يمكنك رفع ملف إكسيل يحتوي على أرقام الطلاب الأكاديمية (ID) وقيم الغياب لرصد كافة الأسابيع دفعة واحدة:
+            </p>
+
+            {/* Instruction Guide Diagram */}
+            <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'10px',padding:'14px',marginBottom:'1.3rem',fontSize:'0.83rem'}}>
+              <div style={{fontWeight:700,color:'var(--text-main)',marginBottom:'8px'}}>📋 التنسيق المطلوب للأعمدة في ملف Excel:</div>
+              <div style={{overflowX:'auto',fontFamily:'monospace',background:'rgba(0,0,0,0.2)',padding:'8px',borderRadius:'6px',color:'#38bdf8',marginBottom:'8px'}}>
+                | Section | ID | Name | Section 1 | Section 2 | Section 3 | ...
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px',fontSize:'0.8rem',color:'var(--text-muted)'}}>
+                <span>● <strong style={{color:'var(--success)'}}>1</strong> = حاضر ✓</span>
+                <span>● <strong style={{color:'var(--danger)'}}>0</strong> = غائب ✗</span>
+                <span>● <strong style={{color:'var(--warning)'}}>2</strong> = تأخير ⏱️</span>
+                <span>● <strong style={{color:'#3b82f6'}}>E</strong> = عذر 🔵</span>
+              </div>
+            </div>
+
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.3rem'}}>
+              <span style={{fontSize:'0.85rem',color:'var(--text-muted)'}}>هل تريد نموذجاً جاهزاً بأعمدة المادة والطلاب؟</span>
+              <button 
+                className="btn-secondary" 
+                onClick={handleDownloadAttendanceTemplate}
+                style={{padding:'6px 12px',fontSize:'0.82rem',color:'var(--success)',borderColor:'rgba(16,185,129,0.3)',display:'flex',alignItems:'center',gap:'5px'}}
+              >
+                <Download size={14} /> تحميل نموذج جاهز (.xlsx)
+              </button>
+            </div>
+
+            <div style={{marginBottom:'1.5rem'}}>
+              <label style={{display:'block',marginBottom:'8px',fontWeight:700,fontSize:'0.9rem'}}>اختر ملف الإكسيل (.xlsx / .xls):</label>
+              <input 
+                type="file" 
+                accept=".xlsx, .xls"
+                onChange={e => setImportAttendanceFile(e.target.files[0] || null)}
+                className="input-field" 
+                style={{padding:'8px'}}
+              />
+            </div>
+
+            {importAttendanceStatus && (
+              <div style={{
+                background: importAttendanceStatus.startsWith('❌') ? 'rgba(239, 68, 68, 0.1)' : 'rgba(79, 70, 229, 0.1)',
+                color: importAttendanceStatus.startsWith('❌') ? 'var(--danger)' : 'var(--primary-hover)',
+                border: importAttendanceStatus.startsWith('❌') ? '1px solid var(--danger)' : '1px solid var(--primary)',
+                padding:'10px 14px',borderRadius:'8px',marginBottom:'1.2rem',fontSize:'0.88rem',fontWeight:700
+              }}>
+                {importAttendanceStatus}
+              </div>
+            )}
+
+            <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
+              <button className="btn-secondary" onClick={() => setShowImportAttendanceModal(false)} disabled={importingAttendance}>
+                إلغاء
+              </button>
+              <button 
+                className="btn-primary" 
+                onClick={handleProcessAttendanceImport} 
+                disabled={!importAttendanceFile || importingAttendance}
+                style={{display:'flex',alignItems:'center',gap:'8px'}}
+              >
+                <FileSpreadsheet size={16} /> {importingAttendance ? 'جاري الاستيراد...' : 'رفع ورصد الغياب فوراً'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

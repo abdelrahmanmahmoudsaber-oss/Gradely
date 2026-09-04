@@ -216,3 +216,189 @@ export async function generateMultiSheetExcelBase64(sheets) {
   }
   return window.btoa(binary);
 }
+
+
+/**
+ * Generates an Excel template (.xlsx) for attendance recording.
+ */
+export async function exportAttendanceTemplateExcel(students, subjectName, totalWeeks = 12) {
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('سجل الغياب');
+
+  // Title Row
+  worksheet.mergeCells('A1', 'F1');
+  const titleCell = worksheet.getCell('A1');
+  titleCell.value = `نموذج رصد غياب مادة: ${subjectName}`;
+  titleCell.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+  // Subtitle / Instruction Row
+  worksheet.mergeCells('A2', 'F2');
+  const instCell = worksheet.getCell('A2');
+  instCell.value = 'تعليمات: اكتب (1) للحاضر، (0) للغايب، (2) للتأخير، (E) للعذر | لا تعدل عمود الرقم الأكاديمي ID';
+  instCell.font = { italic: true, size: 10, color: { argb: 'FF475569' } };
+  instCell.alignment = { horizontal: 'center' };
+
+  // Header Row (Row 3)
+  const headers = ['No.', 'Section', 'ID', 'Name'];
+  for (let w = 1; w <= totalWeeks; w++) {
+    headers.push(`Section ${w}`);
+  }
+
+  const headerRow = worksheet.getRow(3);
+  headerRow.values = headers;
+  headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  headerRow.eachCell(cell => {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+  });
+
+  // Populate Student Rows
+  students.forEach((stu, idx) => {
+    const rowValues = [idx + 1, stu.section || 'S01', stu.user_id, stu.name];
+    for (let w = 1; w <= totalWeeks; w++) {
+      rowValues.push('');
+    }
+    const row = worksheet.addRow(rowValues);
+    row.alignment = { horizontal: 'center', vertical: 'middle' };
+  });
+
+  worksheet.columns.forEach((col, colIdx) => {
+    if (colIdx === 2 || colIdx === 3) col.width = 18;
+    else if (colIdx === 0) col.width = 8;
+    else col.width = 14;
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `حضور_${subjectName.replace(/\s+/g, '_')}_نموذج.xlsx`;
+  a.click();
+  window.URL.revokeObjectURL(url);
+}
+
+/**
+ * Parses attendance records from an uploaded Excel file.
+ */
+export async function parseAttendanceExcelFile(file) {
+  if (!file) throw new Error('No file provided');
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    throw new Error('حجم الملف كبير جداً (الحد الأقصى 5 ميجابايت).');
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(arrayBuffer);
+
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) return [];
+
+  let headerRowIdx = 1;
+  for (let r = 1; r <= Math.min(5, worksheet.rowCount); r++) {
+    const row = worksheet.getRow(r);
+    let texts = [];
+    row.eachCell({ includeEmpty: false }, cell => {
+      if (cell.value) texts.push(String(cell.value).toLowerCase().trim());
+    });
+    const combined = texts.join(' ');
+    if (combined.includes('id') || combined.includes('section') || combined.includes('الرقم') || combined.includes('كود') || combined.includes('الاسم')) {
+      headerRowIdx = r;
+      break;
+    }
+  }
+
+  const headerRow = worksheet.getRow(headerRowIdx);
+  const colMap = {};
+  headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    if (cell.value !== null && cell.value !== undefined) {
+      colMap[colNumber] = String(cell.value).trim();
+    }
+  });
+
+  let idColIdx = null;
+  let nameColIdx = null;
+  let sectionColIdx = null;
+  const weekColMap = {};
+
+  Object.keys(colMap).forEach(colIdxStr => {
+    const colNumber = parseInt(colIdxStr, 10);
+    const header = colMap[colNumber];
+    const lower = header.toLowerCase();
+
+    if (lower === 'id' || lower.includes('الرقم الأكاديمي') || lower.includes('رقم الجلوس') || lower.includes('الكود') || lower.includes('رقم الطالب')) {
+      idColIdx = colNumber;
+    } else if (lower.includes('name') || lower.includes('الاسم') || lower.includes('اسم الطالب')) {
+      nameColIdx = colNumber;
+    } else if (lower === 'section' || lower === 'السكشن' || lower === 'فرقة') {
+      sectionColIdx = colNumber;
+    } else {
+      const match = header.match(/(\d+)/);
+      if (match && (lower.includes('sec') || lower.includes('week') || lower.includes('أسبوع') || lower.includes('سكشن') || lower.includes('w') || lower.includes('s') || /^\d+$/.test(header))) {
+        const weekNum = parseInt(match[1], 10);
+        if (weekNum >= 1 && weekNum <= 30) {
+          weekColMap[colNumber] = weekNum;
+        }
+      }
+    }
+  });
+
+  if (!idColIdx) {
+    idColIdx = 3; // Default Column C in Excel
+  }
+
+  const parsedRecords = [];
+
+  worksheet.eachRow((row, rowNumber) => {
+    if (rowNumber <= headerRowIdx) return;
+
+    let rawId = idColIdx ? row.getCell(idColIdx).value : null;
+    if (rawId && typeof rawId === 'object' && rawId.result !== undefined) rawId = rawId.result;
+    const studentId = rawId !== null && rawId !== undefined ? String(rawId).trim() : '';
+
+    let rawName = nameColIdx ? row.getCell(nameColIdx).value : null;
+    const studentName = rawName !== null && rawName !== undefined ? String(rawName).trim() : '';
+
+    let rawSec = sectionColIdx ? row.getCell(sectionColIdx).value : null;
+    const section = rawSec !== null && rawSec !== undefined ? String(rawSec).trim() : '';
+
+    if (!studentId && !studentName) return;
+
+    const weekStatuses = {};
+
+    Object.keys(weekColMap).forEach(colIdxStr => {
+      const colNumber = parseInt(colIdxStr, 10);
+      const weekNum = weekColMap[colNumber];
+      const cellVal = row.getCell(colNumber).value;
+
+      let strVal = '';
+      if (cellVal !== null && cellVal !== undefined) {
+        strVal = String(cellVal).trim().toLowerCase();
+        if (typeof cellVal === 'object' && cellVal.result !== undefined) {
+          strVal = String(cellVal.result).trim().toLowerCase();
+        }
+      }
+
+      if (strVal === '1' || strVal === 'حاضر' || strVal === 'present' || strVal === 'p') {
+        weekStatuses[weekNum] = 'present';
+      } else if (strVal === '0' || strVal === 'غائب' || strVal === 'absent' || strVal === 'a') {
+        weekStatuses[weekNum] = 'absent';
+      } else if (strVal === '2' || strVal === 'تأخير' || strVal === 'late' || strVal === 'l') {
+        weekStatuses[weekNum] = 'late';
+      } else if (strVal === 'e' || strVal === 'عذر' || strVal === 'excused' || strVal === 'ع') {
+        weekStatuses[weekNum] = 'excused';
+      }
+    });
+
+    parsedRecords.push({
+      studentId,
+      studentName,
+      section,
+      weekStatuses
+    });
+  });
+
+  return parsedRecords;
+}

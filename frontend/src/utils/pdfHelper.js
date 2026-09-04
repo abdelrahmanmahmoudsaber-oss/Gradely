@@ -100,9 +100,9 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
           </thead>
           <tbody>
             <tr>
-              ${includeQuizzes ? `<td>${g.quiz_1 || 0}</td><td>${g.quiz_2 || 0}</td>` : ''}
-              ${includeProject ? `<td>${g.project || 0}</td>` : ''}
-              ${includeAttendanceScore ? `<td style="color: #059669; font-weight: bold;">${g.attendance_score || 0}</td>` : ''}
+              ${includeQuizzes ? `<td>${g.quiz_1 !== null && g.quiz_1 !== undefined ? g.quiz_1 : 'لم ترصد'}</td><td>${g.quiz_2 !== null && g.quiz_2 !== undefined ? g.quiz_2 : 'لم ترصد'}</td>` : ''}
+              ${includeProject ? `<td>${g.project !== null && g.project !== undefined ? g.project : 'لم ترصد'}</td>` : ''}
+              ${includeAttendanceScore ? `<td style="color: #059669; font-weight: bold;">${g.attendance_score !== null && g.attendance_score !== undefined ? g.attendance_score : 'لم ترصد'}</td>` : ''}
               ${includeTotal ? `<td class="total-td">${(g.quiz_1 || 0) + (g.quiz_2 || 0) + (g.project || 0) + (g.attendance_score || 0)}</td>` : ''}
             </tr>
           </tbody>
