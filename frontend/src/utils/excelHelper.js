@@ -236,7 +236,7 @@ export async function exportAttendanceTemplateExcel(students, subjectName, total
   // Subtitle / Instruction Row
   worksheet.mergeCells('A2', 'F2');
   const instCell = worksheet.getCell('A2');
-  instCell.value = 'تعليمات: اكتب (1) للحاضر، (0) للغايب، (2) للتأخير، (E) للعذر | لا تعدل عمود الرقم الأكاديمي ID';
+  instCell.value = 'اكتب (1) حاضر، (0) غايب، (2) تأخير، (E) عذر في خانات السكاشن والأسابيع';
   instCell.font = { italic: true, size: 10, color: { argb: 'FF475569' } };
   instCell.alignment = { horizontal: 'center' };
 

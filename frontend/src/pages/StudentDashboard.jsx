@@ -283,7 +283,7 @@ export default function StudentDashboard({ user, onLogout }) {
       <div style={{display: 'flex', minHeight: '100vh', width: '100%', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)'}}>
         <div style={{textAlign: 'center', color: 'var(--text-muted)'}}>
           <div style={{fontSize: '2rem', marginBottom: '1rem'}}>⏳</div>
-          جاري تحميل بياناتك الأكاديمية...
+          جاري تحميل بيانات المنصة...
         </div>
       </div>
     );
