@@ -204,7 +204,7 @@ export default function StudentDashboard({ user, onLogout }) {
     try {
       const [subRes, attRes, grdRes, adminRes] = await Promise.all([
         supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, enrolled_students, excluded_students'),
-        supabase.from('attendance').select('subject_id, week_number, status').eq('student_id', user.user_id).order('week_number', { ascending: true }),
+        supabase.from('attendance').select('subject_id, week_number, status, created_at').eq('student_id', user.user_id).order('week_number', { ascending: true }),
         supabase.from('grades').select('subject_id, quiz_1, quiz_2, project, attendance_score, final_grade').eq('student_id', user.user_id),
         supabase.from('users').select('id, user_id, name, role, assigned_subjects').eq('role', 'admin')
       ]);
@@ -626,7 +626,7 @@ export default function StudentDashboard({ user, onLogout }) {
                         <div style={{fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '2px'}}>الأسبوع {w}</div>
                         <div style={{fontWeight: 'bold', color: statusColor, fontSize: '0.85rem'}}>{statusLabel}</div>
                         {(() => {
-                          const wDate = getSubjectWeekDate(currentSubject, w);
+                          const wDate = getSubjectWeekDate(currentSubject, w) || (record && record.created_at ? record.created_at.split('T')[0] : '');
                           return wDate ? (
                             <div style={{fontSize: '0.75rem', color: '#60a5fa', marginTop: '5px', background: 'rgba(59, 130, 246, 0.1)', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', fontWeight: 700}}>
                               🗓️ {formatDisplayDate(wDate)}
@@ -726,6 +726,47 @@ export default function StudentDashboard({ user, onLogout }) {
           </div>
         )}
 
+      
+        {/* Developer Branding Footer */}
+        <div style={{
+          textAlign: 'center',
+          marginTop: '3.5rem',
+          borderTop: '1px solid var(--border)',
+          paddingTop: '1.5rem',
+          paddingBottom: '1.5rem',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '6px',
+          direction: 'ltr',
+          width: '100%'
+        }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.92rem', color: 'var(--text-muted)' }}>
+            <span>Developed by</span>
+            <a 
+              href="https://www.linkedin.com/in/abdelrahman-mahmoud-6912801a0/" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                color: 'var(--primary-hover)',
+                fontWeight: 700,
+                textDecoration: 'none',
+                transition: 'all 0.2s',
+              }}
+              onMouseOver={e => e.currentTarget.style.color = '#818cf8'}
+              onMouseOut={e => e.currentTarget.style.color = 'var(--primary-hover)'}
+            >
+              <span>Abdelrahman Mahmoud</span>
+              <LinkedInOfficialIcon />
+            </a>
+          </div>
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', letterSpacing: '1.8px', fontWeight: 600, opacity: 0.85, textTransform: 'uppercase' }}>
+            SOFTWARE ENGINEER
+          </span>
+        </div>
       </main>
     </div>
   );

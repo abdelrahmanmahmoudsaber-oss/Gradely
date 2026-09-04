@@ -49,6 +49,23 @@ export default function AttendanceTab({ user }) {
   const [importAttendanceStatus, setImportAttendanceStatus] = useState('');
   const [importingAttendance, setImportingAttendance] = useState(false);
 
+
+  const saveSubjectWeekDate = async (subId, weekNum, dateStr) => {
+    if (!subId || !dateStr) return;
+    const targetSub = subjects.find(s => s.id === subId);
+    if (!targetSub) return;
+    const currentExcluded = Array.isArray(targetSub.excluded_students) ? targetSub.excluded_students : [];
+    const datePrefix = 'WEEK_DATE_W' + weekNum + ':';
+    const existing = currentExcluded.find(e => typeof e === 'string' && e.startsWith(datePrefix));
+    if (existing === datePrefix + dateStr) return;
+
+    const kept = currentExcluded.filter(e => typeof e === 'string' && !e.startsWith(datePrefix));
+    const updatedExcluded = [...kept, datePrefix + dateStr];
+    await supabase.from('subjects').update({ excluded_students: updatedExcluded }).eq('id', subId);
+    targetSub.excluded_students = updatedExcluded;
+    cacheManager.clear();
+  };
+
   const isSuper = !user || user.user_id === 'admin';
 
   const normalizeYear = (yr) => {
@@ -375,6 +392,7 @@ export default function AttendanceTab({ user }) {
     setAutoSaveStatus('💾 جاري الحفظ...');
 
     try {
+      saveSubjectWeekDate(selectedSubject, week, sessionDate);
       const { error } = await supabase.from('attendance').upsert({
         student_id: studentId,
         subject_id: selectedSubject,
@@ -408,7 +426,8 @@ export default function AttendanceTab({ user }) {
       }));
 
       if (upsertRows.length > 0) {
-        const { error } = await supabase.from('attendance').upsert(upsertRows, { onConflict: 'student_id,subject_id,week_number' });
+        await saveSubjectWeekDate(selectedSubject, week, sessionDate);
+      const { error } = await supabase.from('attendance').upsert(upsertRows, { onConflict: 'student_id,subject_id,week_number' });
         if (error) throw error;
       }
 
@@ -588,11 +607,21 @@ export default function AttendanceTab({ user }) {
       const upsertRows = [];
       let matchedCount = 0;
 
+      const norm = (v) => String(v || '').replace(/\.0+$/, '').trim().toLowerCase();
+      const digitsOnly = (v) => String(v || '').replace(/\D/g, '');
+
       parsedRows.forEach(rec => {
-        const matchedStudent = allStudents.find(s => 
-          (s.user_id && rec.studentId && s.user_id.trim() === rec.studentId.trim()) ||
-          (s.name && rec.studentName && s.name.trim().toLowerCase() === rec.studentName.trim().toLowerCase())
-        );
+        const matchedStudent = allStudents.find(s => {
+          const sId = norm(s.user_id);
+          const rId = norm(rec.studentId);
+          const sDigits = digitsOnly(s.user_id);
+          const rDigits = digitsOnly(rec.studentId);
+
+          const idMatches = (sId && rId && sId === rId) || (sDigits && rDigits && sDigits === rDigits);
+          const nameMatches = s.name && rec.studentName && s.name.trim().toLowerCase() === rec.studentName.trim().toLowerCase();
+
+          return idMatches || nameMatches;
+        });
 
         if (matchedStudent) {
           matchedCount++;

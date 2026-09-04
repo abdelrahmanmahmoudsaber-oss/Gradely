@@ -296,15 +296,19 @@ export async function parseAttendanceExcelFile(file) {
   const worksheet = workbook.worksheets[0];
   if (!worksheet) return [];
 
+  // Find exact header row by scanning for cells strictly matching 'id', 'no.', 'الرقم الأكاديمي', etc.
   let headerRowIdx = 1;
   for (let r = 1; r <= Math.min(5, worksheet.rowCount); r++) {
     const row = worksheet.getRow(r);
-    let texts = [];
+    let cellTexts = [];
     row.eachCell({ includeEmpty: false }, cell => {
-      if (cell.value) texts.push(String(cell.value).toLowerCase().trim());
+      if (cell.value) cellTexts.push(String(cell.value).trim().toLowerCase());
     });
-    const combined = texts.join(' ');
-    if (combined.includes('id') || combined.includes('section') || combined.includes('الرقم') || combined.includes('كود') || combined.includes('الاسم')) {
+    
+    const hasExactId = cellTexts.some(v => v === 'id' || v === 'no.' || v === 'الرقم الأكاديمي' || v === 'الكود' || v === 'رقم الطالب');
+    const hasNameOrSec = cellTexts.some(v => v === 'name' || v === 'section' || v === 'الاسم' || v === 'السكشن' || v.includes('section 1') || v.includes('أسبوع 1'));
+
+    if (hasExactId && hasNameOrSec) {
       headerRowIdx = r;
       break;
     }
@@ -346,23 +350,24 @@ export async function parseAttendanceExcelFile(file) {
   });
 
   if (!idColIdx) {
-    idColIdx = 3; // Default Column C in Excel
+    idColIdx = 3; // Default Column C
   }
+
+  const cleanVal = (val) => {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'object' && val.result !== undefined) val = val.result;
+    let str = String(val).trim();
+    return str.replace(/\.0+$/, '');
+  };
 
   const parsedRecords = [];
 
   worksheet.eachRow((row, rowNumber) => {
     if (rowNumber <= headerRowIdx) return;
 
-    let rawId = idColIdx ? row.getCell(idColIdx).value : null;
-    if (rawId && typeof rawId === 'object' && rawId.result !== undefined) rawId = rawId.result;
-    const studentId = rawId !== null && rawId !== undefined ? String(rawId).trim() : '';
-
-    let rawName = nameColIdx ? row.getCell(nameColIdx).value : null;
-    const studentName = rawName !== null && rawName !== undefined ? String(rawName).trim() : '';
-
-    let rawSec = sectionColIdx ? row.getCell(sectionColIdx).value : null;
-    const section = rawSec !== null && rawSec !== undefined ? String(rawSec).trim() : '';
+    const studentId = cleanVal(idColIdx ? row.getCell(idColIdx).value : null);
+    const studentName = cleanVal(nameColIdx ? row.getCell(nameColIdx).value : null);
+    const section = cleanVal(sectionColIdx ? row.getCell(sectionColIdx).value : null);
 
     if (!studentId && !studentName) return;
 
@@ -373,13 +378,7 @@ export async function parseAttendanceExcelFile(file) {
       const weekNum = weekColMap[colNumber];
       const cellVal = row.getCell(colNumber).value;
 
-      let strVal = '';
-      if (cellVal !== null && cellVal !== undefined) {
-        strVal = String(cellVal).trim().toLowerCase();
-        if (typeof cellVal === 'object' && cellVal.result !== undefined) {
-          strVal = String(cellVal.result).trim().toLowerCase();
-        }
-      }
+      let strVal = cleanVal(cellVal).toLowerCase();
 
       if (strVal === '1' || strVal === 'حاضر' || strVal === 'present' || strVal === 'p') {
         weekStatuses[weekNum] = 'present';
