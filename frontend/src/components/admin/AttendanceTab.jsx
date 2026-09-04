@@ -604,52 +604,115 @@ export default function AttendanceTab({ user }) {
         throw new Error('لم يتم العثور على بيانات صالحة في ملف الإكسيل.');
       }
 
-      const upsertRows = [];
-      let matchedCount = 0;
+      const rowsMap = new Map();
+      let matchedStudentsCount = 0;
+      const targetSub = subjects.find(s => s.id === selectedSubject);
+      const maxWeeks = targetSub?.total_weeks || 12;
 
       const norm = (v) => String(v || '').replace(/\.0+$/, '').trim().toLowerCase();
       const digitsOnly = (v) => String(v || '').replace(/\D/g, '');
 
+      // Student pool for matching
+      const pool = allStudents.length > 0 ? allStudents : enrolledStudents;
+
       parsedRows.forEach(rec => {
-        const matchedStudent = allStudents.find(s => {
+        const matchedStudent = pool.find(s => {
           const sId = norm(s.user_id);
           const rId = norm(rec.studentId);
           const sDigits = digitsOnly(s.user_id);
           const rDigits = digitsOnly(rec.studentId);
 
-          const idMatches = (sId && rId && sId === rId) || (sDigits && rDigits && sDigits === rDigits);
+          const idMatches = (sId && rId && sId === rId) || (sDigits && rDigits && sDigits === rDigits && sDigits.length >= 3);
           const nameMatches = s.name && rec.studentName && s.name.trim().toLowerCase() === rec.studentName.trim().toLowerCase();
 
           return idMatches || nameMatches;
         });
 
         if (matchedStudent) {
-          matchedCount++;
+          matchedStudentsCount++;
           Object.keys(rec.weekStatuses).forEach(wStr => {
             const wNum = parseInt(wStr, 10);
-            upsertRows.push({
-              student_id: matchedStudent.user_id,
-              subject_id: selectedSubject,
-              week_number: wNum,
-              status: rec.weekStatuses[wStr]
-            });
+            if (wNum >= 1 && wNum <= maxWeeks) {
+              const rawSt = rec.weekStatuses[wStr];
+              let cleanStatus = 'present';
+              if (rawSt === 'absent' || rawSt === '0' || rawSt === 'غائب' || rawSt === 'غ') cleanStatus = 'absent';
+              else if (rawSt === 'late' || rawSt === '2' || rawSt === 'تأخير') cleanStatus = 'late';
+              else if (rawSt === 'excused' || rawSt === 'e' || rawSt === 'عذر' || rawSt === 'ع') cleanStatus = 'excused';
+              else if (rawSt === 'present' || rawSt === '1' || rawSt === 'حاضر' || rawSt === 'ح') cleanStatus = 'present';
+              else cleanStatus = 'present';
+
+              const stuId = String(matchedStudent.user_id).trim();
+              const subId = String(selectedSubject).trim();
+              const key = stuId + '_' + subId + '_' + wNum;
+
+              rowsMap.set(key, {
+                student_id: stuId,
+                subject_id: subId,
+                week_number: wNum,
+                status: cleanStatus
+              });
+            }
           });
         }
       });
 
-      if (upsertRows.length === 0) {
-        throw new Error('لم يتم العثور على طُلاب مطابقين بالأرقام الأكاديمية (ID) المسجلة في المادة.');
+      const uniqueRows = Array.from(rowsMap.values());
+
+      if (uniqueRows.length === 0) {
+        throw new Error('لم يتم العثور على طُلاب مطابقين بالأرقام الأكاديمية (ID) المسجلة في المادة، أو لم يتم وضع قيم حضور/غياب في أعمدة الأسابيع.');
       }
 
-      setImportAttendanceStatus(`جاري رصد وتسجيل ${upsertRows.length} سجل غياب لعدد ${matchedCount} طالب...`);
+      setImportAttendanceStatus(`جاري رصد ${uniqueRows.length} سجل حضور وغياب لعدد ${matchedStudentsCount} طالب...`);
 
-      const { error } = await supabase.from('attendance').upsert(upsertRows, { onConflict: 'student_id,subject_id,week_number' });
-      if (error) throw error;
+      // Save week date for the active week
+      try {
+        await saveSubjectWeekDate(selectedSubject, week, sessionDate);
+      } catch (e) {
+        console.warn('saveSubjectWeekDate warning:', e);
+      }
+
+      // Safe Chunked Upsert (15 rows per chunk) with Row-by-Row Fallback
+      let savedSuccessCount = 0;
+      const chunkSize = 15;
+
+      for (let i = 0; i < uniqueRows.length; i += chunkSize) {
+        const chunk = uniqueRows.slice(i, i + chunkSize);
+        try {
+          const { error } = await supabase.from('attendance').upsert(chunk, { onConflict: 'student_id,subject_id,week_number' });
+          if (!error) {
+            savedSuccessCount += chunk.length;
+          } else {
+            // Row-by-row fallback
+            for (const singleRow of chunk) {
+              try {
+                const { error: singleErr } = await supabase.from('attendance').upsert(singleRow, { onConflict: 'student_id,subject_id,week_number' });
+                if (!singleErr) savedSuccessCount++;
+              } catch (errRow) {
+                console.warn('Single row upsert error:', errRow);
+              }
+            }
+          }
+        } catch (chunkErr) {
+          // Row-by-row fallback
+          for (const singleRow of chunk) {
+            try {
+              const { error: singleErr } = await supabase.from('attendance').upsert(singleRow, { onConflict: 'student_id,subject_id,week_number' });
+              if (!singleErr) savedSuccessCount++;
+            } catch (errRow) {
+              console.warn('Single row upsert error:', errRow);
+            }
+          }
+        }
+      }
+
+      if (savedSuccessCount === 0) {
+        throw new Error('تعذر حفظ السجلات في قاعدة البيانات. يرجى التأكد من اتصال الإنترنت وصلاحيات المعيد.');
+      }
 
       cacheManager.clear();
       await fetchAttendance();
 
-      setMessage(`✅ تم استيراد ورصد الغياب بنجاح لـ ${matchedCount} طالب وتسميعها فوراً لجميع المعيدين والطلاب والتقرير الشامل!`);
+      setMessage(`✅ تم استيراد ورصد ${savedSuccessCount} سجل غياب بنجاح لـ ${matchedStudentsCount} طالب وتسميعها فوراً لجميع المعيدين والطلاب والتقرير الشامل!`);
       setTimeout(() => setMessage(''), 5000);
       setShowImportAttendanceModal(false);
       setImportAttendanceFile(null);
