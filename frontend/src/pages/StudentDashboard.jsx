@@ -103,6 +103,13 @@ export default function StudentDashboard({ user, onLogout }) {
     return entry ? entry.replace(prefix, '') : '';
   };
 
+  const getSubjectLectureDate = (sub, weekNum) => {
+    if (!sub || !Array.isArray(sub.excluded_students)) return '';
+    const prefix = 'LEC_DATE_W' + weekNum + ':';
+    const entry = sub.excluded_students.find(e => typeof e === 'string' && e.startsWith(prefix));
+    return entry ? entry.replace(prefix, '') : '';
+  };
+
   const getSectionInstructorName = (subId, sec) => {
     const secNorm = normalizeSection(sec || 'S1');
     for (const adm of allAdmins) {
