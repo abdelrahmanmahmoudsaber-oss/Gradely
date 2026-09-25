@@ -219,44 +219,71 @@ export async function generateMultiSheetExcelBase64(sheets) {
 
 
 /**
- * Generates an Excel template (.xlsx) for attendance recording.
+ * Resolves a student's lecture group (Group A, Group B, Group C)
  */
-export async function exportAttendanceTemplateExcel(students, subjectName, totalWeeks = 12) {
+export const getStudentLectureGroup = (student, subId = null) => {
+  if (!student) return 'A';
+  if (Array.isArray(student.assigned_subjects)) {
+    if (subId) {
+      const subGroup = student.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(subId + ':GROUP:'));
+      if (subGroup) return subGroup.split(':')[2].toUpperCase();
+    }
+    const genGroup = student.assigned_subjects.find(e => typeof e === 'string' && e.startsWith('GROUP:'));
+    if (genGroup) return genGroup.split(':')[1].toUpperCase();
+  }
+  // Fallback from section: S1, S2 -> A | S3, S4 -> B | S5, S6 -> C
+  const sec = (student.section || 'S1').toString().trim().toUpperCase().replace(/\s+/g, '');
+  const match = sec.match(/(\d+)/);
+  const num = match ? parseInt(match[1], 10) : 1;
+  if (num === 1 || num === 2) return 'A';
+  if (num === 3 || num === 4) return 'B';
+  return 'C';
+};
+
+/**
+ * Generates an Excel template (.xlsx) for attendance recording (Section or Lecture).
+ */
+export async function exportAttendanceTemplateExcel(students, subjectName, totalWeeks = 12, attendanceType = 'section', selectedGroup = 'all') {
   const workbook = new ExcelJS.Workbook();
-  const worksheet = workbook.addWorksheet('سجل الغياب');
+  const isLecture = attendanceType === 'lecture';
+  const sheetName = isLecture ? 'غياب المحاضرات' : 'غياب السكاشن';
+  const worksheet = workbook.addWorksheet(sheetName);
 
   // Title Row
-  worksheet.mergeCells('A1', 'F1');
+  worksheet.mergeCells('A1', 'G1');
   const titleCell = worksheet.getCell('A1');
-  titleCell.value = `نموذج رصد غياب مادة: ${subjectName}`;
+  titleCell.value = isLecture 
+    ? `نموذج رصد غياب محاضرات مادة: ${subjectName} ${selectedGroup !== 'all' ? `(مجموعة ${selectedGroup})` : '(كافة المجموعات)'}`
+    : `نموذج رصد غياب سكاشن مادة: ${subjectName}`;
   titleCell.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
-  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isLecture ? 'FF0D9488' : 'FF4F46E5' } };
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
   // Subtitle / Instruction Row
-  worksheet.mergeCells('A2', 'F2');
+  worksheet.mergeCells('A2', 'G2');
   const instCell = worksheet.getCell('A2');
-  instCell.value = 'اكتب (1) حاضر، (0) غايب، (2) تأخير، (E) عذر في خانات السكاشن والأسابيع';
+  instCell.value = 'اكتب (1) حاضر، (0) غايب، (2) تأخير، (E) عذر في خانات الأسابيع';
   instCell.font = { italic: true, size: 10, color: { argb: 'FF475569' } };
   instCell.alignment = { horizontal: 'center' };
 
   // Header Row (Row 3)
-  const headers = ['No.', 'Section', 'ID', 'Name'];
+  const headers = ['No.', 'Section', 'Group', 'ID', 'Name'];
   for (let w = 1; w <= totalWeeks; w++) {
-    headers.push(`Section ${w}`);
+    headers.push(isLecture ? `Lecture ${w}` : `Section ${w}`);
   }
 
   const headerRow = worksheet.getRow(3);
   headerRow.values = headers;
   headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
   headerRow.eachCell(cell => {
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: isLecture ? 'FF115E59' : 'FF1E293B' } };
     cell.alignment = { horizontal: 'center', vertical: 'middle' };
   });
 
   // Populate Student Rows
   students.forEach((stu, idx) => {
-    const rowValues = [idx + 1, stu.section || 'S01', stu.user_id, stu.name];
+    const grp = getStudentLectureGroup(stu);
+    const rowValues = [idx + 1, stu.section || 'S01', `Group ${grp}`, stu.user_id, stu.name];
     for (let w = 1; w <= totalWeeks; w++) {
       rowValues.push('');
     }
@@ -265,9 +292,9 @@ export async function exportAttendanceTemplateExcel(students, subjectName, total
   });
 
   worksheet.columns.forEach((col, colIdx) => {
-    if (colIdx === 2 || colIdx === 3) col.width = 18;
+    if (colIdx === 3 || colIdx === 4) col.width = 18;
     else if (colIdx === 0) col.width = 8;
-    else col.width = 14;
+    else col.width = 13;
   });
 
   const buffer = await workbook.xlsx.writeBuffer();
@@ -275,13 +302,14 @@ export async function exportAttendanceTemplateExcel(students, subjectName, total
   const url = window.URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `حضور_${subjectName.replace(/\s+/g, '_')}_نموذج.xlsx`;
+  const prefix = isLecture ? 'محاضرات' : 'سكاشن';
+  a.download = `${prefix}_${subjectName.replace(/\s+/g, '_')}_نموذج.xlsx`;
   a.click();
   window.URL.revokeObjectURL(url);
 }
 
 /**
- * Parses attendance records from an uploaded Excel file.
+ * Parses attendance records from an uploaded Excel file (supports Section and Lecture columns & Group).
  */
 export async function parseAttendanceExcelFile(file) {
   if (!file) throw new Error('No file provided');
@@ -306,7 +334,7 @@ export async function parseAttendanceExcelFile(file) {
     });
     
     const hasExactId = cellTexts.some(v => v === 'id' || v === 'no.' || v === 'الرقم الأكاديمي' || v === 'الكود' || v === 'رقم الطالب');
-    const hasNameOrSec = cellTexts.some(v => v === 'name' || v === 'section' || v === 'الاسم' || v === 'السكشن' || v.includes('section 1') || v.includes('أسبوع 1'));
+    const hasNameOrSec = cellTexts.some(v => v === 'name' || v === 'section' || v === 'الاسم' || v === 'السكشن' || v.includes('section 1') || v.includes('lecture 1') || v.includes('أسبوع 1') || v.includes('محاضرة 1'));
 
     if (hasExactId && hasNameOrSec) {
       headerRowIdx = r;
@@ -325,6 +353,7 @@ export async function parseAttendanceExcelFile(file) {
   let idColIdx = null;
   let nameColIdx = null;
   let sectionColIdx = null;
+  let groupColIdx = null;
   const weekColMap = {};
 
   Object.keys(colMap).forEach(colIdxStr => {
@@ -338,9 +367,15 @@ export async function parseAttendanceExcelFile(file) {
       nameColIdx = colNumber;
     } else if (lower === 'section' || lower === 'السكشن' || lower === 'فرقة') {
       sectionColIdx = colNumber;
+    } else if (lower === 'group' || lower.includes('الجروب') || lower.includes('المجموعة') || lower.includes('مجموعة')) {
+      groupColIdx = colNumber;
     } else {
       const match = header.match(/(\d+)/);
-      if (match && (lower.includes('sec') || lower.includes('week') || lower.includes('أسبوع') || lower.includes('سكشن') || lower.includes('w') || lower.includes('s') || /^\d+$/.test(header))) {
+      if (match && (
+        lower.includes('sec') || lower.includes('week') || lower.includes('lec') || 
+        lower.includes('محاضرة') || lower.includes('أسبوع') || lower.includes('سكشن') || 
+        lower.includes('w') || lower.includes('s') || lower.includes('l') || /^\d+$/.test(header)
+      )) {
         const weekNum = parseInt(match[1], 10);
         if (weekNum >= 1 && weekNum <= 30) {
           weekColMap[colNumber] = weekNum;
@@ -350,7 +385,8 @@ export async function parseAttendanceExcelFile(file) {
   });
 
   if (!idColIdx) {
-    idColIdx = 3; // Default Column C
+    // Check column C or D
+    idColIdx = colMap[3]?.toLowerCase().includes('id') ? 3 : (colMap[4]?.toLowerCase().includes('id') ? 4 : 3);
   }
 
   const cleanVal = (val) => {
@@ -368,6 +404,10 @@ export async function parseAttendanceExcelFile(file) {
     const studentId = cleanVal(idColIdx ? row.getCell(idColIdx).value : null);
     const studentName = cleanVal(nameColIdx ? row.getCell(nameColIdx).value : null);
     const section = cleanVal(sectionColIdx ? row.getCell(sectionColIdx).value : null);
+    let group = cleanVal(groupColIdx ? row.getCell(groupColIdx).value : null);
+    if (group) {
+      group = group.toUpperCase().replace('GROUP', '').replace('مجموعة', '').replace('جروب', '').trim();
+    }
 
     if (!studentId && !studentName) return;
 
@@ -380,11 +420,11 @@ export async function parseAttendanceExcelFile(file) {
 
       let strVal = cleanVal(cellVal).toLowerCase();
 
-      if (strVal === '1' || strVal === 'حاضر' || strVal === 'present' || strVal === 'p') {
+      if (strVal === '1' || strVal === 'حاضر' || strVal === 'present' || strVal === 'p' || strVal === 'ح') {
         weekStatuses[weekNum] = 'present';
-      } else if (strVal === '0' || strVal === 'غائب' || strVal === 'absent' || strVal === 'a') {
+      } else if (strVal === '0' || strVal === 'غائب' || strVal === 'absent' || strVal === 'a' || strVal === 'غ') {
         weekStatuses[weekNum] = 'absent';
-      } else if (strVal === '2' || strVal === 'تأخير' || strVal === 'late' || strVal === 'l') {
+      } else if (strVal === '2' || strVal === 'تأخير' || strVal === 'late' || strVal === 'l' || strVal === 'ت') {
         weekStatuses[weekNum] = 'late';
       } else if (strVal === 'e' || strVal === 'عذر' || strVal === 'excused' || strVal === 'ع') {
         weekStatuses[weekNum] = 'excused';
@@ -395,6 +435,7 @@ export async function parseAttendanceExcelFile(file) {
       studentId,
       studentName,
       section,
+      group,
       weekStatuses
     });
   });

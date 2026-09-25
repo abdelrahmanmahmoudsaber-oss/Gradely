@@ -41,7 +41,8 @@ export default function StudentDashboard({ user, onLogout }) {
   const [grades, setGrades] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedSubjectId, setSelectedSubjectId] = useState('');
-  const [viewMode, setViewMode] = useState('attendance'); // 'attendance', 'grades', 'analytics'
+  const [viewMode, setViewMode] = useState('attendance');
+  const [attSubMode, setAttSubMode] = useState('section'); // 'section' or 'lecture' // 'attendance', 'grades', 'analytics'
 
   // Dynamic Visibility Settings controlled by Super Admin
   const [visibility, setVisibility] = useState({
@@ -574,12 +575,41 @@ export default function StudentDashboard({ user, onLogout }) {
               )}
             </div>
 
-            {/* Attendance View */}
+            {/* Attendance View (Sections & Lectures) */}
             {viewMode === 'attendance' && (
               <div className="fade-in">
+                {/* Sub-tabs: Section Attendance vs Lecture Attendance */}
+                <div style={{display:'flex',gap:'8px',marginBottom:'1.2rem',background:'var(--bg)',padding:'4px',borderRadius:'10px',border:'1px solid var(--border)',width:'fit-content'}}>
+                  <button 
+                    onClick={() => setAttSubMode('section')}
+                    style={{
+                      background: attSubMode === 'section' ? 'var(--primary)' : 'transparent',
+                      color: attSubMode === 'section' ? 'white' : 'var(--text-muted)',
+                      border: 'none', padding: '6px 14px', borderRadius: '7px', fontWeight: 700, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', transition: 'all 0.15s'
+                    }}
+                  >
+                    <span>🏢</span> غياب السكاشن ({currentAttendance.filter(a => a.week_number <= 50 && a.status === 'absent').length} غياب)
+                  </button>
+                  <button 
+                    onClick={() => setAttSubMode('lecture')}
+                    style={{
+                      background: attSubMode === 'lecture' ? '#0d9488' : 'transparent',
+                      color: attSubMode === 'lecture' ? 'white' : 'var(--text-muted)',
+                      border: 'none', padding: '6px 14px', borderRadius: '7px', fontWeight: 700, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', transition: 'all 0.15s'
+                    }}
+                  >
+                    <span>🏛️</span> غياب المحاضرات ({currentAttendance.filter(a => a.week_number > 100 && a.status === 'absent').length} غياب)
+                  </button>
+                </div>
+
+                {/* Sub-header with counters */}
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',flexWrap:'wrap',gap:'0.8rem'}}>
                   <h4 style={{margin: 0, color: 'var(--text-muted)', fontSize:'0.95rem'}}>
-                    سجل الأسابيع — إجمالي الغياب: <span style={{color: absCount > 3 ? 'var(--danger)' : 'var(--success)', fontWeight:'bold'}}>{absCount} مرات</span>
+                    {attSubMode === 'lecture' ? '🏛️ سجل حضور وغياب المحاضرات' : '🏢 سجل حضور وغياب السكاشن'} — إجمالي الغياب: <span style={{color: (attSubMode === 'lecture' ? currentAttendance.filter(a => a.week_number > 100 && a.status === 'absent').length : currentAttendance.filter(a => a.week_number <= 50 && a.status === 'absent').length) > 3 ? 'var(--danger)' : 'var(--success)', fontWeight:'bold'}}>
+                      {attSubMode === 'lecture' ? currentAttendance.filter(a => a.week_number > 100 && a.status === 'absent').length : currentAttendance.filter(a => a.week_number <= 50 && a.status === 'absent').length} مرات
+                    </span>
                   </h4>
                   <div style={{display:'flex',gap:'10px',fontSize:'0.8rem',flexWrap:'wrap'}}>
                     <span style={{color:'var(--success)',fontWeight:'bold'}}>● حاضر</span>
@@ -589,9 +619,10 @@ export default function StudentDashboard({ user, onLogout }) {
                   </div>
                 </div>
 
-                <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: '8px'}}>
+                <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(105px, 1fr))', gap: '8px'}}>
                   {Array.from({ length: currentSubject.total_weeks || 12 }, (_, i) => i + 1).map(w => {
-                    const record = currentAttendance.find(a => a.week_number === w);
+                    const targetWeekNum = attSubMode === 'lecture' ? 100 + w : w;
+                    const record = currentAttendance.find(a => a.week_number === targetWeekNum);
                     let statusLabel = 'لم يرصد';
                     let statusColor = 'var(--text-muted)';
                     let bg = 'var(--bg)';
@@ -621,18 +652,21 @@ export default function StudentDashboard({ user, onLogout }) {
                       }
                     }
 
+                    const wDate = attSubMode === 'lecture'
+                      ? (getSubjectLectureDate(currentSubject, w) || (record && record.created_at ? record.created_at.split('T')[0] : ''))
+                      : (getSubjectWeekDate(currentSubject, w) || (record && record.created_at ? record.created_at.split('T')[0] : ''));
+
                     return (
-                      <div key={w} style={{background: bg, border: '1px solid ' + border, borderRadius: '6px', padding: '10px 6px', textAlign: 'center'}}>
-                        <div style={{fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '2px'}}>الأسبوع {w}</div>
+                      <div key={w} style={{background: bg, border: '1px solid ' + border, borderRadius: '8px', padding: '10px 6px', textAlign: 'center'}}>
+                        <div style={{fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '2px'}}>
+                          {attSubMode === 'lecture' ? `محاضرة ${w}` : `أسبوع ${w}`}
+                        </div>
                         <div style={{fontWeight: 'bold', color: statusColor, fontSize: '0.85rem'}}>{statusLabel}</div>
-                        {(() => {
-                          const wDate = getSubjectWeekDate(currentSubject, w) || (record && record.created_at ? record.created_at.split('T')[0] : '');
-                          return wDate ? (
-                            <div style={{fontSize: '0.75rem', color: '#60a5fa', marginTop: '5px', background: 'rgba(59, 130, 246, 0.1)', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', fontWeight: 700}}>
-                              🗓️ {formatDisplayDate(wDate)}
-                            </div>
-                          ) : null;
-                        })()}
+                        {wDate ? (
+                          <div style={{fontSize: '0.73rem', color: attSubMode === 'lecture' ? '#2dd4bf' : '#60a5fa', marginTop: '5px', background: attSubMode === 'lecture' ? 'rgba(45, 212, 191, 0.1)' : 'rgba(59, 130, 246, 0.1)', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', fontWeight: 700}}>
+                            🗓️ {formatDisplayDate(wDate)}
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })}

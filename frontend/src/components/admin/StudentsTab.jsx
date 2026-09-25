@@ -275,6 +275,7 @@ export default function StudentsTab({ user }) {
         'ID': '2200304',
         'Name': 'roshdy ahmed roshdy',
         'Section': '2',
+        'Group': 'A',
         'CourseLevel': '2',
         'StudentLevel': '2',
         'Password': '123456'
@@ -362,6 +363,11 @@ export default function StudentsTab({ user }) {
         const studentYear = normalizeYear(stuLevelRaw || '1');
         const sRaw = getVal(row, 'Section', 'السكشن', 'سكشن', 'Sec');
         const s = normalizeSection(sRaw || 'S1');
+        const groupRaw = getVal(row, 'Group', 'group', 'الجروب', 'المجموعة', 'مجموعة', 'مجموعة المحاضرة');
+        let cleanGroup = '';
+        if (groupRaw) {
+          cleanGroup = groupRaw.toString().toUpperCase().replace('GROUP', '').replace('مجموعة', '').replace('جروب', '').trim();
+        }
         const pass = (getVal(row, 'Password', 'كلمة السر', 'الباسورد') || id)?.toString().trim();
         const subjectName = (getVal(row, 'Subject', 'المادة', 'اسم المادة', 'المقرر'))?.toString().trim();
 
@@ -371,11 +377,13 @@ export default function StudentsTab({ user }) {
             name: n,
             year_level: studentYear,
             section: s,
+            group: cleanGroup,
             password: pass,
             subSections: {}
           };
         } else {
           studentMap[id].name = n;
+          if (cleanGroup) studentMap[id].group = cleanGroup;
           if (stuLevelRaw) studentMap[id].year_level = studentYear;
         }
 
@@ -398,8 +406,9 @@ export default function StudentsTab({ user }) {
         }
 
         const subIdsInNew = new Set(newEntries.map(e => e.split(':')[0]));
-        const keptOld = currentAssigned.filter(e => typeof e === 'string' && !subIdsInNew.has(e.split(':')[0]));
-        const mergedAssigned = [...keptOld, ...newEntries];
+        const keptOld = currentAssigned.filter(e => typeof e === 'string' && !subIdsInNew.has(e.split(':')[0]) && !e.startsWith('GROUP:'));
+        const groupEntry = sData.group ? ['GROUP:' + sData.group] : [];
+        const mergedAssigned = [...keptOld, ...groupEntry, ...newEntries];
 
         studentsToUpsert.push({
           user_id: id,

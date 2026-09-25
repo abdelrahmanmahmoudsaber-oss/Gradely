@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
-import { exportExcelFile, parseAttendanceExcelFile, exportAttendanceTemplateExcel } from '../../utils/excelHelper';
+import { exportExcelFile, parseAttendanceExcelFile, exportAttendanceTemplateExcel, getStudentLectureGroup } from '../../utils/excelHelper';
 import { cacheManager } from '../../utils/dataCache';
 import { 
   Download, Users, UserPlus, UserMinus, UserCheck, CheckSquare, 
@@ -16,6 +16,9 @@ export default function AttendanceTab({ user }) {
   const [selectedSubject, setSelectedSubject] = useState('');
   const [selectedYear, setSelectedYear] = useState('all');
   const [selectedSection, setSelectedSection] = useState('all');
+  const [attendanceType, setAttendanceType] = useState('section'); // 'section' or 'lecture'
+  const [selectedGroup, setSelectedGroup] = useState('all'); // 'all', 'A', 'B', 'C'
+  const [allSystemSubjects, setAllSystemSubjects] = useState([]);
   const [week, setWeek] = useState(1);
   const [sessionDate, setSessionDate] = useState(new Date().toISOString().split('T')[0]);
   const [attendanceRecords, setAttendanceRecords] = useState({});
@@ -55,7 +58,7 @@ export default function AttendanceTab({ user }) {
     const targetSub = subjects.find(s => s.id === subId);
     if (!targetSub) return;
     const currentExcluded = Array.isArray(targetSub.excluded_students) ? targetSub.excluded_students : [];
-    const datePrefix = 'WEEK_DATE_W' + weekNum + ':';
+    const datePrefix = (attendanceType === 'lecture' ? 'LEC_DATE_W' : 'WEEK_DATE_W') + weekNum + ':';
     const existing = currentExcluded.find(e => typeof e === 'string' && e.startsWith(datePrefix));
     if (existing === datePrefix + dateStr) return;
 
@@ -65,6 +68,10 @@ export default function AttendanceTab({ user }) {
     targetSub.excluded_students = updatedExcluded;
     cacheManager.clear();
   };
+
+
+  const getEffectiveWeekNum = () => (attendanceType === 'lecture' ? 100 + week : week);
+  const getDatePrefix = () => (attendanceType === 'lecture' ? 'LEC_DATE_W' + week + ':' : 'WEEK_DATE_W' + week + ':');
 
   const isSuper = !user || user.user_id === 'admin';
 
@@ -137,6 +144,7 @@ export default function AttendanceTab({ user }) {
 
       setAllAdmins(allUsersList.filter(u => u.role === 'admin'));
       setAllStudents(allUsersList.filter(u => u.role === 'student'));
+      setAllSystemSubjects(allSubList);
       setSubjects(accessibleSubjects);
 
       if (accessibleSubjects.length > 0) {
@@ -166,10 +174,11 @@ export default function AttendanceTab({ user }) {
       setSelectedStudentsList([]);
       setPastedIds('');
     }
-  }, [selectedSubject, week]);
+  }, [selectedSubject, week, attendanceType, selectedGroup]);
 
   const fetchAttendance = async () => {
-    const cacheKey = 'att_' + selectedSubject + '_w' + week;
+    const effWeek = getEffectiveWeekNum();
+    const cacheKey = 'att_' + (attendanceType === 'lecture' ? 'lec_' : 'sec_') + selectedSubject + '_w' + week;
     const cached = cacheManager.get(cacheKey);
     if (cached) {
       setAttendanceRecords(cached.records || {});
@@ -183,16 +192,16 @@ export default function AttendanceTab({ user }) {
       .from('attendance')
       .select('student_id, status')
       .eq('subject_id', selectedSubject)
-      .eq('week_number', week);
+      .eq('week_number', effWeek);
 
     const recs = {};
     const excuses = {};
     let foundDate = sessionDate;
 
     // Check saved week date in subject config
-    const targetSub = subjects.find(s => s.id === selectedSubject);
+    const targetSub = (attendanceType === 'lecture' ? allSystemSubjects : subjects).find(s => s.id === selectedSubject);
     if (targetSub && Array.isArray(targetSub.excluded_students)) {
-      const datePrefix = 'WEEK_DATE_W' + week + ':';
+      const datePrefix = getDatePrefix();
       const dateEntry = targetSub.excluded_students.find(e => typeof e === 'string' && e.startsWith(datePrefix));
       if (dateEntry) {
         foundDate = dateEntry.replace(datePrefix, '');
@@ -211,7 +220,8 @@ export default function AttendanceTab({ user }) {
     cacheManager.set(cacheKey, { records: recs, excuses, date: foundDate });
   };
 
-  const displayedSubjects = subjects.filter(s => selectedYear === 'all' || normalizeYear(s.year_level) === selectedYear);
+  const activeSubjectsPool = attendanceType === 'lecture' ? allSystemSubjects : subjects;
+  const displayedSubjects = activeSubjectsPool.filter(s => selectedYear === 'all' || normalizeYear(s.year_level) === selectedYear);
 
   const handleYearFilterChange = (yr) => {
     setSelectedYear(yr);
@@ -224,7 +234,7 @@ export default function AttendanceTab({ user }) {
     }
   };
 
-  const currentSub = subjects.find(s => s.id === selectedSubject);
+  const currentSub = (attendanceType === 'lecture' ? allSystemSubjects : subjects).find(s => s.id === selectedSubject);
 
   const getEnrolledStudents = () => {
     if (!currentSub) return [];
@@ -396,7 +406,7 @@ export default function AttendanceTab({ user }) {
       const { error } = await supabase.from('attendance').upsert({
         student_id: studentId,
         subject_id: selectedSubject,
-        week_number: week,
+        week_number: getEffectiveWeekNum(),
         status: nextVal || 'unrecorded'
       }, { onConflict: 'student_id,subject_id,week_number' });
 
@@ -590,7 +600,7 @@ export default function AttendanceTab({ user }) {
   const handleDownloadAttendanceTemplate = async () => {
     if (!currentSub) return;
     const targetStudents = displayedEnrolledStudents.length > 0 ? displayedEnrolledStudents : enrolledStudents;
-    await exportAttendanceTemplateExcel(targetStudents, currentSub.name, currentSub.total_weeks || 12);
+    await exportAttendanceTemplateExcel(targetStudents, currentSub.name, currentSub.total_weeks || 12, attendanceType, selectedGroup);
   };
 
   const handleProcessAttendanceImport = async () => {
@@ -643,12 +653,13 @@ export default function AttendanceTab({ user }) {
 
               const stuId = String(matchedStudent.user_id).trim();
               const subId = String(selectedSubject).trim();
-              const key = stuId + '_' + subId + '_' + wNum;
+              const dbWeekNum = attendanceType === 'lecture' ? 100 + wNum : wNum;
+              const key = stuId + '_' + subId + '_' + dbWeekNum;
 
               rowsMap.set(key, {
                 student_id: stuId,
                 subject_id: subId,
-                week_number: wNum,
+                week_number: dbWeekNum,
                 status: cleanStatus
               });
             }
@@ -787,7 +798,33 @@ export default function AttendanceTab({ user }) {
         </div>
       )}
 
-      {/* FILTER BAR WITH SECTION AND TA LABEL */}
+      {/* ATTENDANCE TYPE SELECTOR (SECTIONS VS LECTURES) */}
+      <div style={{display:'flex',gap:'10px',marginBottom:'1.2rem',background:'var(--surface)',padding:'6px',borderRadius:'10px',border:'1px solid var(--border)',width:'fit-content'}}>
+        <button 
+          onClick={() => { setAttendanceType('section'); }}
+          style={{
+            background: attendanceType === 'section' ? 'var(--primary)' : 'transparent',
+            color: attendanceType === 'section' ? 'white' : 'var(--text-muted)',
+            border: 'none', padding: '8px 18px', borderRadius: '8px', fontWeight: 700, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.92rem', transition: 'all 0.2s'
+          }}
+        >
+          <span>🏢</span> غياب السكاشن (Section)
+        </button>
+        <button 
+          onClick={() => { setAttendanceType('lecture'); }}
+          style={{
+            background: attendanceType === 'lecture' ? '#0d9488' : 'transparent',
+            color: attendanceType === 'lecture' ? 'white' : 'var(--text-muted)',
+            border: 'none', padding: '8px 18px', borderRadius: '8px', fontWeight: 700, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.92rem', transition: 'all 0.2s'
+          }}
+        >
+          <span>🏛️</span> غياب المحاضرات (Lectures - متاح لكافة المعيدين)
+        </button>
+      </div>
+
+      {/* FILTER BAR WITH SECTION/GROUP AND TA LABEL */}
       <div className="panel" style={{display:'flex',gap:'1.2rem',marginBottom:'1.5rem',flexWrap:'wrap',alignItems:'flex-end'}}>
         <div style={{flex:1,minWidth:'140px'}}>
           <label style={{display:'block',marginBottom:'8px',fontSize:'0.9rem',color:'var(--primary-hover)',fontWeight:'bold'}}>1. الفرقة:</label>
@@ -807,20 +844,32 @@ export default function AttendanceTab({ user }) {
           </select>
         </div>
 
-        <div style={{flex:1.5,minWidth:'190px'}}>
-          <label style={{display:'block',marginBottom:'8px',fontSize:'0.9rem',color:'var(--success)',fontWeight:'bold'}}>3. تصفية السكشن والمعيد:</label>
-          <select className="input-field" value={selectedSection} onChange={e => setSelectedSection(e.target.value)}>
-            <option value="all">جميع سكاشن المادة ({enrolledStudents.length} طالب)</option>
-            {availableSections.map(sec => {
-              const taName = selectedSubject ? getSectionInstructorName(selectedSubject, sec) : '';
-              return (
-                <option key={sec} value={sec}>
-                  [ {sec} ] سكشن {sec.replace('S','')} {taName ? '— ' + taName : ''}
-                </option>
-              );
-            })}
-          </select>
-        </div>
+        {attendanceType === 'lecture' ? (
+          <div style={{flex:1.5,minWidth:'190px'}}>
+            <label style={{display:'block',marginBottom:'8px',fontSize:'0.9rem',color:'#2dd4bf',fontWeight:'bold'}}>3. تصفية مجموعة المحاضرة (Group):</label>
+            <select className="input-field" value={selectedGroup} onChange={e => setSelectedGroup(e.target.value)}>
+              <option value="all">جميع مجموعات المحاضرة ({enrolledStudents.length} طالب)</option>
+              <option value="A">مجموعة A (Group A - سكاشن 1 و 2)</option>
+              <option value="B">مجموعة B (Group B - سكاشن 3 و 4)</option>
+              <option value="C">مجموعة C (Group C - سكاشن 5 و 6)</option>
+            </select>
+          </div>
+        ) : (
+          <div style={{flex:1.5,minWidth:'190px'}}>
+            <label style={{display:'block',marginBottom:'8px',fontSize:'0.9rem',color:'var(--success)',fontWeight:'bold'}}>3. تصفية السكشن والمعيد:</label>
+            <select className="input-field" value={selectedSection} onChange={e => setSelectedSection(e.target.value)}>
+              <option value="all">جميع سكاشن المادة ({enrolledStudents.length} طالب)</option>
+              {availableSections.map(sec => {
+                const taName = selectedSubject ? getSectionInstructorName(selectedSubject, sec) : '';
+                return (
+                  <option key={sec} value={sec}>
+                    [ {sec} ] سكشن {sec.replace('S','')} {taName ? '— ' + taName : ''}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        )}
 
         {currentSub && (
           <div style={{flex:1,minWidth:'130px'}}>
