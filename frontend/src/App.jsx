@@ -1,11 +1,22 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import Login from './pages/Login';
-import AdminDashboard from './pages/AdminDashboard';
-import StudentDashboard from './pages/StudentDashboard';
-import { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import { cacheManager } from './utils/dataCache';
 import NetworkIndicator from './components/NetworkIndicator';
+
+// Code Splitting / Lazy Loading: Isolates Admin bundles and code from Student bundle
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const StudentDashboard = lazy(() => import('./pages/StudentDashboard'));
+
+const PageLoader = () => (
+  <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg, #0f172a)' }}>
+    <div style={{ textAlign: 'center', color: 'var(--text-muted, #94a3b8)', fontSize: '1.1rem' }}>
+      <div style={{ fontSize: '2rem', marginBottom: '1rem', animation: 'spin 1s linear infinite' }}>⏳</div>
+      جاري تحميل بيانات المنصة...
+    </div>
+  </div>
+);
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -133,28 +144,30 @@ export default function App() {
     <Router>
       <div className="app-root">
         <NetworkIndicator />
-        <Routes>
-          <Route
-            path="/"
-            element={!user ? <Login onLogin={handleLogin} /> : (
-              user.role === 'admin'
-                ? <Navigate to="/admin" />
-                : <Navigate to="/dashboard" />
-            )}
-          />
-          <Route
-            path="/admin"
-            element={user && user.role === 'admin'
-              ? <AdminDashboard user={user} onLogout={handleLogout} />
-              : <Navigate to="/" />}
-          />
-          <Route
-            path="/dashboard"
-            element={user && user.role === 'student'
-              ? <StudentDashboard user={user} onLogout={handleLogout} />
-              : <Navigate to="/" />}
-          />
-        </Routes>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route
+              path="/"
+              element={!user ? <Login onLogin={handleLogin} /> : (
+                user.role === 'admin'
+                  ? <Navigate to="/admin" />
+                  : <Navigate to="/dashboard" />
+              )}
+            />
+            <Route
+              path="/admin"
+              element={user && user.role === 'admin'
+                ? <AdminDashboard user={user} onLogout={handleLogout} />
+                : <Navigate to="/" />}
+            />
+            <Route
+              path="/dashboard"
+              element={user && user.role === 'student'
+                ? <StudentDashboard user={user} onLogout={handleLogout} />
+                : <Navigate to="/" />}
+            />
+          </Routes>
+        </Suspense>
       </div>
     </Router>
   );

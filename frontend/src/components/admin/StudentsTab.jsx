@@ -155,7 +155,7 @@ export default function StudentsTab({ user }) {
       await supabase.from('users').update(payload).eq('user_id', trimId);
       setMessage('✅ تم تعديل بيانات المستخدم' + (trimPass ? ' وتحديث كلمة المرور المشفرة' : '') + ' بنجاح');
     } else {
-      await supabase.from('users').insert({ user_id: trimId, password: trimPass, ...payload });
+      await supabase.from('users').insert({ user_id: trimId, ...payload });
       setMessage('✅ تمت إضافة المستخدم بنجاح');
     }
 
@@ -417,7 +417,6 @@ export default function StudentsTab({ user }) {
           year_level: sData.year_level,
           section: sData.section,
           assigned_subjects: mergedAssigned,
-          password: sData.password,
           auth_id: existingUser ? existingUser.auth_id : null
         });
       }

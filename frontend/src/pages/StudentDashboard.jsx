@@ -242,7 +242,8 @@ export default function StudentDashboard({ user, onLogout }) {
       const studentSubjects = subData.filter(s => {
         const inEnrolled = Array.isArray(s.enrolled_students) && s.enrolled_students.includes(user.user_id);
         const inAssigned = Array.isArray(user.assigned_subjects) && user.assigned_subjects.some(e => typeof e === 'string' && e.startsWith(s.id + ':'));
-        return inEnrolled || inAssigned;
+        const inYearLevel = user.year_level && normalizeYear(s.year_level) === normalizeYear(user.year_level);
+        return inEnrolled || inAssigned || inYearLevel;
       });
 
       // Sort subjects deterministically by year_level and name so order is 100% fixed and stable
