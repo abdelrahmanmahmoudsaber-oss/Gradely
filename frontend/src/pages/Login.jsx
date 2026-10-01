@@ -51,11 +51,25 @@ export default function Login({ onLogin }) {
 
       if (authData && authData.session) {
         // Fetch profile from DB
-        const { data: profile } = await supabase
+        let { data: profile } = await supabase
           .from('users')
-          .select('id, user_id, name, role, year_level, assigned_subjects, auth_id, created_at')
+          .select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at')
           .eq('auth_id', authData.session.user.id)
           .single();
+
+        // If not found by auth_id yet, fallback to user_id and auto-link auth_id
+        if (!profile) {
+          const { data: fallbackProfile } = await supabase
+            .from('users')
+            .select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at')
+            .eq('user_id', trimmedUserId)
+            .single();
+
+          if (fallbackProfile) {
+            profile = fallbackProfile;
+            supabase.from('users').update({ auth_id: authData.session.user.id }).eq('id', fallbackProfile.id).then();
+          }
+        }
 
         if (profile) {
           onLogin(profile);
