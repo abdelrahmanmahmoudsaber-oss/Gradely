@@ -211,7 +211,9 @@ export default function StudentDashboard({ user, onLogout }) {
   const fetchData = async () => {
     try {
       const [subRes, attRes, grdRes, adminRes] = await Promise.all([
-        supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, enrolled_students, excluded_students'),
+        // SECURITY: enrolled_students intentionally excluded — exposes all student IDs.
+        // Enrollment filtering falls through to inAssigned and inYearLevel below.
+        supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, excluded_students'),
         supabase.from('attendance').select('subject_id, week_number, status, created_at').eq('student_id', user.user_id).order('week_number', { ascending: true }),
         supabase.from('grades').select('subject_id, quiz_1, quiz_2, project, attendance_score, final_grade').eq('student_id', user.user_id),
         supabase.from('users').select('id, user_id, name, role, assigned_subjects').eq('role', 'admin')

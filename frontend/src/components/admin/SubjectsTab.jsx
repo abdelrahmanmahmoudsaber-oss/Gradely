@@ -536,7 +536,7 @@ export default function SubjectsTab({ user }) {
           year_level: sData.year_level,
           section: sData.section,
           assigned_subjects: mergedAssigned,
-          password: sData.password,
+          // SECURITY: password field intentionally excluded — handled via admin_update_user_password RPC only
           auth_id: existingUser ? existingUser.auth_id : null
         });
       }
