@@ -26,7 +26,8 @@ export default function Login({ onLogin }) {
     try {
       const trimmedUserId = userId.trim();
       const trimmedPassword = password.trim();
-      const email = trimmedUserId + '@gradely.app';
+      const cleanUserId = trimmedUserId.toLowerCase();
+      const email = cleanUserId.includes('@') ? cleanUserId : (cleanUserId + '@gradely.app');
       const authPassword = toAuthPassword(trimmedPassword);
 
       // ---------------------------------------------------------------
@@ -93,45 +94,48 @@ export default function Login({ onLogin }) {
       }
 
       if (rpcResult && rpcResult.success) {
-        // Legacy credentials are valid! Create or update Supabase Auth user
-        await supabase.auth.signUp({
-          email,
-          password: authPassword,
-          options: {
-            data: { user_id: rpcResult.user_id, name: rpcResult.name, role: rpcResult.role }
-          }
-        });
-
-        // Sign in to establish active session
-        const { data: signedInData } = await supabase.auth.signInWithPassword({
-          email,
-          password: authPassword
-        });
-
-        if (signedInData && signedInData.session) {
-          // Link auth_id in users table
-          await supabase.rpc('link_my_auth_id', { p_user_id: trimmedUserId });
-
-          const { data: profile } = await supabase
-            .from('users')
-            .select('id, user_id, name, role, year_level, assigned_subjects, auth_id, created_at')
-            .eq('user_id', trimmedUserId)
-            .single();
-
-          if (profile) {
-            if (profile.role === 'student' && (trimmedPassword === trimmedUserId || !localStorage.getItem('gradely_pwd_updated_' + profile.user_id))) {
-              sessionStorage.setItem('gradely_must_change_pwd_' + profile.user_id, 'true');
+        // Legacy credentials are valid! Create or update Supabase Auth user in background
+        try {
+          await supabase.auth.signUp({
+            email,
+            password: authPassword,
+            options: {
+              data: { user_id: rpcResult.user_id, name: rpcResult.name, role: rpcResult.role }
             }
-            onLogin(profile);
-            return;
+          });
+
+          const { data: signedInData } = await supabase.auth.signInWithPassword({
+            email,
+            password: authPassword
+          });
+
+          if (signedInData && signedInData.session) {
+            await supabase.rpc('link_my_auth_id', { p_user_id: trimmedUserId });
           }
+        } catch (authErr) {
+          console.warn('Auth sync notice:', authErr);
+        }
+
+        // Fetch verified profile from database
+        let { data: profile } = await supabase
+          .from('users')
+          .select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at')
+          .eq('user_id', trimmedUserId)
+          .single();
+
+        if (profile) {
+          if (profile.role === 'student' && (trimmedPassword === trimmedUserId || !localStorage.getItem('gradely_pwd_updated_' + profile.user_id))) {
+            sessionStorage.setItem('gradely_must_change_pwd_' + profile.user_id, 'true');
+          }
+          onLogin(profile);
+          return;
         }
       }
 
-      throw new Error('الرقم الأكاديمي أو كلمة المرور غير صحيحة');
+      throw new Error('اسم المستخدم أو كلمة المرور غير صحيحة');
 
     } catch (err) {
-      setError(err.message || 'الرقم الأكاديمي أو كلمة المرور غير صحيحة');
+      setError(err.message || 'اسم المستخدم أو كلمة المرور غير صحيحة');
     } finally {
       setLoading(false);
     }
