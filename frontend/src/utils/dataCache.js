@@ -34,3 +34,17 @@ export const cacheManager = {
     memoryCache.clear();
   }
 };
+
+/**
+ * Checks if a user is the Super Admin.
+ * Recognizes 'admin', 'Amahmoudsaber20262027217@@', and 'super_admin' role.
+ */
+export const isSuperUser = (user) => {
+  if (!user) return true;
+  const uid = (user.user_id || '').toString().trim().toLowerCase();
+  return (
+    user.role === 'super_admin' ||
+    uid === 'admin' ||
+    uid === 'amahmoudsaber20262027217@@'
+  );
+};

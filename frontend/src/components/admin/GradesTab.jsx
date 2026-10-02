@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { exportExcelFile, parseExcelFile } from '../../utils/excelHelper';
-import { cacheManager } from '../../utils/dataCache';
+import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { Download, Upload, Save, Users, Filter, BookOpen, AlertCircle } from 'lucide-react';
 
 export default function GradesTab({ user }) {
-  const isSuper = !user || user.user_id === 'admin';
+  const isSuper = isSuperUser(user);
   const [loading, setLoading] = useState(true);
   const [subjects, setSubjects] = useState([]);
   const [allStudents, setAllStudents] = useState([]);
@@ -54,7 +54,7 @@ export default function GradesTab({ user }) {
   const fetchInitialData = async () => {
     try {
       setLoading(true);
-      const isSuper = !user || user.user_id === 'admin';
+      const isSuper = isSuperUser(user);
 
       let allUsersList = cacheManager.get('admin_users_base');
       let allSubList = cacheManager.get('admin_subjects_base');

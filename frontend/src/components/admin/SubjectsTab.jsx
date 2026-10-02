@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { parseExcelFile, exportExcelFile } from '../../utils/excelHelper';
-import { cacheManager } from '../../utils/dataCache';
+import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { BookOpen, Upload, Plus, Trash2, Edit, Users, UserCheck, X, CheckSquare, Square, Shield, Layers, Download, FileSpreadsheet, Info } from 'lucide-react';
 
 const DEFAULT_SECTIONS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
@@ -189,7 +189,7 @@ export default function SubjectsTab({ user }) {
     // Persist section assignments in users.assigned_subjects
     if (targetSubjectId) {
       for (const ta of instructorsList) {
-        if (ta.user_id === 'admin') continue;
+        if (isSuperUser(ta)) continue;
 
         // Current assigned items for this TA without this subject
         const currentEntries = (Array.isArray(ta.assigned_subjects) ? ta.assigned_subjects : [])

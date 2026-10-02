@@ -18,6 +18,17 @@ export default function Login({ onLogin }) {
   // Helper to ensure Supabase Auth minimum 6-character requirement is always met
   const toAuthPassword = (raw) => (raw.length < 6 ? 'Gradely#' + raw : raw);
 
+  // Helper to ensure valid email address for Supabase Auth
+  const isValidEmail = (str) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str);
+  const toSafeAuthEmail = (rawUserId) => {
+    const trimmed = (rawUserId || '').trim().toLowerCase();
+    if (isValidEmail(trimmed)) {
+      return trimmed;
+    }
+    const safePrefix = trimmed.replace(/[^a-z0-9_.-]/g, '_');
+    return safePrefix + '@gradely.app';
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -26,8 +37,7 @@ export default function Login({ onLogin }) {
     try {
       const trimmedUserId = userId.trim();
       const trimmedPassword = password.trim();
-      const cleanUserId = trimmedUserId.toLowerCase();
-      const email = cleanUserId.includes('@') ? cleanUserId : (cleanUserId + '@gradely.app');
+      const email = toSafeAuthEmail(trimmedUserId);
       const authPassword = toAuthPassword(trimmedPassword);
 
       // ---------------------------------------------------------------

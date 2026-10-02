@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { LogOut, BookOpen, Users, CheckSquare, FileText, LayoutDashboard, Menu, X, Printer, KeyRound, Lock } from 'lucide-react';
 import { supabase } from '../supabaseClient';
+import { isSuperUser } from '../utils/dataCache';
 import OverviewTab from '../components/admin/OverviewTab';
 import SubjectsTab from '../components/admin/SubjectsTab';
 import StudentsTab from '../components/admin/StudentsTab';
@@ -19,7 +20,7 @@ export default function AdminDashboard({ user, onLogout }) {
   const [passwordMsg, setPasswordMsg] = useState({ type: '', text: '' });
   const [passwordUpdating, setPasswordUpdating] = useState(false);
 
-  const isSuperAdmin = !user || user.user_id === 'admin';
+  const isSuperAdmin = isSuperUser(user);
 
   const handleChangePassword = async (e) => {
     e.preventDefault();

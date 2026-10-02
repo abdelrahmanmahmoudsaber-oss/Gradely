@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
-import { cacheManager } from '../../utils/dataCache';
+import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { printStudentReportPDF } from '../../utils/pdfHelper';
 import { Search, Printer, Calendar, BookOpen, FileText, CheckCircle2, XCircle, X, ChevronDown, ChevronUp, Sliders, CheckSquare, Square, RefreshCw } from 'lucide-react';
 
@@ -102,7 +102,7 @@ export default function StudentReportTab({ user }) {
       if (forceRefresh) setRefreshing(true);
       else setLoading(true);
 
-      const isSuper = !user || user.user_id === 'admin';
+      const isSuper = isSuperUser(user);
 
       if (forceRefresh) {
         cacheManager.invalidate('admin_users_base');

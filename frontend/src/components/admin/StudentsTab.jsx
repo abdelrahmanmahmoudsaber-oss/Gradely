@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { parseExcelFile, exportExcelFile } from '../../utils/excelHelper';
-import { cacheManager } from '../../utils/dataCache';
+import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { Users, Upload, UserPlus, Edit, Trash2, Search, Shield, GraduationCap, X, ChevronDown, KeyRound, Filter, CheckSquare, Square, BookOpen, Lock, Download, FileSpreadsheet, Info } from 'lucide-react';
 
 export default function StudentsTab({ user }) {
@@ -757,7 +757,7 @@ export default function StudentsTab({ user }) {
             </thead>
             <tbody>
               {adminsList.map(adm => {
-                const isSuper = adm.user_id === 'admin';
+                const isSuper = isSuperUser(adm);
                 return (
                   <tr key={adm.id} style={{borderBottom:'1px solid var(--border)'}}>
                     <td style={{padding:'14px 16px',fontWeight:'bold'}}>{adm.user_id}</td>

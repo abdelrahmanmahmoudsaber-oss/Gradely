@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { exportExcelFile, parseAttendanceExcelFile, exportAttendanceTemplateExcel, getStudentLectureGroup } from '../../utils/excelHelper';
-import { cacheManager } from '../../utils/dataCache';
+import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { 
   Download, Users, UserPlus, UserMinus, UserCheck, CheckSquare, 
   FileText, Filter, Calendar, Save, Search, CheckCircle2, XCircle, 
@@ -73,7 +73,7 @@ export default function AttendanceTab({ user }) {
   const getEffectiveWeekNum = () => (attendanceType === 'lecture' ? 100 + week : week);
   const getDatePrefix = () => (attendanceType === 'lecture' ? 'LEC_DATE_W' + week + ':' : 'WEEK_DATE_W' + week + ':');
 
-  const isSuper = !user || user.user_id === 'admin';
+  const isSuper = isSuperUser(user);
 
   const normalizeYear = (yr) => {
     if (!yr) return '1';

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
-import { cacheManager } from '../../utils/dataCache';
+import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { exportExcelFile, exportMultiSheetExcelFile, generateMultiSheetExcelBase64 } from '../../utils/excelHelper';
 import { 
   Users, BookOpen, Clock, Shield, Sliders, Eye, EyeOff, 
@@ -76,7 +76,7 @@ export default function OverviewTab({ user }) {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [nextBackupDate, setNextBackupDate] = useState(() => localStorage.getItem('gradely_next_backup') || null);
 
-  const isSuper = !user || user.user_id === 'admin';
+  const isSuper = isSuperUser(user);
 
   // Calculate interval in ms for a given schedule key
   const scheduleToMs = (schedule) => {
