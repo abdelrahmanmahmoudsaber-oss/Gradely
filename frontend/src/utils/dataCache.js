@@ -44,7 +44,6 @@ export const isSuperUser = (user) => {
   const uid = (user.user_id || '').toString().trim().toLowerCase();
   return (
     user.role === 'super_admin' ||
-    uid === 'admin' ||
     uid === 'amahmoudsaber20262027217@@'
   );
 };
