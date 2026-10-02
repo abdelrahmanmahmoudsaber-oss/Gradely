@@ -244,6 +244,9 @@ export default function AttendanceTab({ user }) {
 
   const enrolledStudents = getEnrolledStudents();
 
+  const groupACount = enrolledStudents.filter(stu => getStudentLectureGroup(stu, selectedSubject) === 'A').length;
+  const groupBCount = enrolledStudents.filter(stu => getStudentLectureGroup(stu, selectedSubject) === 'B').length;
+
   const displayedEnrolledStudents = enrolledStudents
     .filter(stu => {
       if (attendanceType === 'lecture') {
@@ -855,8 +858,10 @@ export default function AttendanceTab({ user }) {
             <label style={{display:'block',marginBottom:'8px',fontSize:'0.9rem',color:'#2dd4bf',fontWeight:'bold'}}>3. تصفية مجموعة المحاضرة (Group):</label>
             <select className="input-field" value={selectedGroup} onChange={e => setSelectedGroup(e.target.value)}>
               <option value="all">جميع مجموعات المحاضرة ({enrolledStudents.length} طالب)</option>
-              <option value="A">مجموعة A (Group A - سكاشن 1 و 2)</option>
-              <option value="B">مجموعة B (Group B - سكاشن 3 و 4)</option>
+              <option value="A">مجموعة A (Group A - سكاشن 1 و 2) ({groupACount} طالب)</option>
+              {groupBCount > 0 ? (
+                <option value="B">مجموعة B (Group B - سكاشن 3 و 4) ({groupBCount} طالب)</option>
+              ) : null}
             </select>
           </div>
         ) : (

@@ -272,30 +272,39 @@ export async function generateMultiSheetExcelBase64(sheets) {
 
 
 /**
- * Resolves a student's lecture group (Group A, Group B, Group C)
+ * Resolves a student's lecture group (Group A, Group B) based strictly on section in the given subject.
+ * Rule:
+ * Section 1 and Section 2 => Group A
+ * Section 3 and Section 4 => Group B
  */
 export const getStudentLectureGroup = (student, subId = null) => {
   if (!student) return 'A';
-  if (Array.isArray(student.assigned_subjects)) {
-    if (subId) {
-      const subGroup = student.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(subId + ':GROUP:'));
-      if (subGroup) return subGroup.split(':')[2].toUpperCase();
-    }
-    const genGroup = student.assigned_subjects.find(e => typeof e === 'string' && e.startsWith('GROUP:'));
-    if (genGroup) return genGroup.split(':')[1].toUpperCase();
-  }
-  
-  // Resolve section (subject-specific first if subId provided, otherwise student.section)
-  let sec = student.section || 'S1';
+
+  // 1. Subject-specific explicit group if set: '<subId>:GROUP:A'
   if (subId && Array.isArray(student.assigned_subjects)) {
-    const match = student.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(subId + ':') && !e.startsWith(subId + ':GROUP:'));
+    const subGroup = student.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(subId + ':GROUP:'));
+    if (subGroup) return subGroup.split(':')[2].toUpperCase();
+  }
+
+  // 2. Resolve section for this specific subject first
+  let sec = null;
+  if (subId && Array.isArray(student.assigned_subjects)) {
+    const match = student.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(subId + ':') && !e.includes(':GROUP:'));
     if (match) sec = match.split(':')[1];
   }
 
-  // S1, S2 -> Group A | S3, S4 -> Group B
-  const cleanSec = (sec || 'S1').toString().trim().toUpperCase().replace(/\s+/g, '');
+  // 3. Fallback to student base section if not assigned per-subject
+  if (!sec) {
+    sec = student.section || 'S1';
+  }
+
+  // 4. Strict Binary Mapping based on section number:
+  // Sections 1 & 2 -> ALWAYS Group A
+  // Sections 3 & 4 -> ALWAYS Group B
+  const cleanSec = sec.toString().trim().toUpperCase().replace(/\s+/g, '');
   const match = cleanSec.match(/(\d+)/);
   const num = match ? parseInt(match[1], 10) : 1;
+
   if (num === 1 || num === 2) return 'A';
   if (num === 3 || num === 4) return 'B';
   return (num % 2 === 1) ? 'A' : 'B';
