@@ -29,6 +29,8 @@ export default function StudentsTab({ user }) {
   const [assignedSubjects, setAssignedSubjects] = useState([]); // for TAs
   const [selectedEnrollSubjects, setSelectedEnrollSubjects] = useState([]); // for students
   const [editMode, setEditMode] = useState(false);
+  const [submittingUser, setSubmittingUser] = useState(false);
+  const [modalError, setModalError] = useState('');
 
   // Student Filters
   const [studentSearch, setStudentSearch] = useState('');
@@ -97,6 +99,7 @@ export default function StudentsTab({ user }) {
 
   const handleManualAdd = async (e) => {
     e.preventDefault();
+    setModalError('');
     const trimId = userId.trim();
     const trimName = name.trim();
     const trimPass = password.trim();
@@ -105,105 +108,120 @@ export default function StudentsTab({ user }) {
 
     if (!editMode) {
       if (!trimPass) {
-        setMessage('❌ يرجى إدخال كلمة المرور');
+        setModalError('❌ يرجى إدخال كلمة المرور');
         return;
       }
       if (trimPass.length < 6) {
-        setMessage('❌ يجب أن تتكون كلمة المرور من 6 أحرف أو أرقام على الأقل');
+        setModalError('❌ يجب أن تتكون كلمة المرور من 6 أحرف أو أرقام على الأقل');
         return;
       }
       if (trimPass !== trimConfirm) {
-        setMessage('❌ تأكيد كلمة المرور غير متطابق');
+        setModalError('❌ تأكيد كلمة المرور غير متطابق');
         return;
       }
     } else if (trimPass) {
       if (trimPass.length < 6) {
-        setMessage('❌ يجب أن تتكون كلمة المرور الجديدة من 6 أحرف أو أرقام على الأقل');
+        setModalError('❌ يجب أن تتكون كلمة المرور الجديدة من 6 أحرف أو أرقام على الأقل');
         return;
       }
       if (trimPass !== trimConfirm) {
-        setMessage('❌ تأكيد كلمة المرور الجديدة غير متطابق');
+        setModalError('❌ تأكيد كلمة المرور الجديدة غير متطابق');
         return;
       }
     }
 
-    const payload = {
-      name: trimName,
-      role: addingType === 'admin' ? 'admin' : 'student',
-      year_level: addingType === 'student' ? yearLevel : null,
-      section: addingType === 'student' ? normalizeSection(section) : null,
-      assigned_subjects: addingType === 'admin' ? assignedSubjects : null,
-    };
+    setSubmittingUser(true);
+    try {
+      const payload = {
+        name: trimName,
+        role: addingType === 'admin' ? 'admin' : 'student',
+        year_level: addingType === 'student' ? yearLevel : null,
+        section: addingType === 'student' ? normalizeSection(section) : null,
+        assigned_subjects: addingType === 'admin' ? assignedSubjects : null,
+      };
 
-    const { data: existing } = await supabase.from('users').select('id, user_id').eq('user_id', trimId).maybeSingle();
-    if (existing) {
-      if (trimPass) {
-        try {
-          const { error: rpcErr } = await supabase.rpc('admin_update_user_password', { 
-            p_user_id: trimId, 
-            p_new_password: trimPass 
-          });
-          if (rpcErr) {
-            console.error('Password update error:', rpcErr);
-            setMessage('❌ فشل في تحديث كلمة المرور: ' + rpcErr.message);
-            return;
+      const { data: existing } = await supabase.from('users').select('id, user_id').eq('user_id', trimId).maybeSingle();
+      if (existing) {
+        if (trimPass) {
+          try {
+            const { error: rpcErr } = await supabase.rpc('admin_update_user_password', { 
+              p_user_id: trimId, 
+              p_new_password: trimPass 
+            });
+            if (rpcErr) {
+              console.error('Password update error:', rpcErr);
+              setModalError('❌ فشل في تحديث كلمة المرور: ' + rpcErr.message);
+              setSubmittingUser(false);
+              return;
+            }
+          } catch (err) {
+            console.warn('RPC update password:', err);
           }
-        } catch (err) {
-          console.warn('RPC update password:', err);
+        }
+        const { error: updateErr } = await supabase.from('users').update(payload).eq('user_id', trimId);
+        if (updateErr) {
+          console.error('Update user error:', updateErr);
+          setModalError('❌ فشل في تعديل بيانات المستخدم: ' + updateErr.message);
+          setSubmittingUser(false);
+          return;
+        }
+        setMessage('✅ تم تعديل بيانات المستخدم' + (trimPass ? ' وتحديث كلمة المرور المشفرة' : '') + ' بنجاح');
+      } else {
+        const { error: insertErr } = await supabase.from('users').insert({ 
+          user_id: trimId, 
+          password: trimPass, 
+          ...payload 
+        });
+        if (insertErr) {
+          console.error('Insert user error:', insertErr);
+          setModalError('❌ فشل في إضافة المستخدم: ' + insertErr.message);
+          setSubmittingUser(false);
+          return;
+        }
+        if (trimPass) {
+          try {
+            await supabase.rpc('admin_update_user_password', { 
+              p_user_id: trimId, 
+              p_new_password: trimPass 
+            });
+          } catch (err) {
+            console.warn('RPC set password error:', err);
+          }
+        }
+        setMessage('✅ تمت إضافة المستخدم (' + trimName + ') بنجاح' + (trimPass ? ' وتشفير كلمة المرور' : ''));
+      }
+
+      // Parallel sync student enrollment in selected subjects
+      if (addingType === 'student' && allSubjects.length > 0) {
+        const updates = [];
+        for (const sub of allSubjects) {
+          const currentEnrolled = Array.isArray(sub.enrolled_students) ? sub.enrolled_students : [];
+          const isSelected = selectedEnrollSubjects.includes(sub.id);
+
+          if (isSelected && !currentEnrolled.includes(trimId)) {
+            const updated = [...currentEnrolled, trimId];
+            updates.push(supabase.from('subjects').update({ enrolled_students: updated, included_students: updated }).eq('id', sub.id));
+          } else if (!isSelected && currentEnrolled.includes(trimId)) {
+            const updated = currentEnrolled.filter(id => id !== trimId);
+            updates.push(supabase.from('subjects').update({ enrolled_students: updated, included_students: updated }).eq('id', sub.id));
+          }
+        }
+        if (updates.length > 0) {
+          await Promise.all(updates);
         }
       }
-      const { error: updateErr } = await supabase.from('users').update(payload).eq('user_id', trimId);
-      if (updateErr) {
-        console.error('Update user error:', updateErr);
-        setMessage('❌ فشل في تعديل بيانات المستخدم: ' + updateErr.message);
-        return;
-      }
-      setMessage('✅ تم تعديل بيانات المستخدم' + (trimPass ? ' وتحديث كلمة المرور المشفرة' : '') + ' بنجاح');
-    } else {
-      const { error: insertErr } = await supabase.from('users').insert({ 
-        user_id: trimId, 
-        password: trimPass, 
-        ...payload 
-      });
-      if (insertErr) {
-        console.error('Insert user error:', insertErr);
-        setMessage('❌ فشل في إضافة المستخدم: ' + insertErr.message);
-        return;
-      }
-      if (trimPass) {
-        try {
-          await supabase.rpc('admin_update_user_password', { 
-            p_user_id: trimId, 
-            p_new_password: trimPass 
-          });
-        } catch (err) {
-          console.warn('RPC set password error:', err);
-        }
-      }
-      setMessage('✅ تمت إضافة المستخدم (' + trimName + ') بنجاح' + (trimPass ? ' وتشفير كلمة المرور' : ''));
+
+      setUserId(''); setName(''); setPassword(''); setConfirmPassword(''); setEditMode(false); setAssignedSubjects([]); setSelectedEnrollSubjects([]); setSection('S1');
+      setShowAddModal(false);
+      cacheManager.invalidate('admin_users_base');
+      await fetchData();
+      setTimeout(() => setMessage(''), 4000);
+    } catch (err) {
+      console.error('Unexpected error:', err);
+      setModalError('❌ حدث خطأ غير متوقع: ' + (err?.message || err));
+    } finally {
+      setSubmittingUser(false);
     }
-
-    // Sync student enrollment in selected subjects
-    if (addingType === 'student') {
-      for (const sub of allSubjects) {
-        const currentEnrolled = Array.isArray(sub.enrolled_students) ? sub.enrolled_students : [];
-        const isSelected = selectedEnrollSubjects.includes(sub.id);
-
-        if (isSelected && !currentEnrolled.includes(trimId)) {
-          const updated = [...currentEnrolled, trimId];
-          await supabase.from('subjects').update({ enrolled_students: updated, included_students: updated }).eq('id', sub.id);
-        } else if (!isSelected && currentEnrolled.includes(trimId)) {
-          const updated = currentEnrolled.filter(id => id !== trimId);
-          await supabase.from('subjects').update({ enrolled_students: updated, included_students: updated }).eq('id', sub.id);
-        }
-      }
-    }
-
-    setUserId(''); setName(''); setPassword(''); setConfirmPassword(''); setEditMode(false); setAssignedSubjects([]); setSelectedEnrollSubjects([]); setSection('S1');
-    setShowAddModal(false);
-    cacheManager.invalidate('admin_users_base');
-    fetchData();
-    setTimeout(() => setMessage(''), 4000);
   };
 
   const handleEdit = (userObj) => {
@@ -1019,11 +1037,38 @@ export default function StudentsTab({ user }) {
                 </div>
               )}
 
+              {modalError && (
+                <div style={{
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid var(--danger)',
+                  color: 'var(--danger)',
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  fontWeight: 'bold',
+                  fontSize: '0.9rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  {modalError}
+                </div>
+              )}
+
               <div style={{display:'flex',gap:'10px',marginTop:'1rem'}}>
-                <button type="submit" className="btn-primary" style={{flex:1}}>
-                  {editMode ? 'حفظ التعديلات' : 'إضافة المستخدم'}
+                <button 
+                  type="submit" 
+                  className="btn-primary" 
+                  style={{flex:1}} 
+                  disabled={submittingUser}
+                >
+                  {submittingUser ? '⏳ جاري الحفظ وتشفير الحساب...' : (editMode ? 'حفظ التعديلات' : 'إضافة المستخدم')}
                 </button>
-                <button type="button" className="btn-secondary" onClick={() => setShowAddModal(false)}>
+                <button 
+                  type="button" 
+                  className="btn-secondary" 
+                  onClick={() => setShowAddModal(false)}
+                  disabled={submittingUser}
+                >
                   إلغاء
                 </button>
               </div>
