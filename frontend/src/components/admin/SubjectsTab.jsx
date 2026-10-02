@@ -292,43 +292,47 @@ export default function SubjectsTab({ user }) {
       const downloadSampleExcel = () => {
     const sampleData = [
       {
-        'Subject': 'Introduction to Operation Research and Decision Support systems',
+        'Subject': 'Introduction to Operation Research',
         'ID': '2200304',
         'Name': 'roshdy ahmed roshdy',
-        'Section': '2',
+        'Section': '1',
+        'Group': 'A',
         'CourseLevel': '2',
         'StudentLevel': '2',
-        'Password': '123456',
+        'Password': '(اختياري - افتراضياً رقم الجلوس)',
         'TA': 'Abdelrahman Mahmoud'
       },
       {
         'Subject': 'Microcontrollers',
         'ID': '2200304',
         'Name': 'roshdy ahmed roshdy',
-        'Section': '1',
+        'Section': '2',
+        'Group': 'A',
         'CourseLevel': '3',
         'StudentLevel': '2',
-        'Password': '123456',
+        'Password': '',
         'TA': 'Abdelrahman Mahmoud'
       },
       {
         'Subject': 'Advanced Software Engineering',
         'ID': '2200304',
         'Name': 'roshdy ahmed roshdy',
-        'Section': '1',
+        'Section': '3',
+        'Group': 'B',
         'CourseLevel': '3',
         'StudentLevel': '2',
-        'Password': '123456',
+        'Password': '',
         'TA': 'Mostafa Abubakr'
       },
       {
         'Subject': 'Logic Design',
         'ID': '2200304',
         'Name': 'roshdy ahmed roshdy',
-        'Section': '3',
+        'Section': '4',
+        'Group': 'B',
         'CourseLevel': '1',
         'StudentLevel': '2',
-        'Password': '123456',
+        'Password': '',
         'TA': 'Mostafa Abubakr'
       }
     ];
@@ -388,7 +392,16 @@ export default function SubjectsTab({ user }) {
         
         const sRaw = getVal(row, 'Section', 'السكشن', 'سكشن', 'Sec');
         const s = normalizeSection(sRaw || 'S1');
-        const pass = (getVal(row, 'Password', 'كلمة السر', 'الباسورد') || id)?.toString().trim();
+        const groupRaw = getVal(row, 'Group', 'group', 'الجروب', 'المجموعة', 'مجموعة', 'مجموعة المحاضرة');
+        let cleanGroup = '';
+        if (groupRaw) {
+          cleanGroup = groupRaw.toString().toUpperCase().replace('GROUP', '').replace('مجموعة', '').replace('جروب', '').trim();
+        } else {
+          // Auto-infer from section: S1, S2 -> A | S3, S4 -> B
+          const matchNum = s.match(/(\d+)/);
+          const num = matchNum ? parseInt(matchNum[1], 10) : 1;
+          cleanGroup = (num === 1 || num === 2) ? 'A' : (num === 3 || num === 4) ? 'B' : (num % 2 === 1 ? 'A' : 'B');
+        }
         const ta = (getVal(row, 'TA', 'المعيد', 'اسم المعيد', 'المشرف', 'مشرف'))?.toString().trim();
 
         if (!studentMap[id]) {
@@ -397,11 +410,12 @@ export default function SubjectsTab({ user }) {
             name: name,
             year_level: studentYear,
             section: s,
-            password: pass,
+            group: cleanGroup,
             subSections: {}
           };
         } else {
           studentMap[id].name = name;
+          if (cleanGroup) studentMap[id].group = cleanGroup;
           if (stuLevelRaw) studentMap[id].year_level = studentYear;
         }
 
@@ -526,8 +540,9 @@ export default function SubjectsTab({ user }) {
 
         // Merge without duplicating
         const subIdsInNew = new Set(newEntries.map(e => e.split(':')[0]));
-        const keptOld = currentAssigned.filter(e => typeof e === 'string' && !subIdsInNew.has(e.split(':')[0]));
-        const mergedAssigned = [...keptOld, ...newEntries];
+        const keptOld = currentAssigned.filter(e => typeof e === 'string' && !subIdsInNew.has(e.split(':')[0]) && !e.startsWith('GROUP:'));
+        const groupEntry = sData.group ? ['GROUP:' + sData.group] : [];
+        const mergedAssigned = [...keptOld, ...groupEntry, ...newEntries];
 
         studentsToUpsert.push({
           user_id: id,
@@ -783,19 +798,23 @@ export default function SubjectsTab({ user }) {
                 <span className="text-muted" style={{display:'block', fontSize:'0.75rem'}}>سكشن الطالب في هذه المادة (1, 2, S1...)</span>
               </div>
               <div style={{background:'var(--bg)', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--border)'}}>
-                <strong style={{color:'#f59e0b'}}>5. CourseLevel</strong>
+                <strong style={{color:'#a855f7'}}>5. Group</strong>
+                <span className="text-muted" style={{display:'block', fontSize:'0.75rem'}}>مجموعة المحاضرة A أو B (اختياري - افتراضياً: S1,S2=A و S3,S4=B)</span>
+              </div>
+              <div style={{background:'var(--bg)', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--border)'}}>
+                <strong style={{color:'#f59e0b'}}>6. CourseLevel</strong>
                 <span className="text-muted" style={{display:'block', fontSize:'0.75rem'}}>فرقة المادة في اللائحة (1, 2, 3, 4)</span>
               </div>
               <div style={{background:'var(--bg)', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--border)'}}>
-                <strong style={{color:'#3b82f6'}}>6. StudentLevel</strong>
+                <strong style={{color:'#3b82f6'}}>7. StudentLevel</strong>
                 <span className="text-muted" style={{display:'block', fontSize:'0.75rem'}}>الفرقة الأكاديمية الحالية للطالب</span>
               </div>
               <div style={{background:'var(--bg)', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--border)'}}>
-                <strong style={{color:'var(--text-main)'}}>7. Password</strong>
-                <span className="text-muted" style={{display:'block', fontSize:'0.75rem'}}>كلمة المرور (اختياري)</span>
+                <strong style={{color:'var(--text-main)'}}>8. Password</strong>
+                <span className="text-muted" style={{display:'block', fontSize:'0.75rem'}}>كلمة المرور (اختياري - افتراضياً: رقم الجلوس/ID)</span>
               </div>
               <div style={{background:'var(--bg)', padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--border)'}}>
-                <strong style={{color:'var(--text-main)'}}>8. TA</strong>
+                <strong style={{color:'var(--text-main)'}}>9. TA</strong>
                 <span className="text-muted" style={{display:'block', fontSize:'0.75rem'}}>المعيد المشرف (اختياري - اسم أو كود)</span>
               </div>
             </div>

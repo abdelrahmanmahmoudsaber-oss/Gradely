@@ -72,6 +72,9 @@ export default function Login({ onLogin }) {
         }
 
         if (profile) {
+          if (profile.role === 'student' && (trimmedPassword === trimmedUserId || !localStorage.getItem('gradely_pwd_updated_' + profile.user_id))) {
+            sessionStorage.setItem('gradely_must_change_pwd_' + profile.user_id, 'true');
+          }
           onLogin(profile);
           return;
         }
@@ -116,6 +119,9 @@ export default function Login({ onLogin }) {
             .single();
 
           if (profile) {
+            if (profile.role === 'student' && (trimmedPassword === trimmedUserId || !localStorage.getItem('gradely_pwd_updated_' + profile.user_id))) {
+              sessionStorage.setItem('gradely_must_change_pwd_' + profile.user_id, 'true');
+            }
             onLogin(profile);
             return;
           }

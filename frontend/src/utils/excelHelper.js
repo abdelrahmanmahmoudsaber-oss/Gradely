@@ -231,13 +231,21 @@ export const getStudentLectureGroup = (student, subId = null) => {
     const genGroup = student.assigned_subjects.find(e => typeof e === 'string' && e.startsWith('GROUP:'));
     if (genGroup) return genGroup.split(':')[1].toUpperCase();
   }
-  // Fallback from section: S1, S2 -> A | S3, S4 -> B | S5, S6 -> C
-  const sec = (student.section || 'S1').toString().trim().toUpperCase().replace(/\s+/g, '');
-  const match = sec.match(/(\d+)/);
+  
+  // Resolve section (subject-specific first if subId provided, otherwise student.section)
+  let sec = student.section || 'S1';
+  if (subId && Array.isArray(student.assigned_subjects)) {
+    const match = student.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(subId + ':') && !e.startsWith(subId + ':GROUP:'));
+    if (match) sec = match.split(':')[1];
+  }
+
+  // S1, S2 -> Group A | S3, S4 -> Group B
+  const cleanSec = (sec || 'S1').toString().trim().toUpperCase().replace(/\s+/g, '');
+  const match = cleanSec.match(/(\d+)/);
   const num = match ? parseInt(match[1], 10) : 1;
   if (num === 1 || num === 2) return 'A';
   if (num === 3 || num === 4) return 'B';
-  return 'C';
+  return (num % 2 === 1) ? 'A' : 'B';
 };
 
 /**

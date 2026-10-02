@@ -5,7 +5,7 @@ import { printStudentReportPDF } from '../utils/pdfHelper';
 import { 
   LogOut, BookOpen, Calendar, FileText, GraduationCap, UserCheck, 
   Award, TrendingUp, Star, CheckCircle2, AlertTriangle, Printer, 
-  BarChart3, Sparkles, Trophy, Target
+  BarChart3, Sparkles, Trophy, Target, KeyRound, Lock, X
 } from 'lucide-react';
 
 const SUBJECT_COLORS = [
@@ -54,9 +54,62 @@ export default function StudentDashboard({ user, onLogout }) {
     showAttendanceTab: true
   });
 
+  // Password Change State
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [isForcePasswordChange, setIsForcePasswordChange] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [passwordMsg, setPasswordMsg] = useState({ type: '', text: '' });
+  const [passwordUpdating, setPasswordUpdating] = useState(false);
+
   useEffect(() => {
     fetchData();
   }, [user.user_id]);
+
+  useEffect(() => {
+    // Check if student logged in with default password and must change it
+    const mustChange = sessionStorage.getItem('gradely_must_change_pwd_' + user.user_id) === 'true';
+    if (mustChange) {
+      setIsForcePasswordChange(true);
+      setShowPasswordModal(true);
+    }
+  }, [user.user_id]);
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    setPasswordMsg({ type: '', text: '' });
+
+    if (newPassword.length < 6) {
+      setPasswordMsg({ type: 'error', text: 'يجب أن تتكون كلمة المرور الجديدة من 6 أحرف أو أرقام على الأقل' });
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordMsg({ type: 'error', text: 'كلمتا المرور غير متطابقتين' });
+      return;
+    }
+
+    try {
+      setPasswordUpdating(true);
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+
+      sessionStorage.removeItem('gradely_must_change_pwd_' + user.user_id);
+      localStorage.setItem('gradely_pwd_updated_' + user.user_id, 'true');
+      setPasswordMsg({ type: 'success', text: '✅ تم تغيير وتعيين كلمة المرور بنجاح!' });
+      setTimeout(() => {
+        setShowPasswordModal(false);
+        setIsForcePasswordChange(false);
+        setNewPassword('');
+        setConfirmNewPassword('');
+        setPasswordMsg({ type: '', text: '' });
+      }, 1500);
+    } catch (err) {
+      console.error(err);
+      setPasswordMsg({ type: 'error', text: err.message || 'حدث خطأ أثناء تحديث كلمة المرور' });
+    } finally {
+      setPasswordUpdating(false);
+    }
+  };
 
   const normalizeYear = (yr) => {
     if (!yr) return '';
@@ -398,7 +451,25 @@ export default function StudentDashboard({ user, onLogout }) {
             فرقة {normalizeYear(user.year_level)} | {normalizeSection(user.section || 'S1')}
           </span>
 
-          
+          <button 
+            onClick={() => { setShowPasswordModal(true); setIsForcePasswordChange(false); setPasswordMsg({type:'',text:''}); }} 
+            style={{
+              background: 'rgba(79, 70, 229, 0.1)',
+              color: 'var(--primary-hover)',
+              border: '1px solid rgba(79, 70, 229, 0.3)',
+              padding: '6px 12px',
+              borderRadius: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+              fontWeight: 600,
+              transition: 'all 0.2s'
+            }}
+          >
+            <KeyRound size={14} /> تغيير كلمة المرور
+          </button>
 
           <button 
             onClick={onLogout} 
@@ -662,6 +733,7 @@ export default function StudentDashboard({ user, onLogout }) {
                       }
                     }
 
+                    const hasRecordedAttendance = record && record.status && record.status !== 'unrecorded';
                     const wDate = attSubMode === 'lecture'
                       ? (getSubjectLectureDate(currentSubject, w) || (record && record.created_at ? record.created_at.split('T')[0] : ''))
                       : (getSubjectWeekDate(currentSubject, w) || (record && record.created_at ? record.created_at.split('T')[0] : ''));
@@ -672,7 +744,7 @@ export default function StudentDashboard({ user, onLogout }) {
                           {attSubMode === 'lecture' ? `محاضرة ${w}` : `أسبوع ${w}`}
                         </div>
                         <div style={{fontWeight: 'bold', color: statusColor, fontSize: '0.85rem'}}>{statusLabel}</div>
-                        {wDate ? (
+                        {hasRecordedAttendance && wDate ? (
                           <div style={{fontSize: '0.73rem', color: attSubMode === 'lecture' ? '#2dd4bf' : '#60a5fa', marginTop: '5px', background: attSubMode === 'lecture' ? 'rgba(45, 212, 191, 0.1)' : 'rgba(59, 130, 246, 0.1)', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', fontWeight: 700}}>
                             🗓️ {formatDisplayDate(wDate)}
                           </div>
@@ -812,6 +884,156 @@ export default function StudentDashboard({ user, onLogout }) {
           </span>
         </div>
       </main>
+
+      {/* Password Change Modal (Enforced on first login or opened manually) */}
+      {showPasswordModal && (
+        <div 
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.85)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '1rem',
+            boxSizing: 'border-box'
+          }}
+          onClick={e => {
+            if (!isForcePasswordChange && e.target === e.currentTarget) {
+              setShowPasswordModal(false);
+            }
+          }}
+        >
+          <div 
+            className="panel fade-in" 
+            style={{
+              maxWidth: '440px',
+              width: '100%',
+              background: 'var(--surface, #1e293b)',
+              border: isForcePasswordChange ? '2px solid var(--primary-hover, #6366f1)' : '1px solid var(--border, #334155)',
+              borderRadius: '16px',
+              padding: '1.8rem',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+              position: 'relative'
+            }}
+          >
+            {!isForcePasswordChange && (
+              <button 
+                onClick={() => setShowPasswordModal(false)}
+                style={{
+                  position: 'absolute',
+                  top: '14px',
+                  left: '14px',
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: '4px'
+                }}
+              >
+                <X size={20} />
+              </button>
+            )}
+
+            <div style={{ textAlign: 'center', marginBottom: '1.2rem' }}>
+              <div style={{
+                width: '56px',
+                height: '56px',
+                borderRadius: '50%',
+                background: 'rgba(99, 102, 241, 0.15)',
+                color: 'var(--primary-hover, #6366f1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 12px auto'
+              }}>
+                <Lock size={28} />
+              </div>
+              <h3 style={{ margin: '0 0 6px 0', fontSize: '1.3rem', color: 'var(--text-main, #f8fafc)' }}>
+                {isForcePasswordChange ? '🔒 تعيين كلمة مرور جديدة لحسابك' : '🔑 تغيير كلمة المرور'}
+              </h3>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted, #94a3b8)', lineHeight: 1.5 }}>
+                {isForcePasswordChange 
+                  ? 'لحماية حسابك وبياناتك الأكاديمية، يُرجى تعيين كلمة مرور شخصية خاصة بك بدلاً من كلمة المرور الافتراضية.'
+                  : 'أدخل كلمة المرور الجديدة لحسابك (6 أحرف أو أرقام على الأقل).'}
+              </p>
+            </div>
+
+            {passwordMsg.text && (
+              <div style={{
+                padding: '10px 14px',
+                borderRadius: '8px',
+                marginBottom: '1rem',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                textAlign: 'center',
+                background: passwordMsg.type === 'error' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                color: passwordMsg.type === 'error' ? 'var(--danger, #ef4444)' : 'var(--success, #10b981)',
+                border: passwordMsg.type === 'error' ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)'
+              }}>
+                {passwordMsg.text}
+              </div>
+            )}
+
+            <form onSubmit={handleChangePassword}>
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                  كلمة المرور الجديدة:
+                </label>
+                <input 
+                  type="password"
+                  required
+                  minLength={6}
+                  placeholder="6 أحرف أو أرقام على الأقل"
+                  className="input-field"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  style={{ width: '100%', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '1.4rem' }}>
+                <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                  تأكيد كلمة المرور الجديدة:
+                </label>
+                <input 
+                  type="password"
+                  required
+                  minLength={6}
+                  placeholder="أعد كتابة كلمة المرور"
+                  className="input-field"
+                  value={confirmNewPassword}
+                  onChange={e => setConfirmNewPassword(e.target.value)}
+                  style={{ width: '100%', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button 
+                  type="submit"
+                  disabled={passwordUpdating}
+                  className="btn-primary"
+                  style={{ flex: 1, padding: '10px', fontSize: '0.95rem', fontWeight: 700 }}
+                >
+                  {passwordUpdating ? 'جاري الحفظ...' : '💾 حفظ وتعيين كلمة المرور'}
+                </button>
+                {!isForcePasswordChange && (
+                  <button 
+                    type="button"
+                    onClick={() => setShowPasswordModal(false)}
+                    className="btn-secondary"
+                    style={{ padding: '10px 16px', fontSize: '0.9rem' }}
+                  >
+                    إلغاء
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

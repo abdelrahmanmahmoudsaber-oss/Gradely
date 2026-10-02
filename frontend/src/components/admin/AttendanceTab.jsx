@@ -246,8 +246,14 @@ export default function AttendanceTab({ user }) {
 
   const displayedEnrolledStudents = enrolledStudents
     .filter(stu => {
-      if (selectedSection === 'all') return true;
-      return getStudentSubSection(stu, selectedSubject) === normalizeSection(selectedSection);
+      if (attendanceType === 'lecture') {
+        if (selectedGroup === 'all') return true;
+        const grp = getStudentLectureGroup(stu, selectedSubject);
+        return grp === selectedGroup;
+      } else {
+        if (selectedSection === 'all') return true;
+        return getStudentSubSection(stu, selectedSubject) === normalizeSection(selectedSection);
+      }
     })
     .filter(stu => {
       if (!studentSearch.trim()) return true;
@@ -851,7 +857,6 @@ export default function AttendanceTab({ user }) {
               <option value="all">جميع مجموعات المحاضرة ({enrolledStudents.length} طالب)</option>
               <option value="A">مجموعة A (Group A - سكاشن 1 و 2)</option>
               <option value="B">مجموعة B (Group B - سكاشن 3 و 4)</option>
-              <option value="C">مجموعة C (Group C - سكاشن 5 و 6)</option>
             </select>
           </div>
         ) : (
