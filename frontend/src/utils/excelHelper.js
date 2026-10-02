@@ -12,8 +12,26 @@ export const sanitizeCell = (val) => {
   return val;
 };
 
+// Helper: extract raw or rich text from any ExcelJS cell
+const extractCellValue = (cell) => {
+  if (cell === null || cell === undefined) return '';
+  let val = cell.value;
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'object') {
+    if (val.result !== undefined && val.result !== null) return String(val.result).trim();
+    if (val.text !== undefined && val.text !== null) return String(val.text).trim();
+    if (Array.isArray(val.richText)) {
+      return val.richText.map(t => t.text || '').join('').trim();
+    }
+    if (val instanceof Date) return val.toISOString().slice(0, 10);
+    return String(val).trim();
+  }
+  return String(val).trim();
+};
+
 /**
  * Parses an uploaded .xlsx or .xls file into an array of row objects using ExcelJS.
+ * Features smart multi-sheet scanning and automated header row auto-detection.
  */
 export async function parseExcelFile(file) {
   if (!file) throw new Error('No file provided');
@@ -26,53 +44,88 @@ export async function parseExcelFile(file) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(arrayBuffer);
 
-  const worksheet = workbook.worksheets[0];
-  if (!worksheet) {
+  const activeWorksheets = (workbook.worksheets || []).filter(ws => ws && ws.rowCount > 0);
+  if (activeWorksheets.length === 0) {
     return [];
   }
 
-  const rowCount = worksheet.rowCount;
-  if (rowCount - 1 > MAX_ROWS) {
-    throw new Error(`عدد الصفوف (${rowCount - 1}) يتجاوز الحد الأقصى المسموح (${MAX_ROWS} صف).`);
-  }
+  const allData = [];
+  const headerKeywords = [
+    'id', 'name', 'اسم', 'كود', 'رقم', 'مادة', 'subject', 'course', 'مقرر', 
+    'فرقة', 'year', 'level', 'سكشن', 'sec', 'group', 'مجموعة', 'ta', 'معيد', 'مشرف', 'جلوس'
+  ];
 
-  const headerRow = worksheet.getRow(1);
-  const headers = [];
-  headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-    headers[colNumber] = cell.value !== null && cell.value !== undefined ? String(cell.value).trim() : '';
-  });
+  for (const worksheet of activeWorksheets) {
+    let headerRowIdx = 1;
+    let maxHeaderScore = 0;
+    let detectedHeaders = {};
 
-  const data = [];
-  worksheet.eachRow((row, rowNumber) => {
-    if (rowNumber === 1) return;
+    // Scan first 12 rows to find true header row
+    const scanLimit = Math.min(12, worksheet.rowCount);
+    for (let r = 1; r <= scanLimit; r++) {
+      const row = worksheet.getRow(r);
+      let score = 0;
+      let cellCount = 0;
+      const rowHeaders = {};
 
-    let hasValue = false;
-    const rowObj = {};
+      row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+        const strVal = extractCellValue(cell);
+        if (strVal) {
+          cellCount++;
+          rowHeaders[colNumber] = strVal;
+          const lowerVal = strVal.toLowerCase();
+          if (headerKeywords.some(k => lowerVal.includes(k))) {
+            score += 3;
+          } else {
+            score += 1;
+          }
+        }
+      });
 
-    headers.forEach((header, colNumber) => {
-      if (header) {
+      if (cellCount >= 2 && score > maxHeaderScore) {
+        maxHeaderScore = score;
+        headerRowIdx = r;
+        detectedHeaders = rowHeaders;
+      }
+    }
+
+    // Fallback: if no scored header row found, use row 1
+    if (Object.keys(detectedHeaders).length === 0) {
+      const row1 = worksheet.getRow(1);
+      row1.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+        const strVal = extractCellValue(cell);
+        if (strVal) detectedHeaders[colNumber] = strVal;
+      });
+      headerRowIdx = 1;
+    }
+
+    // Parse data rows starting after headerRowIdx
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber <= headerRowIdx) return;
+
+      let hasValue = false;
+      const rowObj = {};
+
+      Object.entries(detectedHeaders).forEach(([colNumberStr, headerName]) => {
+        const colNumber = parseInt(colNumberStr, 10);
         const cell = row.getCell(colNumber);
-        let val = cell.value;
+        const val = extractCellValue(cell);
 
-        if (val && typeof val === 'object' && val.result !== undefined) {
-          val = val.result;
-        }
-
-        if (val !== null && val !== undefined && String(val).trim() !== '') {
+        if (val !== '') {
           hasValue = true;
-          rowObj[header] = typeof val === 'object' ? String(val) : val;
+          rowObj[headerName] = val;
         } else {
-          rowObj[header] = '';
+          rowObj[headerName] = '';
         }
+      });
+
+      if (hasValue) {
+        allData.push(rowObj);
       }
     });
+  }
 
-    if (hasValue) {
-      data.push(rowObj);
-    }
-  });
-
-  return data;
+  return allData;
 }
 
 /**

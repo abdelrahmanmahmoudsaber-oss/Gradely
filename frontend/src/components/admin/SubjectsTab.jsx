@@ -352,11 +352,20 @@ export default function SubjectsTab({ user }) {
         return;
       }
 
-      // Helper: case-insensitive column getter
+      // Ultra-resilient header matcher: strips spaces, underscores, symbols
+      const cleanHeader = (s) => (s ? s.toString().toLowerCase().replace(/[\s_\-#.:/\\،,;()]/g, '').trim() : '');
+
       const getVal = (row, ...keys) => {
         for (const k of keys) {
+          const normK = cleanHeader(k);
           for (const rk of Object.keys(row)) {
-            if (rk.toLowerCase().trim() === k.toLowerCase().trim()) return row[rk];
+            const normRk = cleanHeader(rk);
+            if (normRk === normK || normRk.includes(normK) || normK.includes(normRk)) {
+              const v = row[rk];
+              if (v !== undefined && v !== null && String(v).trim() !== '') {
+                return v;
+              }
+            }
           }
         }
         return undefined;
@@ -377,22 +386,31 @@ export default function SubjectsTab({ user }) {
       const studentMap = {};  // { id: { user_id, name, year_level, section, password, subSections: { subName: sec } } }
 
       for (const row of rows) {
-        const id = (getVal(row, 'ID', 'الرقم الأكاديمي', 'الكود', 'رقم الجلوس', 'كود الطالب'))?.toString().trim();
-        const name = (getVal(row, 'Name', 'الاسم', 'اسم الطالب', 'طالب'))?.toString().trim();
+        let id = (getVal(row, 'ID', 'id', 'user_id', 'الرقم الأكاديمي', 'الرقم_الأكاديمي', 'رقم أكاديمي', 'الكود', 'كود', 'كود الطالب', 'كود_الطالب', 'رقم الطالب', 'رقم_الطالب', 'رقم القيد', 'رقم الجلوس', 'رقم_الجلوس', 'الجلوس', 'الرقم القومي', 'الرقم الجامعي', 'Student ID', 'StudentID', 'Academic ID', 'AcademicID', 'Code', 'Seat No', 'SeatNo', 'Seat Number', 'مسلسل', 'م'))?.toString().trim();
+        let name = (getVal(row, 'Name', 'name', 'اسم', 'الاسم', 'اسم الطالب', 'اسم_الطالب', 'طالب', 'الاسم رباعي', 'الاسم ثلاثي', 'الاسم الكامل', 'Student Name', 'StudentName', 'Full Name', 'FullName'))?.toString().trim();
         
-        // Skip completely empty rows or headers
+        // Positional fallback if headers were slightly off
+        if (!id || !name) {
+          const vals = Object.values(row).map(v => (v !== null && v !== undefined ? String(v).trim() : '')).filter(Boolean);
+          if (vals.length >= 2) {
+            if (!id && /^\d+$/.test(vals[0])) id = vals[0];
+            if (!name && typeof vals[1] === 'string' && vals[1].length >= 3 && !/^\d+$/.test(vals[1])) name = vals[1];
+          }
+        }
+
+        // Skip completely empty rows
         if (!id || !name) continue;
 
-        const subName = (getVal(row, 'Subject', 'المادة', 'اسم المادة', 'المقرر', 'اسم المقرر'))?.toString().trim();
-        const stuLevelRaw = getVal(row, 'StudentLevel', 'Student_Level', 'Student Level', 'StudentYear', 'Student_Year', 'فرقة الطالب', 'مستوى الطالب', 'Year', 'YEAR', 'الفرقة', 'السنة', 'Level', 'المستوى');
+        const subName = (getVal(row, 'Subject', 'subject', 'المادة', 'اسم المادة', 'اسم_المادة', 'مادة', 'المقرر', 'اسم المقرر', 'اسم_المقرر', 'المقرر الدراسي', 'اسم المقرر الدراسي', 'Course', 'Course Name', 'CourseName'))?.toString().trim();
+        const stuLevelRaw = getVal(row, 'StudentLevel', 'Student_Level', 'Student Level', 'StudentYear', 'Student_Year', 'فرقة الطالب', 'مستوى الطالب', 'Year', 'YEAR', 'الفرقة', 'فرقة', 'السنة', 'Level', 'المستوى', 'مستوى');
         const courseLevelRaw = getVal(row, 'CourseLevel', 'Course_Level', 'Course Level', 'CourseYear', 'Course_Year', 'فرقة المادة', 'فرقة المقرر', 'مستوى المادة', 'مستوى المقرر', 'Year', 'YEAR', 'الفرقة', 'السنة', 'Level', 'المستوى');
         
         const studentYear = normalizeYear(stuLevelRaw || '1');
         const courseYear = normalizeYear(courseLevelRaw || stuLevelRaw || '1');
         
-        const sRaw = getVal(row, 'Section', 'السكشن', 'سكشن', 'Sec');
+        const sRaw = getVal(row, 'Section', 'section', 'السكشن', 'سكشن', 'Sec', 'sec', 'Section No', 'رقم السكشن');
         const s = normalizeSection(sRaw || 'S1');
-        const groupRaw = getVal(row, 'Group', 'group', 'الجروب', 'المجموعة', 'مجموعة', 'مجموعة المحاضرة');
+        const groupRaw = getVal(row, 'Group', 'group', 'الجروب', 'جروب', 'المجموعة', 'مجموعة', 'مجموعة المحاضرة', 'فوج', 'الفوج');
         let cleanGroup = '';
         if (groupRaw) {
           cleanGroup = groupRaw.toString().toUpperCase().replace('GROUP', '').replace('مجموعة', '').replace('جروب', '').trim();
@@ -402,7 +420,7 @@ export default function SubjectsTab({ user }) {
           const num = matchNum ? parseInt(matchNum[1], 10) : 1;
           cleanGroup = (num === 1 || num === 2) ? 'A' : (num === 3 || num === 4) ? 'B' : (num % 2 === 1 ? 'A' : 'B');
         }
-        const ta = (getVal(row, 'TA', 'المعيد', 'اسم المعيد', 'المشرف', 'مشرف'))?.toString().trim();
+        const ta = (getVal(row, 'TA', 'ta', 'المعيد', 'معيد', 'اسم المعيد', 'المشرف', 'مشرف', 'Instructor', 'Teacher'))?.toString().trim();
 
         if (!studentMap[id]) {
           studentMap[id] = {
