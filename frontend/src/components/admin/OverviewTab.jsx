@@ -74,11 +74,50 @@ export default function OverviewTab({ user }) {
   const [backupEmail, setBackupEmail] = useState(() => localStorage.getItem('gradely_backup_email') || 'admin@gradely.app');
   const [webhookScriptUrl, setWebhookScriptUrl] = useState(() => localStorage.getItem('gradely_webhook_url') || 'https://script.google.com/macros/s/AKfycbzBUNCHESyAtmUK_V8Wm7KV-8zdV3mmpoI8ACd6KHtLRBlhG7B28EiPKZVXf9SU7haiEQ/exec');
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [nextBackupDate, setNextBackupDate] = useState(() => localStorage.getItem('gradely_next_backup') || null);
 
   const isSuper = !user || user.user_id === 'admin';
 
+  // Calculate interval in ms for a given schedule key
+  const scheduleToMs = (schedule) => {
+    switch (schedule) {
+      case 'daily':   return 24 * 60 * 60 * 1000;
+      case '3days':   return 3 * 24 * 60 * 60 * 1000;
+      case 'weekly':  return 7 * 24 * 60 * 60 * 1000;
+      case 'monthly': return 30 * 24 * 60 * 60 * 1000;
+      default:        return 7 * 24 * 60 * 60 * 1000;
+    }
+  };
+
+  // Set next backup timestamp after a send
+  const recordBackupSent = (schedule) => {
+    const nowMs = Date.now();
+    const nextMs = nowMs + scheduleToMs(schedule);
+    const nextIso = new Date(nextMs).toISOString();
+    localStorage.setItem('gradely_next_backup', nextIso);
+    setNextBackupDate(nextIso);
+  };
+
   useEffect(() => {
     fetchOverviewData();
+  }, []);
+
+  // Auto-trigger scheduled email backup when page loads if due
+  useEffect(() => {
+    if (!isSuper) return;
+    const email = localStorage.getItem('gradely_backup_email') || '';
+    if (!email || !email.includes('@')) return;
+    const nextIso = localStorage.getItem('gradely_next_backup');
+    if (!nextIso) return; // Never scheduled yet – only fires after first manual send
+    const nextMs = new Date(nextIso).getTime();
+    if (isNaN(nextMs)) return;
+    if (Date.now() >= nextMs) {
+      // Due: auto-send silently
+      setTimeout(() => {
+        handleSendEmailBackup(true);
+      }, 2000); // slight delay to let data load
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const parseVisibilityFromSubjects = (subList) => {
@@ -641,14 +680,17 @@ export default function OverviewTab({ user }) {
     localStorage.setItem('gradely_webhook_url', url);
   };
 
-  const handleSendEmailBackup = async () => {
-    if (!backupEmail || !backupEmail.includes('@')) {
-      alert('يرجى كتابة بريد إلكتروني صحيح أولاً (Gmail / Email)');
+  const handleSendEmailBackup = async (isAuto = false) => {
+    const emailToUse = isAuto
+      ? (localStorage.getItem('gradely_backup_email') || backupEmail)
+      : backupEmail;
+    if (!emailToUse || !emailToUse.includes('@')) {
+      if (!isAuto) alert('يرجى كتابة بريد إلكتروني صحيح أولاً (Gmail / Email)');
       return;
     }
 
     setSendingEmail(true);
-    setBackupMessage('جاري استخراج وتجهيز كشوف الغياب المنظمة وإرسالها إلى (' + backupEmail + ')...');
+    setBackupMessage((isAuto ? '🤖 إرسال تلقائي: ' : '') + 'جاري استخراج وتجهيز كشوف الغياب المنظمة وإرسالها إلى (' + emailToUse + ')...');
 
     try {
       const [usersRes, subRes, attRes] = await Promise.all([
@@ -744,7 +786,7 @@ export default function OverviewTab({ user }) {
           return row;
         });
 
-        let sheetName = sub.name.replace(/[:\/?*[\]]/g, '').slice(0, 28);
+        let sheetName = sub.name.replace(/[:\\/?*[\]]/g, '').slice(0, 28);
         if (!sheetName) sheetName = 'مادة ' + sub.id.slice(0, 6);
         sheets.push({ name: sheetName, data: rows });
       });
@@ -754,11 +796,12 @@ export default function OverviewTab({ user }) {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 10);
       const filename = 'Gradely_Attendance_Matrix_' + timestamp + '.xlsx';
 
+      const schedNow = localStorage.getItem('gradely_backup_schedule') || backupSchedule;
       const targetWebhook = webhookScriptUrl.trim() || 'https://script.google.com/macros/s/AKfycbzBUNCHESyAtmUK_V8Wm7KV-8zdV3mmpoI8ACd6KHtLRBlhG7B28EiPKZVXf9SU7haiEQ/exec';
 
       // 3. Send to Google Apps Script Webhook
       const payload = JSON.stringify({
-        email: backupEmail,
+        email: emailToUse,
         filename: filename,
         fileBase64: fileBase64
       });
@@ -774,7 +817,10 @@ export default function OverviewTab({ user }) {
       setLastBackupDate(nowIso);
       localStorage.setItem('gradely_last_backup', nowIso);
 
-      setBackupMessage('🎉 تم إرسال كشف الغياب المنظم بنجاح إلى (' + backupEmail + ') عبر Google Apps Script!');
+      // Schedule next auto backup
+      recordBackupSent(schedNow);
+
+      setBackupMessage('🎉 ' + (isAuto ? 'إرسال تلقائي: ' : '') + 'تم إرسال كشف الغياب المنظم بنجاح إلى (' + emailToUse + ') عبر Google Apps Script!');
       setTimeout(() => setBackupMessage(''), 9000);
     } catch (err) {
       console.error('Email backup error:', err);
