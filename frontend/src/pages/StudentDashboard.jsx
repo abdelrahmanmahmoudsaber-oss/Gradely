@@ -294,9 +294,17 @@ export default function StudentDashboard({ user, onLogout }) {
       const gVis = currentVisibility.global || currentVisibility;
       setViewMode('attendance');
 
+      const hasExplicitAssignments = Array.isArray(user.assigned_subjects) && user.assigned_subjects.some(e => typeof e === 'string' && e.includes(':'));
+
       const studentSubjects = subData.filter(s => {
         const inEnrolled = Array.isArray(s.enrolled_students) && s.enrolled_students.includes(user.user_id);
         const inAssigned = Array.isArray(user.assigned_subjects) && user.assigned_subjects.some(e => typeof e === 'string' && e.startsWith(s.id + ':'));
+        
+        if (hasExplicitAssignments) {
+          return inAssigned || inEnrolled;
+        }
+
+        // Fallback for legacy students without assigned_subjects array
         const inYearLevel = user.year_level && normalizeYear(s.year_level) === normalizeYear(user.year_level);
         return inEnrolled || inAssigned || inYearLevel;
       });
