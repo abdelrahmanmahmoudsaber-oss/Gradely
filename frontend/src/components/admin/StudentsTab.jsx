@@ -160,7 +160,11 @@ export default function StudentsTab({ user }) {
       }
       setMessage('✅ تم تعديل بيانات المستخدم' + (trimPass ? ' وتحديث كلمة المرور المشفرة' : '') + ' بنجاح');
     } else {
-      const { error: insertErr } = await supabase.from('users').insert({ user_id: trimId, ...payload });
+      const { error: insertErr } = await supabase.from('users').insert({ 
+        user_id: trimId, 
+        password: trimPass, 
+        ...payload 
+      });
       if (insertErr) {
         console.error('Insert user error:', insertErr);
         setMessage('❌ فشل في إضافة المستخدم: ' + insertErr.message);
