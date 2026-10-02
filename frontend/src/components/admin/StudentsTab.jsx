@@ -135,7 +135,7 @@ export default function StudentsTab({ user }) {
       assigned_subjects: addingType === 'admin' ? assignedSubjects : null,
     };
 
-    const { data: existing } = await supabase.from('users').select('id').eq('user_id', trimId).single();
+    const { data: existing } = await supabase.from('users').select('id, user_id').eq('user_id', trimId).maybeSingle();
     if (existing) {
       if (trimPass) {
         try {
@@ -152,11 +152,31 @@ export default function StudentsTab({ user }) {
           console.warn('RPC update password:', err);
         }
       }
-      await supabase.from('users').update(payload).eq('user_id', trimId);
+      const { error: updateErr } = await supabase.from('users').update(payload).eq('user_id', trimId);
+      if (updateErr) {
+        console.error('Update user error:', updateErr);
+        setMessage('❌ فشل في تعديل بيانات المستخدم: ' + updateErr.message);
+        return;
+      }
       setMessage('✅ تم تعديل بيانات المستخدم' + (trimPass ? ' وتحديث كلمة المرور المشفرة' : '') + ' بنجاح');
     } else {
-      await supabase.from('users').insert({ user_id: trimId, ...payload });
-      setMessage('✅ تمت إضافة المستخدم بنجاح');
+      const { error: insertErr } = await supabase.from('users').insert({ user_id: trimId, ...payload });
+      if (insertErr) {
+        console.error('Insert user error:', insertErr);
+        setMessage('❌ فشل في إضافة المستخدم: ' + insertErr.message);
+        return;
+      }
+      if (trimPass) {
+        try {
+          await supabase.rpc('admin_update_user_password', { 
+            p_user_id: trimId, 
+            p_new_password: trimPass 
+          });
+        } catch (err) {
+          console.warn('RPC set password error:', err);
+        }
+      }
+      setMessage('✅ تمت إضافة المستخدم (' + trimName + ') بنجاح' + (trimPass ? ' وتشفير كلمة المرور' : ''));
     }
 
     // Sync student enrollment in selected subjects

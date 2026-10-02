@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { LogOut, BookOpen, Users, CheckSquare, FileText, LayoutDashboard, Menu, X, Printer } from 'lucide-react';
+import { LogOut, BookOpen, Users, CheckSquare, FileText, LayoutDashboard, Menu, X, Printer, KeyRound, Lock } from 'lucide-react';
+import { supabase } from '../supabaseClient';
 import OverviewTab from '../components/admin/OverviewTab';
 import SubjectsTab from '../components/admin/SubjectsTab';
 import StudentsTab from '../components/admin/StudentsTab';
@@ -10,8 +11,48 @@ import StudentReportTab from '../components/admin/StudentReportTab';
 export default function AdminDashboard({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  
+  // Password Change Modal State
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [passwordMsg, setPasswordMsg] = useState({ type: '', text: '' });
+  const [passwordUpdating, setPasswordUpdating] = useState(false);
 
   const isSuperAdmin = !user || user.user_id === 'admin';
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    setPasswordMsg({ type: '', text: '' });
+
+    if (newPassword.length < 6) {
+      setPasswordMsg({ type: 'error', text: 'يجب أن تتكون كلمة المرور الجديدة من 6 أحرف أو أرقام على الأقل' });
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordMsg({ type: 'error', text: 'كلمتا المرور غير متطابقتين' });
+      return;
+    }
+
+    try {
+      setPasswordUpdating(true);
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+
+      setPasswordMsg({ type: 'success', text: '✅ تم تحديث كلمة المرور الخاصة بحسابك بنجاح!' });
+      setTimeout(() => {
+        setShowPasswordModal(false);
+        setNewPassword('');
+        setConfirmNewPassword('');
+        setPasswordMsg({ type: '', text: '' });
+      }, 1500);
+    } catch (err) {
+      console.error(err);
+      setPasswordMsg({ type: 'error', text: err.message || 'حدث خطأ أثناء تحديث كلمة المرور' });
+    } finally {
+      setPasswordUpdating(false);
+    }
+  };
 
   const getPageTitle = () => {
     switch(activeTab) {
@@ -100,6 +141,28 @@ export default function AdminDashboard({ user, onLogout }) {
               </div>
             </div>
           </div>
+          <button 
+            onClick={() => { setShowPasswordModal(true); setPasswordMsg({type:'',text:''}); }}
+            style={{
+              marginTop: '10px',
+              width: '100%',
+              background: 'rgba(79, 70, 229, 0.1)',
+              border: '1px solid rgba(79, 70, 229, 0.3)',
+              color: 'var(--primary-hover)',
+              padding: '7px 10px',
+              borderRadius: '8px',
+              fontSize: '0.85rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              transition: 'all 0.2s'
+            }}
+          >
+            <KeyRound size={15} /> تغيير كلمة المرور
+          </button>
         </div>
 
         <nav style={{padding: '0 0.8rem', display: 'flex', flexDirection: 'column', gap: '0.4rem', flex: 1, overflowY: 'auto'}}>
@@ -200,6 +263,28 @@ export default function AdminDashboard({ user, onLogout }) {
             </button>
             <h1 style={{margin: 0, fontSize: 'clamp(1.2rem, 3vw, 1.5rem)', fontWeight: 800}}>{getPageTitle()}</h1>
           </div>
+
+          <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+            <button 
+              onClick={() => { setShowPasswordModal(true); setPasswordMsg({type:'',text:''}); }}
+              style={{
+                background: 'rgba(79, 70, 229, 0.1)',
+                border: '1px solid rgba(79, 70, 229, 0.3)',
+                color: 'var(--primary-hover)',
+                padding: '6px 14px',
+                borderRadius: '20px',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.2s'
+              }}
+            >
+              <KeyRound size={15} /> تغيير كلمة المرور
+            </button>
+          </div>
         </header>
 
         {/* Dynamic View Component */}
@@ -213,6 +298,147 @@ export default function AdminDashboard({ user, onLogout }) {
         </main>
       </div>
 
+      {/* Password Change Modal for TA / Admin */}
+      {showPasswordModal && (
+        <div 
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.85)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '1rem',
+            boxSizing: 'border-box'
+          }}
+          onClick={e => {
+            if (e.target === e.currentTarget) setShowPasswordModal(false);
+          }}
+        >
+          <div 
+            className="panel fade-in" 
+            style={{
+              maxWidth: '440px',
+              width: '100%',
+              background: 'var(--surface, #1e293b)',
+              border: '1px solid var(--border, #334155)',
+              borderRadius: '16px',
+              padding: '1.8rem',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+              position: 'relative'
+            }}
+          >
+            <button 
+              onClick={() => setShowPasswordModal(false)}
+              style={{
+                position: 'absolute',
+                top: '14px',
+                left: '14px',
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                padding: '4px'
+              }}
+            >
+              <X size={20} />
+            </button>
+
+            <div style={{ textAlign: 'center', marginBottom: '1.2rem' }}>
+              <div style={{
+                width: '56px',
+                height: '56px',
+                borderRadius: '50%',
+                background: 'rgba(99, 102, 241, 0.15)',
+                color: 'var(--primary-hover, #6366f1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 12px auto'
+              }}>
+                <Lock size={28} />
+              </div>
+              <h3 style={{ margin: '0 0 6px 0', fontSize: '1.3rem', color: 'var(--text-main, #f8fafc)' }}>
+                🔑 تغيير كلمة المرور لحسابك
+              </h3>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted, #94a3b8)', lineHeight: 1.5 }}>
+                أدخل كلمة المرور الجديدة الخاصة بحسابك المشرف (6 أحرف أو أرقام على الأقل).
+              </p>
+            </div>
+
+            {passwordMsg.text && (
+              <div style={{
+                padding: '10px 14px',
+                borderRadius: '8px',
+                marginBottom: '1rem',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                textAlign: 'center',
+                background: passwordMsg.type === 'error' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                color: passwordMsg.type === 'error' ? 'var(--danger, #ef4444)' : 'var(--success, #10b981)',
+                border: passwordMsg.type === 'error' ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(16, 185, 129, 0.3)'
+              }}>
+                {passwordMsg.text}
+              </div>
+            )}
+
+            <form onSubmit={handleChangePassword}>
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                  كلمة المرور الجديدة:
+                </label>
+                <input 
+                  type="password"
+                  required
+                  minLength={6}
+                  placeholder="6 أحرف أو أرقام على الأقل"
+                  className="input-field"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  style={{ width: '100%', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: '1.4rem' }}>
+                <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                  تأكيد كلمة المرور الجديدة:
+                </label>
+                <input 
+                  type="password"
+                  required
+                  minLength={6}
+                  placeholder="أعد كتابة كلمة المرور"
+                  className="input-field"
+                  value={confirmNewPassword}
+                  onChange={e => setConfirmNewPassword(e.target.value)}
+                  style={{ width: '100%', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button 
+                  type="submit"
+                  disabled={passwordUpdating}
+                  className="btn-primary"
+                  style={{ flex: 1, padding: '10px', fontSize: '0.95rem', fontWeight: 700 }}
+                >
+                  {passwordUpdating ? 'جاري الحفظ...' : '💾 حفظ كلمة المرور'}
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setShowPasswordModal(false)}
+                  className="btn-secondary"
+                  style={{ padding: '10px 16px', fontSize: '0.9rem' }}
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
