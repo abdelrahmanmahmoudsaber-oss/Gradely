@@ -655,20 +655,23 @@ export default function OverviewTab({ user }) {
   };
 
   const handleSaveBackupEmail = async (newEmail) => {
-    setBackupEmail(newEmail);
-    localStorage.setItem('gradely_backup_email', newEmail);
+    const trimmed = (newEmail || '').trim();
+    setBackupEmail(trimmed);
+    localStorage.setItem('gradely_backup_email', trimmed);
     try {
+      // Remove any sensitive backup email from public subjects table
       const { data: subData } = await supabase.from('subjects').select('id, excluded_students');
       if (subData && subData.length > 0) {
         for (const sub of subData) {
           const currentExcluded = Array.isArray(sub.excluded_students) ? sub.excluded_students : [];
           const kept = currentExcluded.filter(e => typeof e === 'string' && !e.startsWith('CONFIG_BACKUP_EMAIL:'));
-          const updated = [...kept, 'CONFIG_BACKUP_EMAIL:' + newEmail];
-          await supabase.from('subjects').update({ excluded_students: updated }).eq('id', sub.id);
+          if (kept.length !== currentExcluded.length) {
+            await supabase.from('subjects').update({ excluded_students: kept }).eq('id', sub.id);
+          }
         }
         cacheManager.invalidate('admin_subjects_base');
       }
-      setBackupMessage('✅ تم حفظ البريد الإلكتروني للنسخ الدوري: ' + newEmail);
+      setBackupMessage('✅ تم حفظ البريد الإلكتروني للنسخ الدوري: ' + trimmed);
       setTimeout(() => setBackupMessage(''), 4000);
     } catch (e) {
       console.error(e);
