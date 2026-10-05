@@ -489,11 +489,14 @@ export default function StudentReportTab({ user }) {
 
       {/* PDF EXPORT OPTIONS MODAL */}
       {showPdfModal && selectedStudent && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem'
-        }}>
-          <div className="panel fade-in" style={{maxWidth: '520px', width: '100%', maxHeight: '90vh', overflowY: 'auto'}}>
+        <div 
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
+          }}
+          onClick={e => { if (e.target === e.currentTarget) setShowPdfModal(false); }}
+        >
+          <div className="panel fade-in" style={{maxWidth: '520px', width: '100%', maxHeight: '90vh', overflowY: 'auto', border: '1px solid rgba(79, 70, 229, 0.35)', boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.85)', borderRadius: '16px'}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',borderBottom:'1px solid var(--border)',paddingBottom:'0.8rem'}}>
               <h3 style={{margin:0,fontSize:'1.25rem',display:'flex',alignItems:'center',gap:'8px'}}>
                 <Printer size={20} style={{color:'var(--primary-hover)'}} /> خيارات تصدير تقرير الطالب PDF

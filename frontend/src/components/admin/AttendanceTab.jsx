@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../supabaseClient';
 import { exportExcelFile, parseAttendanceExcelFile, exportAttendanceTemplateExcel, getStudentLectureGroup } from '../../utils/excelHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { 
   Download, Users, UserPlus, UserMinus, UserCheck, CheckSquare, 
   FileText, Filter, Calendar, Save, Search, CheckCircle2, XCircle, 
-  Clock, AlertCircle, LayoutGrid, List, RotateCcw, Copy, Check, MessageSquare, X, FileSpreadsheet
+  Clock, AlertCircle, LayoutGrid, List, RotateCcw, Copy, Check, MessageSquare, X, FileSpreadsheet,
+  WifiOff, Wifi, RefreshCw
 } from 'lucide-react';
 
 export default function AttendanceTab({ user }) {
@@ -27,6 +28,13 @@ export default function AttendanceTab({ user }) {
   const [message, setMessage] = useState('');
   const [studentSearch, setStudentSearch] = useState('');
   const [viewMode, setViewMode] = useState('cards'); // 'cards' or 'table'
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'present' | 'absent' | 'late' | 'excused' | 'unrecorded'
+
+  // Offline and Sync Handling States
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const [syncingOffline, setSyncingOffline] = useState(false);
+  const [offlineNotice, setOfflineNotice] = useState('');
 
   // Custom Export Modal State (.txt / .xlsx)
   const [showExportModal, setShowExportModal] = useState(false);
@@ -168,6 +176,84 @@ export default function AttendanceTab({ user }) {
     }
   };
 
+  const getPendingQueue = useCallback(() => {
+    try {
+      return JSON.parse(localStorage.getItem('gradely_pending_attendance_sync') || '[]');
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const queueAttendanceChange = (studentId, subId, effWeek, status) => {
+    try {
+      const queue = getPendingQueue();
+      const filtered = queue.filter(item => !(item.student_id === studentId && item.subject_id === subId && item.week_number === effWeek));
+      filtered.push({
+        student_id: studentId,
+        subject_id: subId,
+        week_number: effWeek,
+        status: status || 'unrecorded',
+        timestamp: Date.now()
+      });
+      localStorage.setItem('gradely_pending_attendance_sync', JSON.stringify(filtered));
+      setPendingSyncCount(filtered.length);
+    } catch (e) {
+      console.error('Failed to queue offline attendance:', e);
+    }
+  };
+
+  const syncPendingAttendance = async () => {
+    const queue = getPendingQueue();
+    if (queue.length === 0) return;
+    if (!navigator.onLine) {
+      alert('⚠️ لا يمكن المزامنة حالياً لعدم توفر اتصال بالإنترنت.');
+      return;
+    }
+
+    try {
+      setSyncingOffline(true);
+      const upsertRows = queue.map(q => ({
+        student_id: q.student_id,
+        subject_id: q.subject_id,
+        week_number: q.week_number,
+        status: q.status
+      }));
+
+      const { error } = await supabase.from('attendance').upsert(upsertRows, { onConflict: 'student_id,subject_id,week_number' });
+      if (error) throw error;
+
+      localStorage.removeItem('gradely_pending_attendance_sync');
+      setPendingSyncCount(0);
+      setAutoSaveStatus('✅ تمت مزامنة جميع تسجيلات الغياب المعلقة مع السيرفر بنجاح!');
+      setTimeout(() => setAutoSaveStatus(''), 4000);
+    } catch (err) {
+      console.error('Failed to sync offline attendance:', err);
+      setAutoSaveStatus('❌ تعذر استكمال المزامنة');
+    } finally {
+      setSyncingOffline(false);
+    }
+  };
+
+  useEffect(() => {
+    const q = getPendingQueue();
+    setPendingSyncCount(q.length);
+
+    const handleOnline = () => {
+      setIsOnline(true);
+      syncPendingAttendance();
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [getPendingQueue]);
+
   useEffect(() => {
     if (selectedSubject) {
       fetchAttendance();
@@ -178,7 +264,11 @@ export default function AttendanceTab({ user }) {
 
   const fetchAttendance = async () => {
     const effWeek = getEffectiveWeekNum();
+    const storageKey = 'gradely_local_att_' + (attendanceType === 'lecture' ? 'lec_' : 'sec_') + selectedSubject + '_w' + week;
     const cacheKey = 'att_' + (attendanceType === 'lecture' ? 'lec_' : 'sec_') + selectedSubject + '_w' + week;
+    setOfflineNotice('');
+
+    // 1. Check in-memory cache
     const cached = cacheManager.get(cacheKey);
     if (cached) {
       setAttendanceRecords(cached.records || {});
@@ -187,37 +277,82 @@ export default function AttendanceTab({ user }) {
       return;
     }
 
-    // Fetch attendance records from database
-    const { data } = await supabase
-      .from('attendance')
-      .select('student_id, status')
-      .eq('subject_id', selectedSubject)
-      .eq('week_number', effWeek);
+    // 2. Check offline local storage backup
+    let localSaved = null;
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) localSaved = JSON.parse(raw);
+    } catch (e) {
+      console.error(e);
+    }
 
-    const recs = {};
-    const excuses = {};
-    let foundDate = sessionDate;
+    if (!navigator.onLine) {
+      if (localSaved && localSaved.records) {
+        setAttendanceRecords(localSaved.records);
+        setExcuseReasons(localSaved.excuses || {});
+        if (localSaved.date) setSessionDate(localSaved.date);
+        setOfflineNotice('⚠️ تم تحميل هذا الكشف من النسخة المحفوظة محلياً على هذا الجهاز (وضع عدم الاتصال).');
+      } else {
+        setAttendanceRecords({});
+        setExcuseReasons({});
+        setOfflineNotice('⚠️ تعذر تحميل سجل الغياب لعدم توفر إنترنت ولم يسبق فتح هذا السكشن على هذا الجهاز.');
+      }
+      return;
+    }
 
-    // Check saved week date in subject config
-    const targetSub = (attendanceType === 'lecture' ? allSystemSubjects : subjects).find(s => s.id === selectedSubject);
-    if (targetSub && Array.isArray(targetSub.excluded_students)) {
-      const datePrefix = getDatePrefix();
-      const dateEntry = targetSub.excluded_students.find(e => typeof e === 'string' && e.startsWith(datePrefix));
-      if (dateEntry) {
-        foundDate = dateEntry.replace(datePrefix, '');
+    try {
+      // Fetch attendance records from database
+      const { data, error } = await supabase
+        .from('attendance')
+        .select('student_id, status')
+        .eq('subject_id', selectedSubject)
+        .eq('week_number', effWeek);
+
+      if (error) throw error;
+
+      const recs = {};
+      const excuses = {};
+      let foundDate = sessionDate;
+
+      // Check saved week date in subject config
+      const targetSub = (attendanceType === 'lecture' ? allSystemSubjects : subjects).find(s => s.id === selectedSubject);
+      if (targetSub && Array.isArray(targetSub.excluded_students)) {
+        const datePrefix = getDatePrefix();
+        const dateEntry = targetSub.excluded_students.find(e => typeof e === 'string' && e.startsWith(datePrefix));
+        if (dateEntry) {
+          foundDate = dateEntry.replace(datePrefix, '');
+        }
+      }
+
+      if (data && data.length > 0) {
+        data.forEach(r => { 
+          recs[r.student_id] = r.status;
+        });
+      }
+
+      setAttendanceRecords(recs);
+      setExcuseReasons(excuses);
+      if (foundDate) setSessionDate(foundDate);
+      cacheManager.set(cacheKey, { records: recs, excuses, date: foundDate });
+
+      // Save local offline copy
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({ records: recs, excuses, date: foundDate, updatedAt: Date.now() }));
+      } catch (e) {}
+
+    } catch (err) {
+      console.error('Fetch attendance error:', err);
+      if (localSaved && localSaved.records) {
+        setAttendanceRecords(localSaved.records);
+        setExcuseReasons(localSaved.excuses || {});
+        if (localSaved.date) setSessionDate(localSaved.date);
+        setOfflineNotice('⚠️ حدث خطأ في الاتصال بالسيرفر، تم تحميل النسخة المحلية المحفوظة على جهازك.');
+      } else {
+        setAttendanceRecords({});
+        setExcuseReasons({});
+        setOfflineNotice('⚠️ تعذر الاتصال بالسيرفر لتحميل كشف الغياب.');
       }
     }
-
-    if (data && data.length > 0) {
-      data.forEach(r => { 
-        recs[r.student_id] = r.status;
-      });
-    }
-
-    setAttendanceRecords(recs);
-    setExcuseReasons(excuses);
-    if (foundDate) setSessionDate(foundDate);
-    cacheManager.set(cacheKey, { records: recs, excuses, date: foundDate });
   };
 
   const activeSubjectsPool = attendanceType === 'lecture' ? allSystemSubjects : subjects;
@@ -247,7 +382,7 @@ export default function AttendanceTab({ user }) {
   const groupACount = enrolledStudents.filter(stu => getStudentLectureGroup(stu, selectedSubject) === 'A').length;
   const groupBCount = enrolledStudents.filter(stu => getStudentLectureGroup(stu, selectedSubject) === 'B').length;
 
-  const displayedEnrolledStudents = enrolledStudents
+  const baseEnrolledStudents = enrolledStudents
     .filter(stu => {
       if (attendanceType === 'lecture') {
         if (selectedGroup === 'all') return true;
@@ -263,6 +398,17 @@ export default function AttendanceTab({ user }) {
       const q = studentSearch.toLowerCase().trim();
       return stu.name.toLowerCase().includes(q) || stu.user_id.toLowerCase().includes(q);
     });
+
+  const displayedEnrolledStudents = baseEnrolledStudents.filter(stu => {
+    if (statusFilter === 'all') return true;
+    const st = attendanceRecords[stu.user_id];
+    if (statusFilter === 'present') return st === 'present';
+    if (statusFilter === 'absent') return st === 'absent';
+    if (statusFilter === 'late') return st === 'late';
+    if (statusFilter === 'excused') return st === 'excused';
+    if (statusFilter === 'unrecorded') return !st;
+    return true;
+  });
 
   const getSectionInstructorName = (subId, sec) => {
     for (const adm of allAdmins) {
@@ -391,7 +537,7 @@ export default function AttendanceTab({ user }) {
   };
 
   // Instant 0ms Local Toggle + Non-blocking Background Upsert
-  // Instant 0ms Local Toggle + Non-blocking Database Upsert
+  // Instant 0ms Local Toggle + Non-blocking Database Upsert + Offline Storage
   const toggleAttendance = async (studentId, newStatus) => {
     const currentVal = attendanceRecords[studentId];
     const nextVal = currentVal === newStatus ? null : newStatus;
@@ -404,10 +550,26 @@ export default function AttendanceTab({ user }) {
 
     const updatedRecs = { ...attendanceRecords, [studentId]: nextVal };
     setAttendanceRecords(updatedRecs);
-    cacheManager.set('att_' + selectedSubject + '_w' + week, { records: updatedRecs, excuses: excuseReasons, date: sessionDate });
+    
+    const effWeek = getEffectiveWeekNum();
+    const storageKey = 'gradely_local_att_' + (attendanceType === 'lecture' ? 'lec_' : 'sec_') + selectedSubject + '_w' + week;
+    const cacheKey = 'att_' + (attendanceType === 'lecture' ? 'lec_' : 'sec_') + selectedSubject + '_w' + week;
+
+    cacheManager.set(cacheKey, { records: updatedRecs, excuses: excuseReasons, date: sessionDate });
     cacheManager.invalidate('rep_' + studentId);
     cacheManager.invalidate('student_data_' + studentId);
-    
+
+    // Save to persistent localStorage immediately
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ records: updatedRecs, excuses: excuseReasons, date: sessionDate, updatedAt: Date.now() }));
+    } catch (e) {}
+
+    if (!navigator.onLine) {
+      queueAttendanceChange(studentId, selectedSubject, effWeek, nextVal);
+      setAutoSaveStatus('🟡 تم الحفظ محلياً على جهازك (Offline)');
+      return;
+    }
+
     setAutoSaveStatus('💾 جاري الحفظ...');
 
     try {
@@ -415,38 +577,57 @@ export default function AttendanceTab({ user }) {
       const { error } = await supabase.from('attendance').upsert({
         student_id: studentId,
         subject_id: selectedSubject,
-        week_number: getEffectiveWeekNum(),
+        week_number: effWeek,
         status: nextVal || 'unrecorded'
       }, { onConflict: 'student_id,subject_id,week_number' });
 
       if (error) {
         console.error('Attendance save error:', error);
-        setAutoSaveStatus('❌ فشل الحفظ');
+        queueAttendanceChange(studentId, selectedSubject, effWeek, nextVal);
+        setAutoSaveStatus('🟡 تم الحفظ محلياً (في انتظار المزامنة)');
       } else {
         setAutoSaveStatus('✓ تم الحفظ تلقائياً');
         setTimeout(() => setAutoSaveStatus(''), 2000);
       }
     } catch (err) {
       console.error('Attendance toggle error:', err);
-      setAutoSaveStatus('❌ خطأ في الحفظ');
+      queueAttendanceChange(studentId, selectedSubject, effWeek, nextVal);
+      setAutoSaveStatus('🟡 تم الحفظ محلياً (في انتظار المزامنة)');
     }
   };
 
   // Manual Explicit Save All Attendance Records for this week
   const handleManualSaveAttendance = async () => {
     if (!selectedSubject) return;
+    const effWeek = getEffectiveWeekNum();
+    const storageKey = 'gradely_local_att_' + (attendanceType === 'lecture' ? 'lec_' : 'sec_') + selectedSubject + '_w' + week;
+    
+    // Always persist to localStorage first
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ records: attendanceRecords, excuses: excuseReasons, date: sessionDate, updatedAt: Date.now() }));
+    } catch (e) {}
+
+    if (!navigator.onLine) {
+      baseEnrolledStudents.forEach(stu => {
+        queueAttendanceChange(stu.user_id, selectedSubject, effWeek, attendanceRecords[stu.user_id]);
+      });
+      setAutoSaveStatus('🟡 تم حفظ الكشف محلياً على جهازك (سيتم الرفع عند الاتصال)');
+      setTimeout(() => setAutoSaveStatus(''), 4000);
+      return;
+    }
+
     setAutoSaveStatus('💾 جاري الحفظ الشامل...');
     try {
-      const upsertRows = displayedEnrolledStudents.map(stu => ({
+      const upsertRows = baseEnrolledStudents.map(stu => ({
         student_id: stu.user_id,
         subject_id: selectedSubject,
-        week_number: week,
+        week_number: effWeek,
         status: attendanceRecords[stu.user_id] || 'unrecorded'
       }));
 
       if (upsertRows.length > 0) {
         await saveSubjectWeekDate(selectedSubject, week, sessionDate);
-      const { error } = await supabase.from('attendance').upsert(upsertRows, { onConflict: 'student_id,subject_id,week_number' });
+        const { error } = await supabase.from('attendance').upsert(upsertRows, { onConflict: 'student_id,subject_id,week_number' });
         if (error) throw error;
       }
 
@@ -466,7 +647,10 @@ export default function AttendanceTab({ user }) {
       setTimeout(() => setAutoSaveStatus(''), 3500);
     } catch (err) {
       console.error('Manual save error:', err);
-      setAutoSaveStatus('❌ حدث خطأ أثناء الحفظ');
+      baseEnrolledStudents.forEach(stu => {
+        queueAttendanceChange(stu.user_id, selectedSubject, effWeek, attendanceRecords[stu.user_id]);
+      });
+      setAutoSaveStatus('🟡 تم الحفظ محلياً على جهازك (تعذر الاتصال بالسيرفر)');
     }
   };
 
@@ -592,19 +776,19 @@ export default function AttendanceTab({ user }) {
     }
   };
 
-  // Realtime counters for currently displayed students
+  // Realtime counters for currently active students
   let countPresent = 0;
   let countAbsent = 0;
   let countLate = 0;
   let countExcused = 0;
-  displayedEnrolledStudents.forEach(stu => {
+  baseEnrolledStudents.forEach(stu => {
     const st = attendanceRecords[stu.user_id];
     if (st === 'present') countPresent++;
     else if (st === 'absent') countAbsent++;
     else if (st === 'late') countLate++;
     else if (st === 'excused') countExcused++;
   });
-  const countUnrecorded = displayedEnrolledStudents.length - (countPresent + countAbsent + countLate + countExcused);
+  const countUnrecorded = baseEnrolledStudents.length - (countPresent + countAbsent + countLate + countExcused);
 
   const handleDownloadAttendanceTemplate = async () => {
     if (!currentSub) return;
@@ -916,6 +1100,25 @@ export default function AttendanceTab({ user }) {
         </div>
       </div>
 
+      {/* Offline Notice Banner */}
+      {offlineNotice && (
+        <div style={{
+          background: 'rgba(245, 158, 11, 0.15)',
+          border: '1px solid rgba(245, 158, 11, 0.4)',
+          color: '#fbbf24',
+          padding: '10px 16px',
+          borderRadius: '10px',
+          marginBottom: '1.2rem',
+          fontWeight: 700,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}>
+          <WifiOff size={18} style={{flexShrink:0}} />
+          <span>{offlineNotice}</span>
+        </div>
+      )}
+
       {/* QUICK ATTENDANCE TOOLBAR & LIVE COUNTERS */}
       {selectedSubject && (
         <div className="panel" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem',flexWrap:'wrap',gap:'1rem',background:'var(--surface)',padding:'1rem 1.2rem'}}>
@@ -933,24 +1136,145 @@ export default function AttendanceTab({ user }) {
             />
           </div>
 
-          {/* Quick Status Counters */}
-          <div style={{display:'flex',gap:'12px',alignItems:'center',fontSize:'0.85rem',fontWeight:700,flexWrap:'wrap'}}>
-            <span style={{color:'var(--success)',background:'rgba(16, 185, 129, 0.1)',padding:'4px 8px',borderRadius:'6px',border:'1px solid rgba(16, 185, 129, 0.2)'}}>
+          {/* Quick Status Interactive Filter Buttons */}
+          <div style={{display:'flex',gap:'8px',alignItems:'center',fontSize:'0.85rem',fontWeight:700,flexWrap:'wrap'}}>
+            <button 
+              type="button"
+              onClick={() => setStatusFilter('all')}
+              style={{
+                cursor:'pointer',
+                border: statusFilter === 'all' ? '2px solid var(--primary-hover)' : '1px solid var(--border)',
+                background: statusFilter === 'all' ? 'rgba(79, 70, 229, 0.25)' : 'var(--bg)',
+                color: statusFilter === 'all' ? '#ffffff' : 'var(--text-muted)',
+                padding:'5px 10px',
+                borderRadius:'8px',
+                fontWeight: 800,
+                transition: 'all 0.15s ease'
+              }}
+              title="عرض جميع الطلاب"
+            >
+              📋 الكل: {baseEnrolledStudents.length}
+            </button>
+
+            <button 
+              type="button"
+              onClick={() => setStatusFilter(prev => prev === 'present' ? 'all' : 'present')}
+              style={{
+                cursor:'pointer',
+                border: statusFilter === 'present' ? '2px solid var(--success)' : '1px solid rgba(16, 185, 129, 0.3)',
+                background: statusFilter === 'present' ? 'rgba(16, 185, 129, 0.25)' : 'rgba(16, 185, 129, 0.08)',
+                color: 'var(--success)',
+                padding:'5px 10px',
+                borderRadius:'8px',
+                fontWeight: 800,
+                boxShadow: statusFilter === 'present' ? '0 0 10px rgba(16, 185, 129, 0.3)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+              title="تصفية الطلاب الحاضرين فقط"
+            >
               ● حاضر: {countPresent}
-            </span>
-            <span style={{color:'var(--danger)',background:'rgba(239, 68, 68, 0.1)',padding:'4px 8px',borderRadius:'6px',border:'1px solid rgba(239, 68, 68, 0.2)'}}>
+            </button>
+
+            <button 
+              type="button"
+              onClick={() => setStatusFilter(prev => prev === 'absent' ? 'all' : 'absent')}
+              style={{
+                cursor:'pointer',
+                border: statusFilter === 'absent' ? '2px solid var(--danger)' : '1px solid rgba(239, 68, 68, 0.3)',
+                background: statusFilter === 'absent' ? 'rgba(239, 68, 68, 0.25)' : 'rgba(239, 68, 68, 0.08)',
+                color: 'var(--danger)',
+                padding:'5px 10px',
+                borderRadius:'8px',
+                fontWeight: 800,
+                boxShadow: statusFilter === 'absent' ? '0 0 10px rgba(239, 68, 68, 0.3)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+              title="تصفية الطلاب الغائبين فقط"
+            >
               ● غائب: {countAbsent}
-            </span>
-            <span style={{color:'var(--warning)',background:'rgba(245, 158, 11, 0.1)',padding:'4px 8px',borderRadius:'6px',border:'1px solid rgba(245, 158, 11, 0.2)'}}>
+            </button>
+
+            <button 
+              type="button"
+              onClick={() => setStatusFilter(prev => prev === 'late' ? 'all' : 'late')}
+              style={{
+                cursor:'pointer',
+                border: statusFilter === 'late' ? '2px solid var(--warning)' : '1px solid rgba(245, 158, 11, 0.3)',
+                background: statusFilter === 'late' ? 'rgba(245, 158, 11, 0.25)' : 'rgba(245, 158, 11, 0.08)',
+                color: 'var(--warning)',
+                padding:'5px 10px',
+                borderRadius:'8px',
+                fontWeight: 800,
+                boxShadow: statusFilter === 'late' ? '0 0 10px rgba(245, 158, 11, 0.3)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+              title="تصفية الطلاب المتأخرين فقط"
+            >
               ● تأخير: {countLate}
-            </span>
-            <span style={{color:'#3b82f6',background:'rgba(59, 130, 246, 0.1)',padding:'4px 8px',borderRadius:'6px',border:'1px solid rgba(59, 130, 246, 0.2)'}}>
+            </button>
+
+            <button 
+              type="button"
+              onClick={() => setStatusFilter(prev => prev === 'excused' ? 'all' : 'excused')}
+              style={{
+                cursor:'pointer',
+                border: statusFilter === 'excused' ? '2px solid #3b82f6' : '1px solid rgba(59, 130, 246, 0.3)',
+                background: statusFilter === 'excused' ? 'rgba(59, 130, 246, 0.25)' : 'rgba(59, 130, 246, 0.08)',
+                color: '#60a5fa',
+                padding:'5px 10px',
+                borderRadius:'8px',
+                fontWeight: 800,
+                boxShadow: statusFilter === 'excused' ? '0 0 10px rgba(59, 130, 246, 0.3)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+              title="تصفية أصحاب الأعذار فقط"
+            >
               ● عذر: {countExcused}
-            </span>
+            </button>
+
             {countUnrecorded > 0 && (
-              <span style={{color:'var(--text-muted)',background:'var(--bg)',padding:'4px 8px',borderRadius:'6px',border:'1px solid var(--border)'}}>
+              <button 
+                type="button"
+                onClick={() => setStatusFilter(prev => prev === 'unrecorded' ? 'all' : 'unrecorded')}
+                style={{
+                  cursor:'pointer',
+                  border: statusFilter === 'unrecorded' ? '2px solid #94a3b8' : '1px solid var(--border)',
+                  background: statusFilter === 'unrecorded' ? 'rgba(148, 163, 184, 0.25)' : 'var(--bg)',
+                  color: statusFilter === 'unrecorded' ? '#ffffff' : 'var(--text-muted)',
+                  padding:'5px 10px',
+                  borderRadius:'8px',
+                  fontWeight: 800,
+                  transition: 'all 0.15s ease'
+                }}
+                title="تصفية الطلاب الذين لم يتم رصدهم بعد"
+              >
                 لم يرصد: {countUnrecorded}
-              </span>
+              </button>
+            )}
+
+            {pendingSyncCount > 0 && (
+              <button
+                type="button"
+                onClick={syncPendingAttendance}
+                disabled={syncingOffline}
+                style={{
+                  background: 'rgba(245, 158, 11, 0.15)',
+                  border: '1px solid #f59e0b',
+                  color: '#f59e0b',
+                  padding: '5px 10px',
+                  borderRadius: '8px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '0.82rem'
+                }}
+                title="مزامنة تسجيلات الغياب المعلقة مع السيرفر"
+              >
+                <RefreshCw size={13} style={{animation: syncingOffline ? 'spin 1s linear infinite' : 'none'}} />
+                مزامنة ({pendingSyncCount})
+              </button>
             )}
           </div>
 
@@ -1447,11 +1771,14 @@ export default function AttendanceTab({ user }) {
 
       {/* CUSTOM EXPORT MODAL (.TXT or .XLSX) */}
       {showExportModal && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem'
-        }}>
-          <div className="panel fade-in" style={{maxWidth: '460px', width: '100%'}}>
+        <div 
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
+          }}
+          onClick={e => { if (e.target === e.currentTarget) setShowExportModal(false); }}
+        >
+          <div className="panel fade-in" style={{maxWidth: '500px', width: '100%', maxHeight: '90vh', overflowY: 'auto', border: '1px solid rgba(79, 70, 229, 0.35)', boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.85)', borderRadius: '16px'}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',borderBottom:'1px solid var(--border)',paddingBottom:'0.8rem'}}>
               <h3 style={{margin:0,fontSize:'1.2rem',display:'flex',alignItems:'center',gap:'8px',color:'var(--primary-hover)'}}>
                 <Download size={20} /> خيارات تصدير كشف الغياب والحضور
@@ -1513,11 +1840,14 @@ export default function AttendanceTab({ user }) {
 
       {/* EXCUSE REASON MODAL */}
       {excuseModalStudent && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem'
-        }}>
-          <div className="panel fade-in" style={{maxWidth: '420px', width: '100%'}}>
+        <div 
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
+          }}
+          onClick={e => { if (e.target === e.currentTarget) setExcuseModalStudent(null); }}
+        >
+          <div className="panel fade-in" style={{maxWidth: '460px', width: '100%', maxHeight: '90vh', overflowY: 'auto', border: '1px solid rgba(59, 130, 246, 0.4)', boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.85)', borderRadius: '16px'}}>
             <h3 style={{marginTop:0,fontSize:'1.2rem',display:'flex',alignItems:'center',gap:'8px',color:'#3b82f6'}}>
               <MessageSquare size={18} /> تسجيل سبب العذر
             </h3>
@@ -1548,8 +1878,14 @@ export default function AttendanceTab({ user }) {
 
       {/* Attendance Excel Import Modal */}
       {showImportAttendanceModal && (
-        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.75)',backdropFilter:'blur(4px)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:'1rem'}}>
-          <div className="panel fade-in" style={{maxWidth:'580px',width:'100%',padding:'2rem',borderRadius:'16px',position:'relative'}}>
+        <div 
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
+            zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
+          }}
+          onClick={e => { if (e.target === e.currentTarget) setShowImportAttendanceModal(false); }}
+        >
+          <div className="panel fade-in" style={{maxWidth:'600px',width:'100%',maxHeight:'90vh',overflowY:'auto',padding:'2rem',borderRadius:'16px',position:'relative',border:'1px solid rgba(79, 70, 229, 0.35)',boxShadow:'0 25px 60px -15px rgba(0, 0, 0, 0.85)'}}>
             <button onClick={() => setShowImportAttendanceModal(false)} style={{position:'absolute',top:'16px',left:'16px',background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}}>
               <X size={22} />
             </button>

@@ -1609,11 +1609,14 @@ export default function OverviewTab({ user }) {
 
       {/* ADD CUSTOM COLUMN MODAL */}
       {showCustomColumnModal && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem'
-        }}>
-          <div className="panel fade-in" style={{maxWidth: '480px', width: '100%'}}>
+        <div 
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
+          }}
+          onClick={e => { if (e.target === e.currentTarget) setShowCustomColumnModal(false); }}
+        >
+          <div className="panel fade-in" style={{maxWidth: '480px', width: '100%', maxHeight: '90vh', overflowY: 'auto', border: '1px solid rgba(79, 70, 229, 0.35)', boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.85)', borderRadius: '16px'}}>
             <h3 style={{margin:'0 0 1rem 0',fontSize:'1.2rem',color:'var(--primary-hover)',fontWeight:800}}>
               ➕ إضافة خانة درجات / أعمال سنة جديدة
             </h3>
@@ -1672,11 +1675,14 @@ export default function OverviewTab({ user }) {
 
       {/* EDIT COLUMN MODAL */}
       {editingColumn && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem'
-        }}>
-          <div className="panel fade-in" style={{maxWidth: '460px', width: '100%'}}>
+        <div 
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
+          }}
+          onClick={e => { if (e.target === e.currentTarget) setEditingColumn(null); }}
+        >
+          <div className="panel fade-in" style={{maxWidth: '460px', width: '100%', maxHeight: '90vh', overflowY: 'auto', border: '1px solid rgba(79, 70, 229, 0.35)', boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.85)', borderRadius: '16px'}}>
             <h3 style={{margin:'0 0 1rem 0',fontSize:'1.2rem',color:'var(--primary-hover)',fontWeight:800}}>
               ✏️ تعديل اسم وبيانات الخانة
             </h3>

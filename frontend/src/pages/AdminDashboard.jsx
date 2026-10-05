@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { LogOut, BookOpen, Users, CheckSquare, FileText, LayoutDashboard, Menu, X, Printer, KeyRound, Lock } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { LogOut, BookOpen, Users, CheckSquare, FileText, LayoutDashboard, Menu, X, Printer, KeyRound, Lock, WifiOff, Wifi } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { isSuperUser } from '../utils/dataCache';
 import OverviewTab from '../components/admin/OverviewTab';
@@ -12,6 +12,7 @@ import StudentReportTab from '../components/admin/StudentReportTab';
 export default function AdminDashboard({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   
   // Password Change Modal State
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -21,6 +22,17 @@ export default function AdminDashboard({ user, onLogout }) {
   const [passwordUpdating, setPasswordUpdating] = useState(false);
 
   const isSuperAdmin = isSuperUser(user);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   const handleChangePassword = async (e) => {
     e.preventDefault();
@@ -123,8 +135,10 @@ export default function AdminDashboard({ user, onLogout }) {
             </span>
           </div>
           <button 
+            className="show-on-mobile"
             style={{background:'rgba(255,255,255,0.05)', padding:'6px', color:'var(--text-main)', border:'none', borderRadius:'50%', cursor:'pointer', display: 'flex'}}
             onClick={() => setMobileMenuOpen(false)}
+            aria-label="إغلاق القائمة"
           >
             <X size={22} />
           </button>
@@ -142,28 +156,6 @@ export default function AdminDashboard({ user, onLogout }) {
               </div>
             </div>
           </div>
-          <button 
-            onClick={() => { setShowPasswordModal(true); setPasswordMsg({type:'',text:''}); }}
-            style={{
-              marginTop: '10px',
-              width: '100%',
-              background: 'rgba(79, 70, 229, 0.1)',
-              border: '1px solid rgba(79, 70, 229, 0.3)',
-              color: 'var(--primary-hover)',
-              padding: '7px 10px',
-              borderRadius: '8px',
-              fontSize: '0.85rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px',
-              transition: 'all 0.2s'
-            }}
-          >
-            <KeyRound size={15} /> تغيير كلمة المرور
-          </button>
         </div>
 
         <nav style={{padding: '0 0.8rem', display: 'flex', flexDirection: 'column', gap: '0.4rem', flex: 1, overflowY: 'auto'}}>
@@ -287,6 +279,29 @@ export default function AdminDashboard({ user, onLogout }) {
             </button>
           </div>
         </header>
+
+        {/* Network Offline Alert Banner */}
+        {!isOnline && (
+          <div 
+            style={{
+              background: 'linear-gradient(90deg, #991b1b 0%, #b91c1c 100%)',
+              color: '#ffffff',
+              padding: '10px 1.5rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px',
+              fontSize: '0.92rem',
+              fontWeight: 700,
+              boxShadow: '0 4px 15px rgba(185, 28, 28, 0.4)',
+              zIndex: 35,
+              textAlign: 'center'
+            }}
+          >
+            <WifiOff size={20} style={{flexShrink:0}} />
+            <span>⚠️ تنبيه: انقطع الاتصال بالإنترنت! أنت تعمل الآن في وضع عدم الاتصال (Offline Mode). جميع تسجيلات الغياب والدرجات يتم حفظها محلياً على جهازك بأمان، وستتم المزامنة تلقائياً فور عودة الإنترنت.</span>
+          </div>
+        )}
 
         {/* Dynamic View Component */}
         <main style={{padding: 'clamp(1rem, 2.5vw, 2rem)', flex: 1, overflowY: 'auto', width: '100%', boxSizing: 'border-box'}}>
