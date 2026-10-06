@@ -24,6 +24,8 @@ export default function StudentsTab({ user }) {
   const [syncCredsProgress, setSyncCredsProgress] = useState({ current: 0, total: 0 });
   const [credsMessage, setCredsMessage] = useState('');
 
+  const isSuper = isSuperUser(user);
+
   const [file, setFile] = useState(null);
   const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState('');
@@ -665,7 +667,7 @@ export default function StudentsTab({ user }) {
             </button>
           )}
 
-          {activeSubTab === 'students' && (
+          {isSuper && activeSubTab === 'students' && (
             <button 
               className="btn-secondary" 
               onClick={() => {

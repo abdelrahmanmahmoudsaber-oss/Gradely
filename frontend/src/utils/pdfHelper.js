@@ -382,10 +382,10 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
 }
 
 /**
- * Generates and prints compact A4 admission/credential slips for students.
- * Formatted as cuttable cards (2 columns per page) with Cairo typography.
+ * Generates and prints ultra-compact A4 admission/credential slips for students.
+ * Optimized for 18 to 21 students per page (3 columns x 6-7 rows) with cuttable dashed borders.
  */
-export function printStudentCredentialsSlips({ credentialsList, title = 'بطاقات كلمات المرور الابتدائية للطلاب' }) {
+export function printStudentCredentialsSlips({ credentialsList, title = 'كروت كلمات المرور' }) {
   if (!Array.isArray(credentialsList) || credentialsList.length === 0) {
     alert('لا توجد بيانات طلاب لطباعة الكروت');
     return;
@@ -397,34 +397,26 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'بطا�
     return;
   }
 
-  const currentDate = new Date().toLocaleDateString('ar-EG', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
-  });
-
-  const cardsHtml = credentialsList.map((item, idx) => `
+  const cardsHtml = credentialsList.map((item) => `
     <div class="credential-card">
-      <div class="card-header">
-        <span class="platform-logo">Gradely</span>
-        <span class="card-type">بطاقة دخول الطالب</span>
+      <div class="card-top-row">
+        <span class="student-name" title="${item.name}">${item.name || 'طالب'}</span>
+        <span class="meta-tag">ف${item.year_level || '1'} | ${item.section || 'S1'}</span>
       </div>
-      <div class="student-main-name">${item.name || 'طالب'}</div>
       
-      <div class="card-info-grid">
-        <div class="info-cell">
-          <span class="cell-label">الرقم الأكاديمي (ID / يوزر):</span>
-          <span class="cell-value ltr-text">${item.user_id}</span>
+      <div class="card-creds-row">
+        <div class="cred-item">
+          <span class="cred-label">ID:</span>
+          <span class="cred-val ltr-text">${item.user_id}</span>
         </div>
-        <div class="info-cell">
-          <span class="cell-label">كلمة المرور المؤقتة:</span>
-          <span class="cell-value pwd-box ltr-text">${item.password}</span>
+        <div class="cred-item">
+          <span class="cred-label">Pass:</span>
+          <span class="cred-val pwd-box ltr-text">${item.password}</span>
         </div>
       </div>
 
-      <div class="card-footer">
-        <span>الفرقة ${item.year_level || '1'} | سكشن ${item.section || 'S1'}</span>
-        <span class="pwd-hint">* يرجى تغيير كلمة المرور فور الدخول</span>
+      <div class="card-hint-row">
+        * يرجى تغيير كلمة المرور فور تسجيل الدخول
       </div>
     </div>
   `).join('');
@@ -434,14 +426,14 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'بطا�
     <html dir="rtl" lang="ar">
     <head>
       <meta charset="UTF-8" />
-      <title>${title} - Gradely</title>
+      <title>${title}</title>
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-      <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+      <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800;900&display=swap" rel="stylesheet">
       <style>
         @page {
           size: A4 portrait;
-          margin: 8mm;
+          margin: 5mm;
         }
         * {
           box-sizing: border-box;
@@ -454,134 +446,102 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'بطا�
           padding: 0;
           background: #ffffff;
           color: #0f172a;
-          font-size: 12px;
-        }
-        .page-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding-bottom: 8px;
-          margin-bottom: 12px;
-          border-bottom: 2px solid #e2e8f0;
-        }
-        .page-header h1 {
-          margin: 0;
-          font-size: 16px;
-          font-weight: 800;
-          color: #1e1b4b;
-        }
-        .page-header .meta-info {
           font-size: 11px;
-          color: #64748b;
         }
         .cards-grid {
           display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 8mm;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 3mm 3.5mm;
         }
         .credential-card {
-          border: 1.5px dashed #94a3b8;
-          border-radius: 8px;
-          padding: 10px 14px;
+          border: 1px dashed #64748b;
+          border-radius: 6px;
+          padding: 5px 7px;
           background: #fafafa;
           page-break-inside: avoid;
           display: flex;
           flex-direction: column;
           justify-content: space-between;
-          height: 52mm;
+          height: 38mm;
           box-sizing: border-box;
         }
-        .card-header {
+        .card-top-row {
           display: flex;
           justify-content: space-between;
           align-items: center;
+          gap: 4px;
           border-bottom: 1px solid #e2e8f0;
-          padding-bottom: 4px;
-          margin-bottom: 4px;
+          padding-bottom: 2px;
+          margin-bottom: 2px;
         }
-        .platform-logo {
-          font-weight: 900;
-          color: #4f46e5;
-          font-size: 13px;
-          letter-spacing: 0.5px;
-        }
-        .card-type {
-          font-size: 10px;
-          color: #64748b;
-          font-weight: 700;
-        }
-        .student-main-name {
-          font-size: 13.5px;
+        .student-name {
+          font-size: 10.5px;
           font-weight: 800;
           color: #0f172a;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          margin: 2px 0 6px 0;
+          max-width: 70%;
         }
-        .card-info-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 6px;
-          background: #ffffff;
-          padding: 6px 8px;
-          border-radius: 6px;
-          border: 1px solid #e2e8f0;
+        .meta-tag {
+          font-size: 8.5px;
+          font-weight: 700;
+          color: #475569;
+          background: #e2e8f0;
+          padding: 1px 4px;
+          border-radius: 3px;
+          white-space: nowrap;
         }
-        .info-cell {
+        .card-creds-row {
           display: flex;
-          flex-direction: column;
-          gap: 2px;
+          justify-content: space-between;
+          align-items: center;
+          background: #ffffff;
+          padding: 3px 6px;
+          border-radius: 4px;
+          border: 1px solid #cbd5e1;
+          margin: 2px 0;
         }
-        .cell-label {
+        .cred-item {
+          display: flex;
+          align-items: center;
+          gap: 3px;
+        }
+        .cred-label {
           font-size: 9px;
           color: #64748b;
           font-weight: 700;
         }
-        .cell-value {
-          font-size: 12px;
+        .cred-val {
+          font-size: 10.5px;
           font-weight: 800;
-          color: #1e293b;
+          color: #0f172a;
         }
         .pwd-box {
           background: #f1f5f9;
-          padding: 2px 6px;
-          border-radius: 4px;
-          border: 1px solid #cbd5e1;
-          color: #0f172a;
-          font-family: 'Consolas', monospace;
-          letter-spacing: 1px;
+          padding: 1px 5px;
+          border-radius: 3px;
+          border: 1px solid #94a3b8;
+          color: #1e1b4b;
+          font-family: 'Consolas', 'Courier New', monospace;
+          letter-spacing: 0.8px;
+          font-size: 11px;
         }
         .ltr-text {
           direction: ltr;
           text-align: left;
         }
-        .card-footer {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          font-size: 9.5px;
+        .card-hint-row {
+          text-align: center;
+          font-size: 7.5px;
           font-weight: 700;
-          color: #475569;
-          margin-top: 4px;
-          padding-top: 4px;
-          border-top: 1px solid #f1f5f9;
-        }
-        .pwd-hint {
           color: #dc2626;
-          font-size: 8.5px;
+          border-top: 1px solid #f1f5f9;
+          padding-top: 2px;
         }
       </style>
     </head>
     <body>
-      <div class="page-header">
-        <div>
-          <h1>${title}</h1>
-          <span class="meta-info">العدد الإجمالي: ${credentialsList.length} طالب | منصة Gradely</span>
-        </div>
-        <div class="meta-info">${currentDate}</div>
-      </div>
-
       <div class="cards-grid">
         ${cardsHtml}
       </div>
