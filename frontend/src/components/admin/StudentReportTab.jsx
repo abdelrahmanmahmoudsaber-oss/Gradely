@@ -29,6 +29,26 @@ export default function StudentReportTab({ user }) {
     selectedSubjectIds: []
   });
 
+  const inferStudentYear = (stuId, rawLevel = '') => {
+    const strId = String(stuId || '').trim();
+    const digits = strId.replace(/\D/g, '');
+    if (digits.length >= 6) {
+      const prefix = digits.slice(0, 2);
+      if (prefix === '26') return '1';
+      if (prefix === '25') return '2';
+      if (prefix === '24') return '3';
+      if (prefix === '23' || prefix === '22' || prefix === '21' || prefix === '20') return '4';
+    }
+    if (rawLevel) {
+      const s = rawLevel.toString().trim();
+      if (/أول|الأولى/i.test(s) || s === '1') return '1';
+      if (/ثاني|الثانية/i.test(s) || s === '2') return '2';
+      if (/ثالث|الثالثة/i.test(s) || s === '3') return '3';
+      if (/رابع|الرابعة/i.test(s) || s === '4') return '4';
+    }
+    return '1';
+  };
+
   const normalizeYear = (yr) => {
     if (!yr) return '1';
     return yr.toString()
@@ -162,7 +182,7 @@ export default function StudentReportTab({ user }) {
 
   const filteredStudents = allStudents.filter(s => {
     const matchSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.user_id.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchYear = selectedYearFilter === 'all' || normalizeYear(s.year_level) === selectedYearFilter;
+    const matchYear = selectedYearFilter === 'all' || inferStudentYear(s.user_id, s.year_level) === selectedYearFilter;
     const matchSection = selectedSectionFilter === 'all' || normalizeSection(s.section || 'S1') === normalizeSection(selectedSectionFilter);
     return matchSearch && matchYear && matchSection;
   });
@@ -190,7 +210,7 @@ export default function StudentReportTab({ user }) {
   const handleGeneratePdf = () => {
     setShowPdfModal(false);
     printStudentReportPDF({
-      student: selectedStudent,
+      student: { ...selectedStudent, year_level: inferStudentYear(selectedStudent.user_id, selectedStudent.year_level) },
       subjects: enrolledSubjects,
       grades: studentGrades,
       attendance: studentAttendance,
@@ -271,7 +291,7 @@ export default function StudentReportTab({ user }) {
                     {selectedStudent.user_id}
                   </span>
                   <span className="badge" style={{background:'rgba(79, 70, 229, 0.12)',color:'var(--primary-hover)',border:'1px solid rgba(79, 70, 229, 0.25)',padding:'6px 12px',fontSize:'0.9rem',fontWeight:700}}>
-                    فرقة الطالب: {normalizeYear(selectedStudent.year_level)}
+                    فرقة الطالب: {inferStudentYear(selectedStudent.user_id, selectedStudent.year_level)}
                   </span>
                   <span className="badge" style={{background:'rgba(16, 185, 129, 0.12)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.25)',padding:'6px 12px',fontSize:'0.9rem',fontWeight:700}}>
                     السكشن الأساسي: {normalizeSection(selectedStudent.section || 'S1')}

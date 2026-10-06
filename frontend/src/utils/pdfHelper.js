@@ -19,6 +19,26 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
     ? subjects.filter(s => selectedSubjectIds.includes(s.id))
     : subjects;
 
+  const inferStudentYear = (stuId, rawLevel = '') => {
+    const strId = String(stuId || '').trim();
+    const digits = strId.replace(/\D/g, '');
+    if (digits.length >= 6) {
+      const prefix = digits.slice(0, 2);
+      if (prefix === '26') return '1';
+      if (prefix === '25') return '2';
+      if (prefix === '24') return '3';
+      if (prefix === '23' || prefix === '22' || prefix === '21' || prefix === '20') return '4';
+    }
+    if (rawLevel) {
+      const s = rawLevel.toString().trim();
+      if (/أول|الأولى/i.test(s) || s === '1') return '1';
+      if (/ثاني|الثانية/i.test(s) || s === '2') return '2';
+      if (/ثالث|الثالثة/i.test(s) || s === '3') return '3';
+      if (/رابع|الرابعة/i.test(s) || s === '4') return '4';
+    }
+    return '1';
+  };
+
   const normalizeYear = (yr) => {
     if (!yr) return '1';
     return yr.toString().replace('الفرقة ', '').replace('الأولى', '1').replace('الثانية', '2').replace('الثالثة', '3').replace('الرابعة', '4').trim();
@@ -347,7 +367,7 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
           <h2 class="student-name">${student.name}</h2>
           <div class="meta-tags">
             <span class="tag tag-id">الرقم الأكاديمي: ${student.user_id}</span>
-            <span class="tag tag-year">الفرقة ${normalizeYear(student.year_level)}</span>
+            <span class="tag tag-year">الفرقة ${inferStudentYear(student.user_id, student.year_level)}</span>
             <span class="tag tag-sec">السكشن: ${normalizeSection(student.section || 'S1')}</span>
           </div>
         </div>
@@ -397,24 +417,31 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
     return;
   }
 
-  const normalizeYear = (yr) => {
-    if (!yr) return '1';
-    return yr.toString().replace('الفرقة ', '').replace('الأولى', '1').replace('الثانية', '2').replace('الثالثة', '3').replace('الرابعة', '4').trim();
-  };
-
-  const normalizeSection = (sec) => {
-    if (!sec) return 'S1';
-    const s = sec.toString().trim().toUpperCase().replace(/\s+/g, '');
-    const match = s.match(/(\d+)/);
-    if (match) return 'S' + parseInt(match[1], 10);
-    return 'S1';
+  const inferStudentYear = (stuId, rawLevel = '') => {
+    const strId = String(stuId || '').trim();
+    const digits = strId.replace(/\D/g, '');
+    if (digits.length >= 6) {
+      const prefix = digits.slice(0, 2);
+      if (prefix === '26') return '1';
+      if (prefix === '25') return '2';
+      if (prefix === '24') return '3';
+      if (prefix === '23' || prefix === '22' || prefix === '21' || prefix === '20') return '4';
+    }
+    if (rawLevel) {
+      const s = rawLevel.toString().trim();
+      if (/أول|الأولى/i.test(s) || s === '1') return '1';
+      if (/ثاني|الثانية/i.test(s) || s === '2') return '2';
+      if (/ثالث|الثالثة/i.test(s) || s === '3') return '3';
+      if (/رابع|الرابعة/i.test(s) || s === '4') return '4';
+    }
+    return '1';
   };
 
   const cardsHtml = credentialsList.map((item) => `
     <div class="credential-card">
       <div class="card-top-row">
         <span class="student-name">${item.name || 'طالب'}</span>
-        <span class="meta-tag">الفرقة ${normalizeYear(item.year_level)} - سكشن ${normalizeSection(item.section)}</span>
+        <span class="meta-tag">الفرقة ${inferStudentYear(item.user_id, item.year_level)} - سكشن ${normalizeSection(item.section)}</span>
       </div>
       
       <div class="card-creds-row">
