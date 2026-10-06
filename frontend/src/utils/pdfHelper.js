@@ -573,60 +573,107 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
           font-size: 10.5px;
           font-weight: 900;
           letter-spacing: 0.5px;
+        @media print {
+          .no-print-toolbar {
+            display: none !important;
+          }
+        }
+        .no-print-toolbar {
+          background: #1e293b;
+          color: white;
+          padding: 10px 16px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          position: sticky;
+          top: 0;
+          z-index: 9999;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+          font-family: 'Cairo', sans-serif;
+          margin-bottom: 8px;
+        }
+        .print-btn {
+          background: #4f46e5;
+          color: white;
+          border: none;
+          padding: 8px 18px;
+          border-radius: 6px;
+          font-weight: 800;
+          font-size: 13px;
+          cursor: pointer;
+          font-family: inherit;
+        }
+        .print-btn:hover {
+          background: #4338ca;
         }
       </style>
     </head>
     <body>
+      <div class="no-print-toolbar">
+        <span style="font-weight:800;font-size:14px;">🖨️ معاينة طباعة كروت كلمات المرور (A4)</span>
+        <button class="print-btn" onclick="window.print()">📄 اضغط للطباعة / الحفظ كـ PDF (Ctrl + P)</button>
+      </div>
+
       <div class="cards-grid">
         ${cardsHtml}
       </div>
 
       <script>
-        window.onload = function() {
+        window.addEventListener('load', function() {
           setTimeout(function() {
-            window.focus();
-            window.print();
-          }, 300);
-        };
+            try {
+              window.focus();
+              window.print();
+            } catch (e) {}
+          }, 500);
+        });
       </script>
     </body>
     </html>
   `;
 
+  // Open print preview reliably across Chrome, Edge, and Safari
   try {
-    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
-    const blobUrl = URL.createObjectURL(blob);
-    const printWin = window.open(blobUrl, '_blank');
-
-    if (!printWin) {
-      // Fallback: create hidden iframe or direct download
-      const iframe = document.createElement('iframe');
-      iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '0';
-      iframe.style.height = '0';
-      iframe.style.border = '0';
-      iframe.src = blobUrl;
-      document.body.appendChild(iframe);
-      iframe.onload = () => {
-        setTimeout(() => {
-          try {
-            iframe.contentWindow.focus();
-            iframe.contentWindow.print();
-          } catch (e) {
-            console.error('Print iframe error:', e);
-          }
-        }, 500);
-      };
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.open();
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+      return;
     }
+  } catch (e) {
+    console.warn('Direct window.open blocked, trying iframe/blob fallback:', e);
+  }
+
+  // Fallback if popup is blocked: use hidden iframe to trigger system print dialog directly
+  try {
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+    
+    const iframeDoc = iframe.contentWindow.document;
+    iframeDoc.open();
+    iframeDoc.write(htmlContent);
+    iframeDoc.close();
 
     setTimeout(() => {
-      URL.revokeObjectURL(blobUrl);
-    }, 60000);
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch (err) {
+        console.error('Iframe print error:', err);
+      } finally {
+        setTimeout(() => document.body.removeChild(iframe), 60000);
+      }
+    }, 600);
   } catch (err) {
     console.error('Error generating print preview:', err);
-    alert('حدث خطأ أثناء إعداد المعاينة للطباعة');
+    alert('يرجى السماح بالنوافذ المنبثقة (Popups) أو إعادة المحاولة');
   }
 }
 
