@@ -383,7 +383,7 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
 
 /**
  * Generates and prints ultra-compact A4 admission/credential slips for students.
- * Optimized for exactly 21 students per page (3 columns x 7 rows) with no overflow.
+ * Ultra-tight layout: 30 to 33 students per page (3 columns x 10-11 rows) with zero wasted space.
  */
 export function printStudentCredentialsSlips({ credentialsList, title = 'كروت كلمات المرور' }) {
   if (!Array.isArray(credentialsList) || credentialsList.length === 0) {
@@ -414,10 +414,6 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
           <span class="cred-val pwd-box">${item.password}</span>
         </div>
       </div>
-
-      <div class="card-hint-row">
-        * يرجى تغيير كلمة المرور فور الدخول
-      </div>
     </div>
   `).join('');
 
@@ -433,7 +429,7 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
       <style>
         @page {
           size: A4 portrait;
-          margin: 6mm 5mm;
+          margin: 5mm 4.5mm;
         }
         * {
           box-sizing: border-box;
@@ -448,27 +444,27 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
           background: #ffffff;
           color: #0f172a;
           font-family: 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          font-size: 11px;
+          font-size: 10.5px;
           overflow-x: hidden;
         }
         .cards-grid {
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 2.5mm 3mm;
+          gap: 1.8mm 2.2mm;
           width: 100%;
           max-width: 100%;
         }
         .credential-card {
           border: 1px dashed #64748b;
-          border-radius: 5px;
-          padding: 4px 6px;
+          border-radius: 4px;
+          padding: 2.5px 5px;
           background: #fafafa;
           page-break-inside: avoid;
           break-inside: avoid;
           display: flex;
           flex-direction: column;
           justify-content: space-between;
-          height: 36.5mm;
+          height: 22.5mm;
           box-sizing: border-box;
           min-width: 0;
           overflow: hidden;
@@ -477,14 +473,14 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
           display: flex;
           justify-content: space-between;
           align-items: center;
-          gap: 4px;
+          gap: 3px;
           border-bottom: 1px solid #e2e8f0;
-          padding-bottom: 2px;
-          margin-bottom: 2px;
+          padding-bottom: 1.5px;
+          margin-bottom: 1.5px;
           min-width: 0;
         }
         .student-name {
-          font-size: 10px;
+          font-size: 9.5px;
           font-weight: 800;
           color: #0f172a;
           white-space: nowrap;
@@ -495,12 +491,12 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
           text-align: right;
         }
         .meta-tag {
-          font-size: 8px;
+          font-size: 7.5px;
           font-weight: 800;
           color: #334155;
           background: #e2e8f0;
-          padding: 1px 4px;
-          border-radius: 3px;
+          padding: 0.5px 3.5px;
+          border-radius: 2.5px;
           white-space: nowrap;
           flex-shrink: 0;
         }
@@ -510,49 +506,37 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
           justify-content: space-between;
           align-items: center;
           background: #ffffff;
-          padding: 2.5px 6px;
-          border-radius: 4px;
+          padding: 1.5px 5px;
+          border-radius: 3px;
           border: 1px solid #cbd5e1;
-          margin: 1.5px 0;
           min-width: 0;
         }
         .cred-item {
           display: flex;
           align-items: center;
-          gap: 3px;
+          gap: 2.5px;
           white-space: nowrap;
         }
         .cred-label {
-          font-size: 9px;
+          font-size: 8.5px;
           color: #64748b;
           font-weight: 800;
           font-family: 'Cairo', sans-serif;
         }
         .cred-val {
-          font-size: 10.5px;
+          font-size: 10px;
           font-weight: 800;
           color: #0f172a;
           font-family: 'Consolas', 'Courier New', monospace;
         }
         .pwd-box {
           background: #f1f5f9;
-          padding: 1px 4px;
-          border-radius: 3px;
+          padding: 0.5px 4px;
+          border-radius: 2.5px;
           border: 1px solid #94a3b8;
           color: #1e1b4b;
-          font-size: 10.5px;
+          font-size: 10px;
           letter-spacing: 0.5px;
-        }
-        .card-hint-row {
-          text-align: center;
-          font-size: 7px;
-          font-weight: 700;
-          color: #dc2626;
-          border-top: 1px solid #f1f5f9;
-          padding-top: 1.5px;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
         }
       </style>
     </head>
