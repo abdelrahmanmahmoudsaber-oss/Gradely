@@ -380,3 +380,224 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
   printWindow.document.write(htmlContent);
   printWindow.document.close();
 }
+
+/**
+ * Generates and prints compact A4 admission/credential slips for students.
+ * Formatted as cuttable cards (2 columns per page) with Cairo typography.
+ */
+export function printStudentCredentialsSlips({ credentialsList, title = 'بطاقات كلمات المرور الابتدائية للطلاب' }) {
+  if (!Array.isArray(credentialsList) || credentialsList.length === 0) {
+    alert('لا توجد بيانات طلاب لطباعة الكروت');
+    return;
+  }
+
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    alert('يرجى السماح بالنوافذ المنبثقة (Popups) لطباعة الكروت');
+    return;
+  }
+
+  const currentDate = new Date().toLocaleDateString('ar-EG', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+
+  const cardsHtml = credentialsList.map((item, idx) => `
+    <div class="credential-card">
+      <div class="card-header">
+        <span class="platform-logo">Gradely</span>
+        <span class="card-type">بطاقة دخول الطالب</span>
+      </div>
+      <div class="student-main-name">${item.name || 'طالب'}</div>
+      
+      <div class="card-info-grid">
+        <div class="info-cell">
+          <span class="cell-label">الرقم الأكاديمي (ID / يوزر):</span>
+          <span class="cell-value ltr-text">${item.user_id}</span>
+        </div>
+        <div class="info-cell">
+          <span class="cell-label">كلمة المرور المؤقتة:</span>
+          <span class="cell-value pwd-box ltr-text">${item.password}</span>
+        </div>
+      </div>
+
+      <div class="card-footer">
+        <span>الفرقة ${item.year_level || '1'} | سكشن ${item.section || 'S1'}</span>
+        <span class="pwd-hint">* يرجى تغيير كلمة المرور فور الدخول</span>
+      </div>
+    </div>
+  `).join('');
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html dir="rtl" lang="ar">
+    <head>
+      <meta charset="UTF-8" />
+      <title>${title} - Gradely</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+      <style>
+        @page {
+          size: A4 portrait;
+          margin: 8mm;
+        }
+        * {
+          box-sizing: border-box;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        body {
+          font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif;
+          margin: 0;
+          padding: 0;
+          background: #ffffff;
+          color: #0f172a;
+          font-size: 12px;
+        }
+        .page-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding-bottom: 8px;
+          margin-bottom: 12px;
+          border-bottom: 2px solid #e2e8f0;
+        }
+        .page-header h1 {
+          margin: 0;
+          font-size: 16px;
+          font-weight: 800;
+          color: #1e1b4b;
+        }
+        .page-header .meta-info {
+          font-size: 11px;
+          color: #64748b;
+        }
+        .cards-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 8mm;
+        }
+        .credential-card {
+          border: 1.5px dashed #94a3b8;
+          border-radius: 8px;
+          padding: 10px 14px;
+          background: #fafafa;
+          page-break-inside: avoid;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          height: 52mm;
+          box-sizing: border-box;
+        }
+        .card-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          border-bottom: 1px solid #e2e8f0;
+          padding-bottom: 4px;
+          margin-bottom: 4px;
+        }
+        .platform-logo {
+          font-weight: 900;
+          color: #4f46e5;
+          font-size: 13px;
+          letter-spacing: 0.5px;
+        }
+        .card-type {
+          font-size: 10px;
+          color: #64748b;
+          font-weight: 700;
+        }
+        .student-main-name {
+          font-size: 13.5px;
+          font-weight: 800;
+          color: #0f172a;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          margin: 2px 0 6px 0;
+        }
+        .card-info-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 6px;
+          background: #ffffff;
+          padding: 6px 8px;
+          border-radius: 6px;
+          border: 1px solid #e2e8f0;
+        }
+        .info-cell {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .cell-label {
+          font-size: 9px;
+          color: #64748b;
+          font-weight: 700;
+        }
+        .cell-value {
+          font-size: 12px;
+          font-weight: 800;
+          color: #1e293b;
+        }
+        .pwd-box {
+          background: #f1f5f9;
+          padding: 2px 6px;
+          border-radius: 4px;
+          border: 1px solid #cbd5e1;
+          color: #0f172a;
+          font-family: 'Consolas', monospace;
+          letter-spacing: 1px;
+        }
+        .ltr-text {
+          direction: ltr;
+          text-align: left;
+        }
+        .card-footer {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-size: 9.5px;
+          font-weight: 700;
+          color: #475569;
+          margin-top: 4px;
+          padding-top: 4px;
+          border-top: 1px solid #f1f5f9;
+        }
+        .pwd-hint {
+          color: #dc2626;
+          font-size: 8.5px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="page-header">
+        <div>
+          <h1>${title}</h1>
+          <span class="meta-info">العدد الإجمالي: ${credentialsList.length} طالب | منصة Gradely</span>
+        </div>
+        <div class="meta-info">${currentDate}</div>
+      </div>
+
+      <div class="cards-grid">
+        ${cardsHtml}
+      </div>
+
+      <script>
+        window.onload = function() {
+          window.focus();
+          window.print();
+        };
+      </script>
+    </body>
+    </html>
+  `;
+
+  printWindow.document.open();
+  printWindow.document.write(htmlContent);
+  printWindow.document.close();
+}
+

@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { parseExcelFile, exportExcelFile } from '../../utils/excelHelper';
+import { printStudentCredentialsSlips } from '../../utils/pdfHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
-import { Users, Upload, UserPlus, Edit, Trash2, Search, Shield, GraduationCap, X, ChevronDown, KeyRound, Filter, CheckSquare, Square, BookOpen, Lock, Download, FileSpreadsheet, Info } from 'lucide-react';
+import { Users, Upload, UserPlus, Edit, Trash2, Search, Shield, GraduationCap, X, ChevronDown, KeyRound, Filter, CheckSquare, Square, BookOpen, Lock, Download, FileSpreadsheet, Info, Printer, RefreshCw, CheckCircle2 } from 'lucide-react';
 
 export default function StudentsTab({ user }) {
   const [allUsers, setAllUsers] = useState([]);
@@ -12,7 +13,16 @@ export default function StudentsTab({ user }) {
   // Modals visibility
   const [showAddModal, setShowAddModal] = useState(false);
   const [showExcelImport, setShowExcelImport] = useState(false);
+  const [showCredentialsModal, setShowCredentialsModal] = useState(false);
   const [importTargetSubject, setImportTargetSubject] = useState('');
+
+  // Credentials Generator State
+  const [credentialsScope, setCredentialsScope] = useState('all');
+  const [passwordFormat, setPasswordFormat] = useState('numeric6');
+  const [generatedCredentials, setGeneratedCredentials] = useState([]);
+  const [isGeneratingCreds, setIsGeneratingCreds] = useState(false);
+  const [syncCredsProgress, setSyncCredsProgress] = useState({ current: 0, total: 0 });
+  const [credsMessage, setCredsMessage] = useState('');
 
   const [file, setFile] = useState(null);
   const [importing, setImporting] = useState(false);
@@ -525,6 +535,113 @@ export default function StudentsTab({ user }) {
     }
   };
 
+  const generateRandomPassword = (format) => {
+    if (format === 'numeric6') {
+      return String(Math.floor(100000 + Math.random() * 900000));
+    }
+    const chars = '23456789abcdefghjkmnpqrstuvwxyz';
+    let res = '';
+    for (let i = 0; i < 6; i++) {
+      res += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return res;
+  };
+
+  const handleGenerateAndSyncCredentials = async () => {
+    try {
+      setIsGeneratingCreds(true);
+      setCredsMessage('');
+
+      // 1. Determine target students
+      let targets = [];
+      if (credentialsScope === 'selected' && selectedStudentIds.length > 0) {
+        targets = allUsers.filter(u => u.role === 'student' && selectedStudentIds.includes(u.user_id));
+      } else if (credentialsScope === 'filtered') {
+        targets = filteredStudents;
+      } else if (credentialsScope.startsWith('year_')) {
+        const y = credentialsScope.replace('year_', '');
+        targets = allUsers.filter(u => u.role === 'student' && normalizeYear(u.year_level) === y);
+      } else {
+        // all
+        targets = allUsers.filter(u => u.role === 'student');
+      }
+
+      if (targets.length === 0) {
+        setCredsMessage('❌ لا يوجد طلاب مطابقون للنطاق المختار');
+        setIsGeneratingCreds(false);
+        return;
+      }
+
+      // Sort targets by year, section, name
+      targets.sort((a, b) => {
+        const yA = parseInt(normalizeYear(a.year_level), 10) || 1;
+        const yB = parseInt(normalizeYear(b.year_level), 10) || 1;
+        if (yA !== yB) return yA - yB;
+        const sA = (a.section || 'S1').localeCompare(b.section || 'S1');
+        if (sA !== 0) return sA;
+        return (a.name || '').localeCompare(b.name || '', 'ar');
+      });
+
+      // 2. Generate passwords
+      const credsList = targets.map(stu => ({
+        user_id: stu.user_id,
+        name: stu.name,
+        year_level: normalizeYear(stu.year_level),
+        section: normalizeSection(stu.section || 'S1'),
+        password: generateRandomPassword(passwordFormat)
+      }));
+
+      setSyncCredsProgress({ current: 0, total: credsList.length });
+
+      // 3. Batch sync passwords into database (via RPC or users table)
+      const BATCH_SIZE = 25;
+      for (let i = 0; i < credsList.length; i += BATCH_SIZE) {
+        const chunk = credsList.slice(i, i + BATCH_SIZE);
+        await Promise.all(chunk.map(async (c) => {
+          try {
+            await supabase.rpc('admin_update_user_password', {
+              p_user_id: c.user_id,
+              p_new_password: c.password
+            });
+          } catch (e) {
+            await supabase.from('users').update({ password: c.password }).eq('user_id', c.user_id);
+          }
+        }));
+        setSyncCredsProgress({ current: Math.min(i + BATCH_SIZE, credsList.length), total: credsList.length });
+      }
+
+      setGeneratedCredentials(credsList);
+      setCredsMessage(`🎉 تم بنجاح توليد وتشفير كلمات المرور لـ ${credsList.length} طالب! جاهز للطباعة والتصدير.`);
+    } catch (err) {
+      console.error('Credentials generation error:', err);
+      setCredsMessage('❌ حدث خطأ أثناء الحفظ: ' + err.message);
+    } finally {
+      setIsGeneratingCreds(false);
+    }
+  };
+
+  const handleExportCredentialsExcel = () => {
+    if (generatedCredentials.length === 0) return;
+    const rows = generatedCredentials.map((c, idx) => ({
+      'م': idx + 1,
+      'الاسم': c.name,
+      'الرقم الأكاديمي': c.user_id,
+      'كلمة المرور المؤقتة': c.password,
+      'الفرقة': 'الفرقة ' + c.year_level,
+      'السكشن': c.section
+    }));
+    const timestamp = new Date().toISOString().slice(0, 10);
+    exportExcelFile(rows, `Gradely_Student_Credentials_${timestamp}.xlsx`);
+  };
+
+  const handlePrintCredentialsCards = () => {
+    if (generatedCredentials.length === 0) return;
+    printStudentCredentialsSlips({
+      credentialsList: generatedCredentials,
+      title: 'كروت كلمات المرور الابتدائية للطلاب - Gradely'
+    });
+  };
+
   return (
     <div className="fade-in">
       
@@ -545,6 +662,21 @@ export default function StudentsTab({ user }) {
               style={{color:'var(--danger)',borderColor:'rgba(239, 68, 68, 0.4)',background:'rgba(239, 68, 68, 0.1)'}}
             >
               <Trash2 size={18} /> حذف المحدد ({selectedStudentIds.length})
+            </button>
+          )}
+
+          {activeSubTab === 'students' && (
+            <button 
+              className="btn-secondary" 
+              onClick={() => {
+                setShowCredentialsModal(true);
+                setCredsMessage('');
+                setGeneratedCredentials([]);
+              }}
+              style={{color:'var(--primary-hover)',borderColor:'rgba(79, 70, 229, 0.4)',background:'rgba(79, 70, 229, 0.1)',display:'flex',alignItems:'center',gap:'6px',fontWeight:700}}
+              title="توليد وتصدير كلمات مرور عشوائية للطلاب في كشف منظم أو كروت مقصوصة للطباعة"
+            >
+              <KeyRound size={18} /> 🔑 توليد وتصدير كروت وكلمات مرور الطلاب
             </button>
           )}
 
@@ -1119,6 +1251,199 @@ export default function StudentsTab({ user }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 5. CREDENTIALS GENERATION & EXPORT MODAL */}
+      {showCredentialsModal && (
+        <div 
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
+          }}
+          onClick={e => { if (e.target === e.currentTarget && !isGeneratingCreds) setShowCredentialsModal(false); }}
+        >
+          <div className="panel fade-in" style={{maxWidth: '680px', width: '100%', maxHeight: '92vh', overflowY: 'auto', border: '1px solid rgba(79, 70, 229, 0.4)', boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.85)', borderRadius: '16px', padding: '1.8rem'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',borderBottom:'1px solid var(--border)',paddingBottom:'0.8rem'}}>
+              <h3 style={{margin:0,fontSize:'1.3rem',color:'var(--primary-hover)',fontWeight:800,display:'flex',alignItems:'center',gap:'8px'}}>
+                <KeyRound size={22} /> توليد وتصدير كروت وكلمات مرور الطلاب
+              </h3>
+              <button 
+                onClick={() => setShowCredentialsModal(false)}
+                className="btn-secondary"
+                disabled={isGeneratingCreds}
+                style={{padding:'4px 10px',fontSize:'0.85rem'}}
+              >
+                ✕ إغلاق
+              </button>
+            </div>
+
+            <div style={{display:'flex',flexDirection:'column',gap:'1.2rem'}}>
+              
+              <div style={{background:'rgba(79, 70, 229, 0.08)',padding:'12px 16px',borderRadius:'10px',border:'1px solid rgba(79, 70, 229, 0.25)'}}>
+                <p style={{margin:0,fontWeight:700,color:'var(--primary-hover)',fontSize:'0.9rem'}}>
+                  🛡️ تأمين حسابات الطلاب وتوزيع كلمات المرور
+                </p>
+                <p style={{margin:'4px 0 0 0',fontSize:'0.82rem',color:'var(--text-muted)'}}>
+                  تتيح لك هذه الأداة توليد كلمات مرور ابتدائية عشوائية وتشفيرها في قاعدة البيانات، ثم طباعة كروت مقصوصة أو تصدير شيت إكسيل مقتضب لتوزيعه على الطلاب. يُلزم الطالب بتغيير كلمة المرور فور دخوله لأول مرة.
+                </p>
+              </div>
+
+              {/* Scope & Format Options */}
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))',gap:'1rem'}}>
+                <div>
+                  <label style={{display:'block',marginBottom:'6px',fontSize:'0.88rem',fontWeight:700}}>
+                    👥 نطاق الطلاب المستهدفين:
+                  </label>
+                  <select 
+                    className="input-field" 
+                    value={credentialsScope} 
+                    onChange={e => setCredentialsScope(e.target.value)}
+                    disabled={isGeneratingCreds}
+                    style={{width:'100%',padding:'9px 12px',fontWeight:700}}
+                  >
+                    <option value="all">🌐 كافة طلاب الكلية ({allStudentsList.length} طالب)</option>
+                    <option value="filtered">🔍 نتائج البحث والفلتر الحالية ({filteredStudents.length} طالب)</option>
+                    {selectedStudentIds.length > 0 && (
+                      <option value="selected">✅ الطلاب المحددين فقط ({selectedStudentIds.length} طالب)</option>
+                    )}
+                    <option value="year_1">الفرقة الأولى فقط ({allStudentsList.filter(s => normalizeYear(s.year_level) === '1').length} طالب)</option>
+                    <option value="year_2">الفرقة الثانية فقط ({allStudentsList.filter(s => normalizeYear(s.year_level) === '2').length} طالب)</option>
+                    <option value="year_3">الفرقة الثالثة فقط ({allStudentsList.filter(s => normalizeYear(s.year_level) === '3').length} طالب)</option>
+                    <option value="year_4">الفرقة الرابعة فقط ({allStudentsList.filter(s => normalizeYear(s.year_level) === '4').length} طالب)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{display:'block',marginBottom:'6px',fontSize:'0.88rem',fontWeight:700}}>
+                    🔢 نمط كلمة المرور:
+                  </label>
+                  <select 
+                    className="input-field" 
+                    value={passwordFormat} 
+                    onChange={e => setPasswordFormat(e.target.value)}
+                    disabled={isGeneratingCreds}
+                    style={{width:'100%',padding:'9px 12px',fontWeight:700}}
+                  >
+                    <option value="numeric6">🔢 6 أرقام عشوائية (مثال: 582914) - سهل ومريح للطلاب</option>
+                    <option value="alphanumeric6">🔤 6 حروف وأرقام إنجليزية (مثال: k9m2p7)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Generate Button */}
+              <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={handleGenerateAndSyncCredentials}
+                  disabled={isGeneratingCreds}
+                  style={{padding:'12px',fontSize:'1rem',fontWeight:800,display:'flex',alignItems:'center',justifyContent:'center',gap:'8px',background:'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)'}}
+                >
+                  {isGeneratingCreds ? (
+                    <>
+                      <RefreshCw size={18} className="spin" />
+                      جاري توليد وتشفير كلمات المرور ({syncCredsProgress.current} / {syncCredsProgress.total})...
+                    </>
+                  ) : (
+                    <>
+                      <KeyRound size={18} />
+                      ⚡ توليد وتشفير كلمات المرور في قاعدة البيانات الآن
+                    </>
+                  )}
+                </button>
+
+                {isGeneratingCreds && (
+                  <div style={{width:'100%',background:'var(--bg)',height:'8px',borderRadius:'4px',overflow:'hidden',border:'1px solid var(--border)'}}>
+                    <div style={{
+                      height:'100%',
+                      background:'linear-gradient(90deg, #4f46e5, #10b981)',
+                      width: `${syncCredsProgress.total > 0 ? (syncCredsProgress.current / syncCredsProgress.total) * 100 : 0}%`,
+                      transition: 'width 0.2s ease'
+                    }} />
+                  </div>
+                )}
+              </div>
+
+              {credsMessage && (
+                <div style={{
+                  background: credsMessage.startsWith('🎉') ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.15)',
+                  border: credsMessage.startsWith('🎉') ? '1px solid var(--success)' : '1px solid var(--danger)',
+                  color: credsMessage.startsWith('🎉') ? 'var(--success)' : 'var(--danger)',
+                  padding: '10px 14px', borderRadius: '8px', fontSize: '0.9rem', fontWeight: 700
+                }}>
+                  {credsMessage}
+                </div>
+              )}
+
+              {/* Export and Print Action Toolbar */}
+              {generatedCredentials.length > 0 && (
+                <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'12px',padding:'16px',display:'flex',flexDirection:'column',gap:'1rem'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'10px'}}>
+                    <span style={{fontWeight:800,fontSize:'0.95rem',color:'var(--text-main)'}}>
+                      📋 جاهز للتوزيع ({generatedCredentials.length} طالب):
+                    </span>
+                    <div style={{display:'flex',gap:'10px',flexWrap:'wrap'}}>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        onClick={handlePrintCredentialsCards}
+                        style={{background:'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',borderColor:'#0369a1',display:'flex',alignItems:'center',gap:'6px',padding:'8px 14px',fontSize:'0.88rem',fontWeight:700}}
+                        title="طباعة بطاقات وكروت مقصوصة جاهزة للتسليم للطلاب في السكشن"
+                      >
+                        <Printer size={16} /> 📄 طباعة كروت الدخول (A4)
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        onClick={handleExportCredentialsExcel}
+                        style={{color:'var(--success)',borderColor:'rgba(16,185,129,0.4)',display:'flex',alignItems:'center',gap:'6px',padding:'8px 14px',fontSize:'0.88rem',fontWeight:700}}
+                        title="تصدير شيت إكسيل مضغوط يحتوي على الاسم والـ ID وكلمة المرور فقط"
+                      >
+                        <FileSpreadsheet size={16} /> 📊 تصدير شيت إكسيل (.xlsx)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Compact Preview Table */}
+                  <div style={{maxHeight:'190px',overflowY:'auto',border:'1px solid var(--border)',borderRadius:'8px'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:'0.82rem',textAlign:'right'}}>
+                      <thead>
+                        <tr style={{background:'rgba(255,255,255,0.03)',borderBottom:'1px solid var(--border)'}}>
+                          <th style={{padding:'6px 10px'}}>الاسم</th>
+                          <th style={{padding:'6px 10px'}}>الرقم الأكاديمي (ID)</th>
+                          <th style={{padding:'6px 10px'}}>كلمة المرور المؤقتة</th>
+                          <th style={{padding:'6px 10px'}}>الفرقة / السكشن</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {generatedCredentials.slice(0, 8).map((c, idx) => (
+                          <tr key={idx} style={{borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
+                            <td style={{padding:'6px 10px',fontWeight:700}}>{c.name}</td>
+                            <td style={{padding:'6px 10px',fontFamily:'monospace',direction:'ltr',textAlign:'right'}}>{c.user_id}</td>
+                            <td style={{padding:'6px 10px'}}>
+                              <span style={{background:'rgba(79, 70, 229, 0.15)',color:'var(--primary-hover)',padding:'2px 8px',borderRadius:'4px',fontFamily:'monospace',fontWeight:800}}>
+                                {c.password}
+                              </span>
+                            </td>
+                            <td style={{padding:'6px 10px',color:'var(--text-muted)'}}>
+                              الفرقة {c.year_level} - {c.section}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {generatedCredentials.length > 8 && (
+                    <div style={{fontSize:'0.75rem',color:'var(--text-muted)',textAlign:'center'}}>
+                      يظهر في المعاينة أول 8 طلاب من إجمالي {generatedCredentials.length} طالب (سيتم تصدير وطباعة الكل بالكامل).
+                    </div>
+                  )}
+                </div>
+              )}
+
+            </div>
           </div>
         </div>
       )}
