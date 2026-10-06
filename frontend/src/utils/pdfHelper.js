@@ -444,7 +444,7 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
     <div class="card-item">
       <div class="card-header-bar">
         <span class="st-name">${item.name || 'طالب'}</span>
-        <span class="st-meta">ف${inferStudentYear(item.user_id, item.year_level)} - ${normalizeSection(item.section)}</span>
+        <span class="st-meta">الفرقة ${inferStudentYear(item.user_id, item.year_level)} - ${normalizeSection(item.section)}</span>
       </div>
 
       <div class="field-row">

@@ -102,6 +102,31 @@ export default function StudentDashboard({ user, onLogout }) {
     }
   };
 
+  const inferStudentYear = (stuId, rawLevel = '') => {
+    const strId = String(stuId || '').trim();
+    const digits = strId.replace(/\D/g, '');
+    if (digits.length >= 6) {
+      const prefix = digits.slice(0, 2);
+      if (prefix === '26') return '1';
+      if (prefix === '25') return '2';
+      if (prefix === '24') return '3';
+      if (prefix === '23' || prefix === '22' || prefix === '21' || prefix === '20') return '4';
+    }
+    if (rawLevel) {
+      const s = rawLevel.toString().trim();
+      const numMatch = s.match(/\d+/);
+      if (numMatch) {
+        const n = parseInt(numMatch[0], 10);
+        if (n >= 1 && n <= 6) return String(n);
+      }
+      if (/أول|الأولى/i.test(s)) return '1';
+      if (/ثاني|الثانية/i.test(s)) return '2';
+      if (/ثالث|الثالثة/i.test(s)) return '3';
+      if (/رابع|الرابعة/i.test(s)) return '4';
+    }
+    return '1';
+  };
+
   const normalizeYear = (yr) => {
     if (!yr) return '';
     const s = yr.toString().trim();
@@ -455,7 +480,7 @@ export default function StudentDashboard({ user, onLogout }) {
         </div>
         <div style={{display:'flex',alignItems:'center',gap:'0.8rem',flexWrap:'wrap'}}>
           <span className="badge" style={{background:'rgba(16, 185, 129, 0.1)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.2)',padding:'5px 10px',fontWeight:700,fontSize:'0.8rem'}}>
-            فرقة {normalizeYear(user.year_level)} | {normalizeSection(user.section || 'S1')}
+            الفرقة {inferStudentYear(user.user_id, user.year_level)} | {normalizeSection(user.section || 'S1')}
           </span>
 
           <button 
@@ -507,7 +532,7 @@ export default function StudentDashboard({ user, onLogout }) {
             أهلاً بك، <span style={{color: 'var(--primary-hover)'}}>{user.name}</span> 👋
           </h1>
           <p className="text-muted" style={{fontSize: '0.95rem', margin: 0}}>
-            الرقم الأكاديمي: <strong>{user.user_id}</strong> | فرقة الطالب: <strong>الفرقة {normalizeYear(user.year_level)}</strong>
+            الرقم الأكاديمي: <strong>{user.user_id}</strong> | فرقة الطالب: <strong>الفرقة {inferStudentYear(user.user_id, user.year_level)}</strong>
           </p>
         </div>
 
