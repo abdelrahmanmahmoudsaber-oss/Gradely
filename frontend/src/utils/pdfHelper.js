@@ -432,20 +432,36 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
   };
 
   const cardsHtml = credentialsList.map((item) => `
-    <div class="credential-card">
-      <div class="card-top-row">
-        <span class="student-name">${item.name || 'طالب'}</span>
-        <span class="meta-tag">الفرقة ${inferStudentYear(item.user_id, item.year_level)} - سكشن ${normalizeSection(item.section)}</span>
+    <div class="card-item">
+      <div class="card-header-bar">
+        <span class="st-name">${item.name || 'طالب'}</span>
+        <span class="st-meta">ف${inferStudentYear(item.user_id, item.year_level)} - ${normalizeSection(item.section)}</span>
       </div>
-      
-      <div class="card-creds-row">
-        <div class="cred-item">
-          <span class="cred-label">ID:</span>
-          <span class="cred-val">${item.user_id}</span>
+
+      <div class="field-row">
+        <div class="field-label-group">
+          <svg class="field-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+          </svg>
+          <span class="field-label">USER</span>
         </div>
-        <div class="cred-item">
-          <span class="cred-label">Pass:</span>
-          <span class="cred-val pwd-box">${item.password}</span>
+        <div class="field-input-box user-box">${item.user_id}</div>
+      </div>
+
+      <div class="field-row">
+        <div class="field-label-group">
+          <svg class="field-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
+          </svg>
+          <span class="field-label">PASSWORD</span>
+        </div>
+        <div class="field-input-box pass-box">${item.password}</div>
+      </div>
+
+      <div class="card-bottom-bar">
+        <div class="card-h-line"></div>
+        <div class="corner-slashes">
+          <span></span><span></span><span></span>
         </div>
       </div>
     </div>
@@ -459,11 +475,11 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
       <title>${title}</title>
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-      <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800;900&display=swap" rel="stylesheet">
+      <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800;900&family=Inter:wght@600;700;800&family=JetBrains+Mono:wght@700;800&display=swap" rel="stylesheet">
       <style>
         @page {
           size: A4 portrait;
-          margin: 5mm 4mm;
+          margin: 4.5mm 4mm;
         }
         * {
           box-sizing: border-box;
@@ -476,110 +492,136 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
           margin: 0;
           padding: 0;
           background: #ffffff;
-          color: #0f172a;
-          font-family: 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          font-size: 10px;
+          color: #000000;
+          font-family: 'Inter', 'Cairo', -apple-system, BlinkMacSystemFont, sans-serif;
           overflow-x: hidden;
         }
         .cards-grid {
           display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+          grid-template-columns: repeat(3, 1fr);
           gap: 2.2mm 2.2mm;
           width: 100%;
-          max-width: 100%;
         }
-        .credential-card {
-          border: 1.5px dashed #475569;
-          border-radius: 5px;
-          padding: 4px 6px;
+        .card-item {
+          border: 1.5px solid #111111;
+          border-radius: 9px;
+          padding: 4px 6.5px 3.5px 6.5px;
           background: #ffffff;
           page-break-inside: avoid;
           break-inside: avoid;
           display: flex;
           flex-direction: column;
           justify-content: space-between;
-          height: 24.5mm;
+          height: 29.5mm;
           box-sizing: border-box;
-          min-width: 0;
-          overflow: hidden;
+          position: relative;
         }
-        .card-top-row {
+        .card-header-bar {
           display: flex;
           justify-content: space-between;
-          align-items: flex-start;
+          align-items: center;
+          direction: rtl;
           gap: 4px;
           margin-bottom: 2px;
-          min-width: 0;
+          line-height: 1.1;
         }
-        .student-name {
-          font-size: 9.5px;
+        .st-name {
+          font-family: 'Cairo', sans-serif;
+          font-size: 8.5px;
           font-weight: 800;
-          line-height: 1.25;
-          color: #0f172a;
-          white-space: normal;
+          color: #111111;
+          white-space: nowrap;
           overflow: hidden;
-          max-height: 24px;
+          text-overflow: ellipsis;
           flex: 1;
-          min-width: 0;
           text-align: right;
         }
-        .meta-tag {
-          font-size: 7.8px;
-          font-weight: 800;
-          color: #3730a3;
-          background: #e0e7ff;
-          border: 1px solid #c7d2fe;
-          padding: 1px 4.5px;
-          border-radius: 3.5px;
+        .st-meta {
+          font-family: 'Cairo', sans-serif;
+          font-size: 7.5px;
+          font-weight: 700;
+          color: #333333;
+          background: #f1f5f9;
+          border: 0.8px solid #cbd5e1;
+          padding: 0.5px 4px;
+          border-radius: 3px;
           white-space: nowrap;
           flex-shrink: 0;
         }
-        .card-creds-row {
+        .field-row {
           display: flex;
-          direction: ltr;
+          align-items: center;
           justify-content: space-between;
-          align-items: center;
-          background: #f8fafc;
-          padding: 2.5px 6px;
-          border-radius: 4px;
-          border: 1px solid #cbd5e1;
-          min-width: 0;
-          margin-top: 2px;
+          direction: ltr;
+          gap: 5px;
+          margin: 1.2px 0;
         }
-        .cred-item {
+        .field-label-group {
           display: flex;
           align-items: center;
-          gap: 3px;
-          white-space: nowrap;
+          gap: 4px;
+          flex-shrink: 0;
         }
-        .cred-label {
-          font-size: 9px;
-          color: #475569;
+        .field-icon {
+          width: 12.5px;
+          height: 12.5px;
+          color: #111111;
+        }
+        .field-label {
+          font-family: 'Inter', sans-serif;
+          font-size: 8px;
           font-weight: 800;
-          font-family: 'Cairo', sans-serif;
-        }
-        .cred-val {
-          font-size: 10.5px;
-          font-weight: 800;
-          color: #0f172a;
-          font-family: 'Consolas', 'Courier New', monospace;
-        }
-        .pwd-box {
-          background: #ffffff;
-          padding: 0.5px 5px;
-          border-radius: 3px;
-          border: 1.5px solid #4f46e5;
-          color: #4338ca;
-          font-size: 10.5px;
-          font-weight: 900;
           letter-spacing: 0.5px;
+          color: #111111;
+        }
+        .field-input-box {
+          flex: 1;
+          max-width: 37mm;
+          border: 1.2px solid #222222;
+          border-radius: 12px;
+          background: #ffffff;
+          padding: 1.5px 6px;
+          text-align: center;
+          font-family: 'JetBrains Mono', 'Consolas', monospace;
+          font-size: 9.5px;
+          font-weight: 800;
+          color: #000000;
+          letter-spacing: 0.4px;
+          line-height: 1.2;
+          box-shadow: inset 0 1px 2px rgba(0,0,0,0.04);
+        }
+        .card-bottom-bar {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          direction: ltr;
+          margin-top: 1.5px;
+          height: 5px;
+        }
+        .card-h-line {
+          flex: 1;
+          height: 1px;
+          background: #333333;
+        }
+        .corner-slashes {
+          display: flex;
+          gap: 2px;
+        }
+        .corner-slashes span {
+          display: block;
+          width: 3.2px;
+          height: 5.5px;
+          background: #111111;
+          transform: skewX(-26deg);
+          border-radius: 0.5px;
+        }
         @media print {
           .no-print-toolbar {
             display: none !important;
           }
         }
         .no-print-toolbar {
-          background: #1e293b;
+          background: #0f172a;
           color: white;
           padding: 10px 16px;
           display: flex;
@@ -588,7 +630,7 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
           position: sticky;
           top: 0;
           z-index: 9999;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+          box-shadow: 0 2px 8px rgba(0,0,0,0.25);
           font-family: 'Cairo', sans-serif;
           margin-bottom: 8px;
         }
@@ -610,7 +652,7 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
     </head>
     <body>
       <div class="no-print-toolbar">
-        <span style="font-weight:800;font-size:14px;">🖨️ معاينة طباعة كروت كلمات المرور (A4)</span>
+        <span style="font-weight:800;font-size:14px;">🖨️ كروت بيانات دخول الطلاب (A4) - جاهز للطباعة والقص</span>
         <button class="print-btn" onclick="window.print()">📄 اضغط للطباعة / الحفظ كـ PDF (Ctrl + P)</button>
       </div>
 
