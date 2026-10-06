@@ -66,15 +66,6 @@ export default function StudentDashboard({ user, onLogout }) {
     fetchData();
   }, [user.user_id]);
 
-  useEffect(() => {
-    // Check if student logged in with default password and must change it
-    const mustChange = sessionStorage.getItem('gradely_must_change_pwd_' + user.user_id) === 'true';
-    if (mustChange) {
-      setIsForcePasswordChange(true);
-      setShowPasswordModal(true);
-    }
-  }, [user.user_id]);
-
   const handleChangePassword = async (e) => {
     e.preventDefault();
     setPasswordMsg({ type: '', text: '' });
@@ -754,7 +745,7 @@ export default function StudentDashboard({ user, onLogout }) {
                       ? getSubjectLectureDate(currentSubject, w)
                       : getSubjectWeekDate(currentSubject, w);
                     const recordDate = record && record.created_at ? record.created_at.split('T')[0] : '';
-                    const wDate = explicitDate || recordDate || getWeekDefaultDate(w);
+                    const wDate = explicitDate || recordDate;
 
                     return (
                       <div key={w} style={{background: bg, border: '1px solid ' + border, borderRadius: '8px', padding: '10px 6px', textAlign: 'center'}}>
@@ -762,13 +753,12 @@ export default function StudentDashboard({ user, onLogout }) {
                           {attSubMode === 'lecture' ? `محاضرة ${w}` : `أسبوع ${w}`}
                         </div>
                         <div style={{fontWeight: 'bold', color: statusColor, fontSize: '0.85rem'}}>{statusLabel}</div>
-                        {wDate ? (
+                        {hasRecordedAttendance && wDate ? (
                           <div style={{
                             fontSize: '0.73rem',
-                            color: hasRecordedAttendance ? (attSubMode === 'lecture' ? '#2dd4bf' : '#60a5fa') : 'var(--text-muted)',
+                            color: attSubMode === 'lecture' ? '#2dd4bf' : '#60a5fa',
                             marginTop: '5px',
-                            background: hasRecordedAttendance ? (attSubMode === 'lecture' ? 'rgba(45, 212, 191, 0.12)' : 'rgba(59, 130, 246, 0.12)') : 'rgba(255, 255, 255, 0.04)',
-                            border: hasRecordedAttendance ? 'none' : '1px dashed var(--border)',
+                            background: attSubMode === 'lecture' ? 'rgba(45, 212, 191, 0.12)' : 'rgba(59, 130, 246, 0.12)',
                             padding: '2px 6px',
                             borderRadius: '4px',
                             display: 'inline-block',

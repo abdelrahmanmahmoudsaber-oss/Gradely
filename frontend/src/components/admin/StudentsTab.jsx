@@ -85,6 +85,79 @@ export default function StudentsTab({ user }) {
     return 'S1';
   };
 
+  const inferStudentYearFromIdOrLevel = (stuId, rawLevel = '') => {
+    if (rawLevel) {
+      const norm = normalizeYear(rawLevel);
+      if (['1', '2', '3', '4'].includes(norm)) return norm;
+    }
+    if (!stuId) return '1';
+    const strId = String(stuId).trim();
+    const digits = strId.replace(/\D/g, '');
+    if (digits.length >= 6) {
+      const prefix = digits.slice(0, 2);
+      if (prefix === '26') return '1';
+      if (prefix === '25') return '2';
+      if (prefix === '24') return '3';
+      if (prefix === '23' || prefix === '22' || prefix === '21' || prefix === '20') return '4';
+    }
+    return '1';
+  };
+
+  const handleAutoFixAllStudentYears = async () => {
+    try {
+      setImporting(true);
+      setMessage('⏳ جاري فحص ومطابقة فرق جميع الطلاب بناءً على السجلات والأرقام الأكاديمية...');
+      
+      const { data: currentDbStudents, error } = await supabase
+        .from('users')
+        .select('id, user_id, name, year_level, role')
+        .eq('role', 'student');
+
+      if (error) throw error;
+      if (!currentDbStudents || currentDbStudents.length === 0) {
+        setMessage('لا توجد حسابات طلاب لفحصها');
+        setImporting(false);
+        return;
+      }
+
+      const updatesToRun = [];
+      currentDbStudents.forEach(stu => {
+        const correctYear = inferStudentYearFromIdOrLevel(stu.user_id, '');
+        const currentYear = normalizeYear(stu.year_level);
+        if (currentYear !== correctYear) {
+          updatesToRun.push({
+            id: stu.id,
+            user_id: stu.user_id,
+            name: stu.name,
+            role: 'student',
+            year_level: correctYear
+          });
+        }
+      });
+
+      if (updatesToRun.length === 0) {
+        setMessage('✅ تم فحص جميع الطلاب: كافة الفرق الدراسية للطلاب صحيحة ومطابقة 100%!');
+        setImporting(false);
+        setTimeout(() => setMessage(''), 4000);
+        return;
+      }
+
+      // Upsert batch
+      const { error: upsertErr } = await supabase.from('users').upsert(updatesToRun, { onConflict: 'user_id' });
+      if (upsertErr) throw upsertErr;
+
+      cacheManager.invalidate('admin_users_base');
+      await fetchData();
+      setMessage(`🎉 تم تصحيح وضبط فرق عدد (${updatesToRun.length}) طالب تلقائياً (وفصل فرق الطلاب عن مستويات المقررات) بنجاح!`);
+      setImporting(false);
+      setTimeout(() => setMessage(''), 6000);
+    } catch (err) {
+      console.error('Auto fix years error:', err);
+      setMessage('❌ حدث خطأ أثناء تصحيح فرق الطلاب: ' + (err.message || ''));
+      setImporting(false);
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -670,6 +743,17 @@ export default function StudentsTab({ user }) {
           {isSuper && activeSubTab === 'students' && (
             <button 
               className="btn-secondary" 
+              onClick={handleAutoFixAllStudentYears}
+              style={{color:'#38bdf8',borderColor:'rgba(56, 189, 248, 0.4)',background:'rgba(56, 189, 248, 0.08)',display:'flex',alignItems:'center',gap:'6px',fontWeight:700}}
+              title="فحص ومطابقة وتصحيح فرق جميع الطلاب تلقائياً بناءً على الأرقام الأكاديمية والبيانات الرسمية"
+            >
+              <RefreshCw size={16} /> ⚡ تدقيق وتصحيح فرق الطلاب تلقائياً
+            </button>
+          )}
+
+          {isSuper && activeSubTab === 'students' && (
+            <button 
+              className="btn-secondary" 
               onClick={() => {
                 setShowCredentialsModal(true);
                 setCredsMessage('');
@@ -967,10 +1051,10 @@ export default function StudentsTab({ user }) {
       {/* 3. ADD / EDIT USER MODAL */}
       {showAddModal && (
         <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem'
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999, padding: '1rem', boxSizing: 'border-box'
         }}>
-          <div className="panel fade-in" style={{maxWidth: '650px', width: '100%', maxHeight: '90vh', overflowY: 'auto'}}>
+          <div className="panel fade-in" style={{maxWidth: '650px', width: '100%', maxHeight: '90vh', overflowY: 'auto', border: '1px solid var(--border)', boxShadow: '0 25px 60px -15px rgba(0,0,0,0.85)', borderRadius: '16px'}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem',borderBottom:'1px solid var(--border)',paddingBottom:'1rem'}}>
               <h3 style={{margin:0,fontSize:'1.3rem'}}>
                 {editMode ? 'تعديل بيانات المستخدم وإعادة تعيين كلمة المرور' : (addingType === 'admin' ? 'إضافة معيد / مشرف جديد' : 'إضافة طالب جديد')}
@@ -1215,10 +1299,10 @@ export default function StudentsTab({ user }) {
       {/* 4. EXCEL IMPORT MODAL */}
       {showExcelImport && (
         <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '1rem'
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999, padding: '1rem', boxSizing: 'border-box'
         }}>
-          <div className="panel fade-in" style={{maxWidth: '500px', width: '100%'}}>
+          <div className="panel fade-in" style={{maxWidth: '500px', width: '100%', border: '1px solid var(--border)', boxShadow: '0 25px 60px -15px rgba(0,0,0,0.85)', borderRadius: '16px'}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem',borderBottom:'1px solid var(--border)',paddingBottom:'1rem'}}>
               <h3 style={{margin:0,fontSize:'1.3rem'}}>استيراد بيانات الطلاب من ملف إكسيل</h3>
               <button onClick={() => setShowExcelImport(false)} style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}}>
@@ -1261,8 +1345,8 @@ export default function StudentsTab({ user }) {
       {showCredentialsModal && (
         <div 
           style={{
-            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
           }}
           onClick={e => { if (e.target === e.currentTarget && !isGeneratingCreds) setShowCredentialsModal(false); }}
         >

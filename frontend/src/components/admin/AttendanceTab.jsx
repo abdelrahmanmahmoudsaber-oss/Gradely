@@ -29,6 +29,14 @@ export const getWeekDefaultDate = (weekNum) => {
   return d.toISOString().split('T')[0];
 };
 
+export const getTodayDateStr = () => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export default function AttendanceTab({ user }) {
   const [loading, setLoading] = useState(true);
   const [subjects, setSubjects] = useState([]);
@@ -41,7 +49,7 @@ export default function AttendanceTab({ user }) {
   const [selectedGroup, setSelectedGroup] = useState('all'); // 'all', 'A', 'B', 'C'
   const [allSystemSubjects, setAllSystemSubjects] = useState([]);
   const [week, setWeek] = useState(() => getAcademicWeekFromDate());
-  const [sessionDate, setSessionDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [sessionDate, setSessionDate] = useState(() => getTodayDateStr());
   const [attendanceRecords, setAttendanceRecords] = useState({});
   const [excuseReasons, setExcuseReasons] = useState({});
   const [autoSaveStatus, setAutoSaveStatus] = useState('');
@@ -362,13 +370,11 @@ export default function AttendanceTab({ user }) {
         }
       }
 
-      if (!foundDate) {
-        const currWeek = getAcademicWeekFromDate();
-        if (week === currWeek) {
-          foundDate = new Date().toISOString().split('T')[0];
-        } else {
-          foundDate = getWeekDefaultDate(week);
-        }
+      const currWeek = getAcademicWeekFromDate();
+      if (week === currWeek) {
+        foundDate = getTodayDateStr();
+      } else if (!foundDate) {
+        foundDate = getWeekDefaultDate(week);
       }
 
       if (data && data.length > 0) {
@@ -721,43 +727,86 @@ export default function AttendanceTab({ user }) {
     setExcuseInputText('');
   };
 
-  const handleMarkAllPresent = () => {
+  const handleMarkAllPresent = async () => {
     const updated = { ...attendanceRecords };
     displayedEnrolledStudents.forEach(stu => {
       updated[stu.user_id] = 'present';
     });
     setAttendanceRecords(updated);
-    cacheManager.set('att_' + selectedSubject + '_w' + week, { records: updated, excuses: excuseReasons, date: sessionDate });
+    const effWeek = getEffectiveWeekNum();
+    const cacheKey = 'att_' + (attendanceType === 'lecture' ? 'lec_' : 'sec_') + selectedSubject + '_w' + week;
+    const storageKey = 'gradely_local_att_' + (attendanceType === 'lecture' ? 'lec_' : 'sec_') + selectedSubject + '_w' + week;
+    cacheManager.set(cacheKey, { records: updated, excuses: excuseReasons, date: sessionDate });
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ records: updated, excuses: excuseReasons, date: sessionDate, updatedAt: Date.now() }));
+    } catch (e) {}
 
     const rows = displayedEnrolledStudents.map(stu => ({
       student_id: stu.user_id,
       subject_id: selectedSubject,
-      week_number: week,
+      week_number: effWeek,
       status: 'present',
-      }));
+    }));
 
-    setAutoSaveStatus('✓ تم حفظ الكل');
-    setTimeout(() => setAutoSaveStatus(''), 1500);
+    setAutoSaveStatus('✓ تم تحضير الكل وحفظه');
+    setTimeout(() => setAutoSaveStatus(''), 2000);
 
-    supabase.from('attendance').upsert(rows, { onConflict: 'student_id,subject_id,week_number' });
+    saveSubjectWeekDate(selectedSubject, week, sessionDate);
+    await supabase.from('attendance').upsert(rows, { onConflict: 'student_id,subject_id,week_number' });
   };
 
-  const handleResetCurrentAttendance = () => {
-    if (!window.confirm('هل تريد إلغاء تحديد الحضور لكافة الطلاب المعروضين في هذا الأسبوع؟')) return;
+  const handleMarkAllAbsent = async () => {
+    const updated = { ...attendanceRecords };
+    displayedEnrolledStudents.forEach(stu => {
+      updated[stu.user_id] = 'absent';
+    });
+    setAttendanceRecords(updated);
+    const effWeek = getEffectiveWeekNum();
+    const cacheKey = 'att_' + (attendanceType === 'lecture' ? 'lec_' : 'sec_') + selectedSubject + '_w' + week;
+    const storageKey = 'gradely_local_att_' + (attendanceType === 'lecture' ? 'lec_' : 'sec_') + selectedSubject + '_w' + week;
+    cacheManager.set(cacheKey, { records: updated, excuses: excuseReasons, date: sessionDate });
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ records: updated, excuses: excuseReasons, date: sessionDate, updatedAt: Date.now() }));
+    } catch (e) {}
+
+    const rows = displayedEnrolledStudents.map(stu => ({
+      student_id: stu.user_id,
+      subject_id: selectedSubject,
+      week_number: effWeek,
+      status: 'absent',
+    }));
+
+    setAutoSaveStatus('✓ تم تغييب كافة الطلاب وحفظه');
+    setTimeout(() => setAutoSaveStatus(''), 2000);
+
+    saveSubjectWeekDate(selectedSubject, week, sessionDate);
+    await supabase.from('attendance').upsert(rows, { onConflict: 'student_id,subject_id,week_number' });
+  };
+
+  const handleResetCurrentAttendance = async () => {
+    if (!window.confirm('هل تريد إلغاء تحديد الحضور والغياب لكافة الطلاب المعروضين في هذا الأسبوع؟')) return;
     const updated = { ...attendanceRecords };
     displayedEnrolledStudents.forEach(stu => {
       delete updated[stu.user_id];
     });
     setAttendanceRecords(updated);
-    cacheManager.set('att_' + selectedSubject + '_w' + week, { records: updated, excuses: excuseReasons, date: sessionDate });
+    const effWeek = getEffectiveWeekNum();
+    const cacheKey = 'att_' + (attendanceType === 'lecture' ? 'lec_' : 'sec_') + selectedSubject + '_w' + week;
+    const storageKey = 'gradely_local_att_' + (attendanceType === 'lecture' ? 'lec_' : 'sec_') + selectedSubject + '_w' + week;
+    cacheManager.set(cacheKey, { records: updated, excuses: excuseReasons, date: sessionDate });
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ records: updated, excuses: excuseReasons, date: sessionDate, updatedAt: Date.now() }));
+    } catch (e) {}
 
     const rows = displayedEnrolledStudents.map(stu => ({
       student_id: stu.user_id,
       subject_id: selectedSubject,
-      week_number: week,
+      week_number: effWeek,
       status: 'unrecorded',
-      }));
-    supabase.from('attendance').upsert(rows, { onConflict: 'student_id,subject_id,week_number' });
+    }));
+    setAutoSaveStatus('✓ تمت إعادة ضبط كشف الأسبوع');
+    setTimeout(() => setAutoSaveStatus(''), 2000);
+    await supabase.from('attendance').upsert(rows, { onConflict: 'student_id,subject_id,week_number' });
   };
 
   // ADVANCED CUSTOM EXPORT (.TXT or .XLSX) BASED ON SELECTION
@@ -1333,16 +1382,24 @@ export default function AttendanceTab({ user }) {
             <button 
               className="btn-secondary" 
               onClick={handleMarkAllPresent}
-              style={{color:'var(--success)',borderColor:'rgba(16, 185, 129, 0.4)',fontSize:'0.85rem',padding:'6px 12px'}}
+              style={{color:'var(--success)',borderColor:'rgba(16, 185, 129, 0.4)',background:'rgba(16, 185, 129, 0.08)',fontSize:'0.85rem',padding:'6px 12px',fontWeight:700}}
               title="تعيين جميع الطلاب المعروضين كـ حاضر دفعة واحدة"
             >
               <CheckCircle2 size={15} /> تحضير الكل
             </button>
             <button 
               className="btn-secondary" 
+              onClick={handleMarkAllAbsent}
+              style={{color:'var(--danger)',borderColor:'rgba(239, 68, 68, 0.4)',background:'rgba(239, 68, 68, 0.08)',fontSize:'0.85rem',padding:'6px 12px',fontWeight:700}}
+              title="تعيين وتغييب جميع الطلاب المعروضين في هذا الكشف دفعة واحدة وحفظها في قاعدة البيانات"
+            >
+              <XCircle size={15} /> تغييب الكل
+            </button>
+            <button 
+              className="btn-secondary" 
               onClick={handleResetCurrentAttendance}
               style={{color:'var(--text-muted)',fontSize:'0.85rem',padding:'6px 10px'}}
-              title="إعادة تعيين وإلغاء تحديد الحضور"
+              title="إعادة تعيين وإلغاء تحديد الحضور والغياب"
             >
               <RotateCcw size={15} />
             </button>
