@@ -411,12 +411,6 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
     return;
   }
 
-  const printWindow = window.open('', '_blank');
-  if (!printWindow) {
-    alert('يرجى السماح بالنوافذ المنبثقة (Popups) لطباعة الكروت');
-    return;
-  }
-
   const inferStudentYear = (stuId, rawLevel = '') => {
     const strId = String(stuId || '').trim();
     const digits = strId.replace(/\D/g, '');
@@ -589,17 +583,51 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
 
       <script>
         window.onload = function() {
-          window.focus();
-          window.print();
+          setTimeout(function() {
+            window.focus();
+            window.print();
+          }, 300);
         };
       </script>
     </body>
     </html>
   `;
 
-  printWindow.document.open();
-  printWindow.document.write(htmlContent);
-  printWindow.document.close();
+  try {
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+    const printWin = window.open(blobUrl, '_blank');
+
+    if (!printWin) {
+      // Fallback: create hidden iframe or direct download
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.src = blobUrl;
+      document.body.appendChild(iframe);
+      iframe.onload = () => {
+        setTimeout(() => {
+          try {
+            iframe.contentWindow.focus();
+            iframe.contentWindow.print();
+          } catch (e) {
+            console.error('Print iframe error:', e);
+          }
+        }, 500);
+      };
+    }
+
+    setTimeout(() => {
+      URL.revokeObjectURL(blobUrl);
+    }, 60000);
+  } catch (err) {
+    console.error('Error generating print preview:', err);
+    alert('حدث خطأ أثناء إعداد المعاينة للطباعة');
+  }
 }
 
 

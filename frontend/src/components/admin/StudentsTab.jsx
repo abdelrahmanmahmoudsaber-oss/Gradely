@@ -18,7 +18,7 @@ export default function StudentsTab({ user }) {
 
   // Credentials Generator State
   const [credentialsScope, setCredentialsScope] = useState('all');
-  const [passwordFormat, setPasswordFormat] = useState('numeric6');
+  const [passwordFormat, setPasswordFormat] = useState('alphanumeric8');
   const [generatedCredentials, setGeneratedCredentials] = useState([]);
   const [isGeneratingCreds, setIsGeneratingCreds] = useState(false);
   const [syncCredsProgress, setSyncCredsProgress] = useState({ current: 0, total: 0 });
@@ -142,13 +142,23 @@ export default function StudentsTab({ user }) {
         return;
       }
 
-      // Upsert batch
-      const { error: upsertErr } = await supabase.from('users').upsert(updatesToRun, { onConflict: 'user_id' });
-      if (upsertErr) throw upsertErr;
+      // Use individual .update() calls to avoid NOT NULL password constraint (upsert would clear it)
+      let failedCount = 0;
+      for (const m of updatesToRun) {
+        const { error: updateErr } = await supabase
+          .from('users')
+          .update({ year_level: m.year_level })
+          .eq('id', m.id);
+        if (updateErr) {
+          console.error(`Failed to update year for student ${m.user_id}:`, updateErr);
+          failedCount++;
+        }
+      }
 
       cacheManager.invalidate('admin_users_base');
       await fetchData();
-      setMessage(`🎉 تم تصحيح وضبط فرق عدد (${updatesToRun.length}) طالب تلقائياً (وفصل فرق الطلاب عن مستويات المقررات) بنجاح!`);
+      const fixedCount = updatesToRun.length - failedCount;
+      setMessage(`🎉 تم تصحيح وضبط فرق عدد (${fixedCount}) طالب تلقائياً بنجاح!${failedCount > 0 ? ` (فشل تصحيح ${failedCount} طالب)` : ''}`);
       setImporting(false);
       setTimeout(() => setMessage(''), 6000);
     } catch (err) {
@@ -614,6 +624,31 @@ export default function StudentsTab({ user }) {
     if (format === 'numeric6') {
       return String(Math.floor(100000 + Math.random() * 900000));
     }
+    if (format === 'alphanumeric8') {
+      // 8-char mixed: uppercase + lowercase + digits + symbol — much harder to guess
+      const upper = 'ABCDEFGHJKMNPQRSTUVWXYZ';
+      const lower = 'abcdefghjkmnpqrstuvwxyz';
+      const digits = '23456789';
+      const symbols = '!@#$&*';
+      const allChars = upper + lower + digits + symbols;
+      // Guarantee at least 1 from each category
+      let result = [
+        upper.charAt(Math.floor(Math.random() * upper.length)),
+        lower.charAt(Math.floor(Math.random() * lower.length)),
+        digits.charAt(Math.floor(Math.random() * digits.length)),
+        symbols.charAt(Math.floor(Math.random() * symbols.length)),
+      ];
+      for (let i = result.length; i < 8; i++) {
+        result.push(allChars.charAt(Math.floor(Math.random() * allChars.length)));
+      }
+      // Shuffle to avoid predictable pattern
+      for (let i = result.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [result[i], result[j]] = [result[j], result[i]];
+      }
+      return result.join('');
+    }
+    // alphanumeric6 (default)
     const chars = '23456789abcdefghjkmnpqrstuvwxyz';
     let res = '';
     for (let i = 0; i < 6; i++) {
@@ -621,6 +656,7 @@ export default function StudentsTab({ user }) {
     }
     return res;
   };
+
 
   const handleGenerateAndSyncCredentials = async () => {
     try {
@@ -1414,6 +1450,7 @@ export default function StudentsTab({ user }) {
                   >
                     <option value="numeric6">🔢 6 أرقام عشوائية (مثال: 582914) - سهل ومريح للطلاب</option>
                     <option value="alphanumeric6">🔤 6 حروف وأرقام إنجليزية (مثال: k9m2p7)</option>
+                    <option value="alphanumeric8">🔐 8 أحرف متنوعة (حروف كبيرة/صغيرة + أرقام + رمز) - أقوى وأصعب تخمين (مثال: Kx3@mN9b)</option>
                   </select>
                 </div>
               </div>
