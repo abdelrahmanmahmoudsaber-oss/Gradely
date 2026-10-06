@@ -36,15 +36,15 @@ export const cacheManager = {
 };
 
 /**
- * Checks if a user is an Admin / Super Admin.
- * Recognizes 'admin', 'Amahmoudsaber20262027217@@', and 'super_admin' or 'admin' role.
+ * Checks if a user is the Super Admin (مدير النظام العام).
+ * Strictly recognizes Super Admin user IDs and 'super_admin' role.
+ * Regular teaching assistants (role: 'admin') return false.
  */
 export const isSuperUser = (user) => {
-  if (!user) return true;
+  if (!user) return false;
   const uid = (user.user_id || '').toString().trim().toLowerCase();
   return (
     user.role === 'super_admin' ||
-    user.role === 'admin' ||
     uid === 'admin' ||
     uid === 'amahmoudsaber20262027217@@'
   );
