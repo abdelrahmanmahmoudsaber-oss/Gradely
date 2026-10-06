@@ -149,6 +149,14 @@ export default function StudentDashboard({ user, onLogout }) {
     }
   };
 
+  const SEMESTER_START_DATE = '2026-10-03';
+
+  const getWeekDefaultDate = (weekNum) => {
+    const start = new Date(SEMESTER_START_DATE);
+    const d = new Date(start.getTime() + (weekNum - 1) * 7 * 24 * 60 * 60 * 1000);
+    return d.toISOString().split('T')[0];
+  };
+
   const getSubjectWeekDate = (sub, weekNum) => {
     if (!sub || !Array.isArray(sub.excluded_students)) return '';
     const prefix = 'WEEK_DATE_W' + weekNum + ':';
@@ -742,9 +750,11 @@ export default function StudentDashboard({ user, onLogout }) {
                     }
 
                     const hasRecordedAttendance = record && record.status && record.status !== 'unrecorded';
-                    const wDate = attSubMode === 'lecture'
-                      ? (getSubjectLectureDate(currentSubject, w) || (record && record.created_at ? record.created_at.split('T')[0] : ''))
-                      : (getSubjectWeekDate(currentSubject, w) || (record && record.created_at ? record.created_at.split('T')[0] : ''));
+                    const explicitDate = attSubMode === 'lecture'
+                      ? getSubjectLectureDate(currentSubject, w)
+                      : getSubjectWeekDate(currentSubject, w);
+                    const recordDate = record && record.created_at ? record.created_at.split('T')[0] : '';
+                    const wDate = explicitDate || recordDate || getWeekDefaultDate(w);
 
                     return (
                       <div key={w} style={{background: bg, border: '1px solid ' + border, borderRadius: '8px', padding: '10px 6px', textAlign: 'center'}}>
@@ -752,8 +762,18 @@ export default function StudentDashboard({ user, onLogout }) {
                           {attSubMode === 'lecture' ? `محاضرة ${w}` : `أسبوع ${w}`}
                         </div>
                         <div style={{fontWeight: 'bold', color: statusColor, fontSize: '0.85rem'}}>{statusLabel}</div>
-                        {hasRecordedAttendance && wDate ? (
-                          <div style={{fontSize: '0.73rem', color: attSubMode === 'lecture' ? '#2dd4bf' : '#60a5fa', marginTop: '5px', background: attSubMode === 'lecture' ? 'rgba(45, 212, 191, 0.1)' : 'rgba(59, 130, 246, 0.1)', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', fontWeight: 700}}>
+                        {wDate ? (
+                          <div style={{
+                            fontSize: '0.73rem',
+                            color: hasRecordedAttendance ? (attSubMode === 'lecture' ? '#2dd4bf' : '#60a5fa') : 'var(--text-muted)',
+                            marginTop: '5px',
+                            background: hasRecordedAttendance ? (attSubMode === 'lecture' ? 'rgba(45, 212, 191, 0.12)' : 'rgba(59, 130, 246, 0.12)') : 'rgba(255, 255, 255, 0.04)',
+                            border: hasRecordedAttendance ? 'none' : '1px dashed var(--border)',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            display: 'inline-block',
+                            fontWeight: 700
+                          }}>
                             🗓️ {formatDisplayDate(wDate)}
                           </div>
                         ) : null}

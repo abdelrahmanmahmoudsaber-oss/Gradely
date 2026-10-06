@@ -9,6 +9,26 @@ import {
   WifiOff, Wifi, RefreshCw
 } from 'lucide-react';
 
+export const SEMESTER_START_DATE = '2026-10-03';
+
+export const getAcademicWeekFromDate = (targetDate = new Date()) => {
+  const start = new Date(SEMESTER_START_DATE);
+  const target = typeof targetDate === 'string' ? new Date(targetDate) : targetDate;
+  start.setHours(0, 0, 0, 0);
+  target.setHours(0, 0, 0, 0);
+  const diffTime = target.getTime() - start.getTime();
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) return 1;
+  const currentWeek = Math.floor(diffDays / 7) + 1;
+  return Math.min(Math.max(currentWeek, 1), 15);
+};
+
+export const getWeekDefaultDate = (weekNum) => {
+  const start = new Date(SEMESTER_START_DATE);
+  const d = new Date(start.getTime() + (weekNum - 1) * 7 * 24 * 60 * 60 * 1000);
+  return d.toISOString().split('T')[0];
+};
+
 export default function AttendanceTab({ user }) {
   const [loading, setLoading] = useState(true);
   const [subjects, setSubjects] = useState([]);
@@ -20,8 +40,8 @@ export default function AttendanceTab({ user }) {
   const [attendanceType, setAttendanceType] = useState('section'); // 'section' or 'lecture'
   const [selectedGroup, setSelectedGroup] = useState('all'); // 'all', 'A', 'B', 'C'
   const [allSystemSubjects, setAllSystemSubjects] = useState([]);
-  const [week, setWeek] = useState(1);
-  const [sessionDate, setSessionDate] = useState(new Date().toISOString().split('T')[0]);
+  const [week, setWeek] = useState(() => getAcademicWeekFromDate());
+  const [sessionDate, setSessionDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [attendanceRecords, setAttendanceRecords] = useState({});
   const [excuseReasons, setExcuseReasons] = useState({});
   const [autoSaveStatus, setAutoSaveStatus] = useState('');
@@ -63,7 +83,7 @@ export default function AttendanceTab({ user }) {
 
   const saveSubjectWeekDate = async (subId, weekNum, dateStr) => {
     if (!subId || !dateStr) return;
-    const targetSub = subjects.find(s => s.id === subId);
+    const targetSub = (attendanceType === 'lecture' ? allSystemSubjects : subjects).find(s => s.id === subId);
     if (!targetSub) return;
     const currentExcluded = Array.isArray(targetSub.excluded_students) ? targetSub.excluded_students : [];
     const datePrefix = (attendanceType === 'lecture' ? 'LEC_DATE_W' : 'WEEK_DATE_W') + weekNum + ':';
@@ -74,7 +94,7 @@ export default function AttendanceTab({ user }) {
     const updatedExcluded = [...kept, datePrefix + dateStr];
     await supabase.from('subjects').update({ excluded_students: updatedExcluded }).eq('id', subId);
     targetSub.excluded_students = updatedExcluded;
-    cacheManager.clear();
+    cacheManager.invalidate('admin_subjects_base');
   };
 
 
@@ -92,6 +112,24 @@ export default function AttendanceTab({ user }) {
       .replace('الثالثة', '3')
       .replace('الرابعة', '4')
       .trim();
+  };
+
+  const formatDisplayDate = (dateStr) => {
+    if (!dateStr) return '';
+    try {
+      const parts = dateStr.split('-');
+      if (parts.length === 3) {
+        const monthIndex = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        const months = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+        if (monthIndex >= 0 && monthIndex < 12) {
+          return day + ' ' + months[monthIndex];
+        }
+      }
+      return dateStr;
+    } catch (e) {
+      return dateStr;
+    }
   };
 
   const getStudentSubSection = (student, subId) => {
@@ -312,7 +350,7 @@ export default function AttendanceTab({ user }) {
 
       const recs = {};
       const excuses = {};
-      let foundDate = sessionDate;
+      let foundDate = null;
 
       // Check saved week date in subject config
       const targetSub = (attendanceType === 'lecture' ? allSystemSubjects : subjects).find(s => s.id === selectedSubject);
@@ -321,6 +359,15 @@ export default function AttendanceTab({ user }) {
         const dateEntry = targetSub.excluded_students.find(e => typeof e === 'string' && e.startsWith(datePrefix));
         if (dateEntry) {
           foundDate = dateEntry.replace(datePrefix, '');
+        }
+      }
+
+      if (!foundDate) {
+        const currWeek = getAcademicWeekFromDate();
+        if (week === currWeek) {
+          foundDate = new Date().toISOString().split('T')[0];
+        } else {
+          foundDate = getWeekDefaultDate(week);
         }
       }
 
@@ -1066,10 +1113,14 @@ export default function AttendanceTab({ user }) {
         )}
 
         {currentSub && (
-          <div style={{flex:1,minWidth:'130px'}}>
+          <div style={{flex:1.2,minWidth:'150px'}}>
             <label style={{display:'block',marginBottom:'8px',fontSize:'0.9rem',fontWeight:'bold'}}>4. رقم الأسبوع:</label>
             <select className="input-field" value={week} onChange={e => setWeek(Number(e.target.value))}>
-              {Array.from({length:currentSub.total_weeks || 12},(_,i)=>i+1).map(w=><option key={w} value={w}>الأسبوع {w}</option>)}
+              {Array.from({length:currentSub.total_weeks || 12},(_,i)=>i+1).map(w => (
+                <option key={w} value={w}>
+                  الأسبوع {w} ({formatDisplayDate(getWeekDefaultDate(w))})
+                </option>
+              ))}
             </select>
           </div>
         )}
@@ -1085,16 +1136,7 @@ export default function AttendanceTab({ user }) {
             onChange={async (e) => {
               const newDate = e.target.value;
               setSessionDate(newDate);
-              const targetSub = subjects.find(s => s.id === selectedSubject);
-              if (targetSub) {
-                const currentExcluded = Array.isArray(targetSub.excluded_students) ? targetSub.excluded_students : [];
-                const datePrefix = 'WEEK_DATE_W' + week + ':';
-                const kept = currentExcluded.filter(el => typeof el === 'string' && !el.startsWith(datePrefix));
-                const updatedExcluded = [...kept, datePrefix + newDate];
-                await supabase.from('subjects').update({ excluded_students: updatedExcluded }).eq('id', selectedSubject);
-                targetSub.excluded_students = updatedExcluded;
-                cacheManager.invalidate('admin_subjects_base');
-              }
+              await saveSubjectWeekDate(selectedSubject, week, newDate);
             }} 
           />
         </div>

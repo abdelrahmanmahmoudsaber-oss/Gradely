@@ -397,11 +397,24 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
     return;
   }
 
+  const normalizeYear = (yr) => {
+    if (!yr) return '1';
+    return yr.toString().replace('الفرقة ', '').replace('الأولى', '1').replace('الثانية', '2').replace('الثالثة', '3').replace('الرابعة', '4').trim();
+  };
+
+  const normalizeSection = (sec) => {
+    if (!sec) return 'S1';
+    const s = sec.toString().trim().toUpperCase().replace(/\s+/g, '');
+    const match = s.match(/(\d+)/);
+    if (match) return 'S' + parseInt(match[1], 10);
+    return 'S1';
+  };
+
   const cardsHtml = credentialsList.map((item) => `
     <div class="credential-card">
       <div class="card-top-row">
         <span class="student-name" title="${item.name}">${item.name || 'طالب'}</span>
-        <span class="meta-tag">ف${item.year_level || '1'} - ${item.section || 'S1'}</span>
+        <span class="meta-tag">الفرقة ${normalizeYear(item.year_level)} - سكشن ${normalizeSection(item.section)}</span>
       </div>
       
       <div class="card-creds-row">
@@ -444,7 +457,7 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
           background: #ffffff;
           color: #0f172a;
           font-family: 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          font-size: 10.5px;
+          font-size: 10px;
           overflow-x: hidden;
         }
         .cards-grid {
@@ -458,13 +471,13 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
           border: 1px dashed #64748b;
           border-radius: 4px;
           padding: 2.5px 5px;
-          background: #fafafa;
+          background: #ffffff;
           page-break-inside: avoid;
           break-inside: avoid;
           display: flex;
           flex-direction: column;
           justify-content: space-between;
-          height: 22.5mm;
+          height: 22mm;
           box-sizing: border-box;
           min-width: 0;
           overflow: hidden;
@@ -480,7 +493,7 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
           min-width: 0;
         }
         .student-name {
-          font-size: 9.5px;
+          font-size: 9px;
           font-weight: 800;
           color: #0f172a;
           white-space: nowrap;
@@ -493,8 +506,9 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
         .meta-tag {
           font-size: 7.5px;
           font-weight: 800;
-          color: #334155;
-          background: #e2e8f0;
+          color: #1e293b;
+          background: #f1f5f9;
+          border: 1px solid #cbd5e1;
           padding: 0.5px 3.5px;
           border-radius: 2.5px;
           white-space: nowrap;
@@ -505,7 +519,7 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
           direction: ltr;
           justify-content: space-between;
           align-items: center;
-          background: #ffffff;
+          background: #f8fafc;
           padding: 1.5px 5px;
           border-radius: 3px;
           border: 1px solid #cbd5e1;
@@ -530,11 +544,11 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
           font-family: 'Consolas', 'Courier New', monospace;
         }
         .pwd-box {
-          background: #f1f5f9;
+          background: #ffffff;
           padding: 0.5px 4px;
           border-radius: 2.5px;
           border: 1px solid #94a3b8;
-          color: #1e1b4b;
+          color: #0f172a;
           font-size: 10px;
           letter-spacing: 0.5px;
         }
@@ -559,4 +573,5 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
   printWindow.document.write(htmlContent);
   printWindow.document.close();
 }
+
 
