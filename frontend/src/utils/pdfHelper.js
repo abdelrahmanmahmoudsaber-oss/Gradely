@@ -488,10 +488,10 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
       <style>
         @page {
           size: A4 portrait;
-          margin: 4.5mm 4mm;
+          margin: 6mm 7mm;
         }
         * {
-          box-sizing: border-box;
+          box-sizing: border-box !important;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
@@ -507,23 +507,27 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
         }
         .cards-grid {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 2.2mm 2.2mm;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 2.5mm 2.5mm;
           width: 100%;
+          max-width: 100%;
+          box-sizing: border-box;
         }
         .card-item {
-          border: 1.5px solid #111111;
+          border: 1.4px solid #111111;
           border-radius: 9px;
-          padding: 4px 6.5px 3.5px 6.5px;
+          padding: 4px 7px 3.5px 7px;
           background: #ffffff;
           page-break-inside: avoid;
           break-inside: avoid;
           display: flex;
           flex-direction: column;
           justify-content: space-between;
-          height: 29.5mm;
+          height: 29mm;
           box-sizing: border-box;
           position: relative;
+          min-width: 0;
+          overflow: hidden;
         }
         .card-header-bar {
           display: flex;

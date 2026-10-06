@@ -683,12 +683,37 @@ export default function StudentsTab({ user }) {
         return;
       }
 
+      // Helper to resolve student's base section matching their native academic level
+      const resolveStudentBaseSection = (stu) => {
+        const nativeYear = inferStudentYearFromIdOrLevel(stu.user_id, stu.year_level);
+        if (Array.isArray(stu.assigned_subjects) && stu.assigned_subjects.length > 0) {
+          // Look for an assignment belonging to a subject in the student's native year level
+          for (const entry of stu.assigned_subjects) {
+            if (typeof entry === 'string' && entry.includes(':')) {
+              const [subId, sec] = entry.split(':');
+              const matchedSub = allSubjects.find(s => s.id === subId);
+              if (matchedSub && normalizeYear(matchedSub.year_level) === nativeYear) {
+                return normalizeSection(sec);
+              }
+            }
+          }
+          // Fallback: any explicitly assigned section
+          for (const entry of stu.assigned_subjects) {
+            if (typeof entry === 'string' && entry.includes(':')) {
+              const [, sec] = entry.split(':');
+              return normalizeSection(sec);
+            }
+          }
+        }
+        return normalizeSection(stu.section || 'S1');
+      };
+
       // Sort targets by year, section, name
       targets.sort((a, b) => {
-        const yA = parseInt(normalizeYear(a.year_level), 10) || 1;
-        const yB = parseInt(normalizeYear(b.year_level), 10) || 1;
+        const yA = parseInt(inferStudentYearFromIdOrLevel(a.user_id, a.year_level), 10) || 1;
+        const yB = parseInt(inferStudentYearFromIdOrLevel(b.user_id, b.year_level), 10) || 1;
         if (yA !== yB) return yA - yB;
-        const sA = (a.section || 'S1').localeCompare(b.section || 'S1');
+        const sA = resolveStudentBaseSection(a).localeCompare(resolveStudentBaseSection(b));
         if (sA !== 0) return sA;
         return (a.name || '').localeCompare(b.name || '', 'ar');
       });
@@ -697,8 +722,8 @@ export default function StudentsTab({ user }) {
       const credsList = targets.map(stu => ({
         user_id: stu.user_id,
         name: stu.name,
-        year_level: normalizeYear(stu.year_level),
-        section: normalizeSection(stu.section || 'S1'),
+        year_level: inferStudentYearFromIdOrLevel(stu.user_id, stu.year_level),
+        section: resolveStudentBaseSection(stu),
         password: generateRandomPassword(passwordFormat)
       }));
 

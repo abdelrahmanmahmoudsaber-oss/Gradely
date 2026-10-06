@@ -206,6 +206,28 @@ export default function StudentDashboard({ user, onLogout }) {
     return defaultLabel;
   };
 
+  const getStudentPrimarySection = (student) => {
+    const nativeYear = inferStudentYear(student?.user_id, student?.year_level);
+    if (student && Array.isArray(student.assigned_subjects) && student.assigned_subjects.length > 0) {
+      for (const entry of student.assigned_subjects) {
+        if (typeof entry === 'string' && entry.includes(':')) {
+          const [subId, sec] = entry.split(':');
+          const matchedSub = subjects.find(s => s.id === subId);
+          if (matchedSub && normalizeYear(matchedSub.year_level) === nativeYear) {
+            return normalizeSection(sec);
+          }
+        }
+      }
+      for (const entry of student.assigned_subjects) {
+        if (typeof entry === 'string' && entry.includes(':')) {
+          const [, sec] = entry.split(':');
+          return normalizeSection(sec);
+        }
+      }
+    }
+    return normalizeSection(student?.section || 'S1');
+  };
+
   const getStudentSubSection = (student, subId) => {
     if (student && Array.isArray(student.assigned_subjects)) {
       const match = student.assigned_subjects.find(entry => typeof entry === 'string' && entry.startsWith(subId + ':'));
@@ -480,7 +502,7 @@ export default function StudentDashboard({ user, onLogout }) {
         </div>
         <div style={{display:'flex',alignItems:'center',gap:'0.8rem',flexWrap:'wrap'}}>
           <span className="badge" style={{background:'rgba(16, 185, 129, 0.1)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.2)',padding:'5px 10px',fontWeight:700,fontSize:'0.8rem'}}>
-            الفرقة {inferStudentYear(user.user_id, user.year_level)} | {normalizeSection(user.section || 'S1')}
+            الفرقة {inferStudentYear(user.user_id, user.year_level)} | {getStudentPrimarySection(user)}
           </span>
 
           <button 
