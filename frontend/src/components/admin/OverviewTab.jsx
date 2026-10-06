@@ -5,7 +5,7 @@ import { exportExcelFile, exportMultiSheetExcelFile, generateMultiSheetExcelBase
 import { 
   Users, BookOpen, Clock, Shield, Sliders, Eye, EyeOff, 
   Download, Upload, Database, RefreshCw, CheckCircle2, AlertTriangle, FileSpreadsheet, Calendar,
-  Edit, Trash2, LayoutDashboard
+  Edit, Trash2, LayoutDashboard, ExternalLink, Copy, Check, Settings
 } from 'lucide-react';
 
 export default function OverviewTab({ user }) {
@@ -71,8 +71,10 @@ export default function OverviewTab({ user }) {
   const [backupMessage, setBackupMessage] = useState('');
   const [backupSchedule, setBackupSchedule] = useState(() => localStorage.getItem('gradely_backup_schedule') || 'weekly');
   const [lastBackupDate, setLastBackupDate] = useState(() => localStorage.getItem('gradely_last_backup') || null);
-  const [backupEmail, setBackupEmail] = useState(() => localStorage.getItem('gradely_backup_email') || 'admin@gradely.app');
-  const [webhookScriptUrl, setWebhookScriptUrl] = useState(() => localStorage.getItem('gradely_webhook_url') || 'https://script.google.com/macros/s/AKfycbzBUNCHESyAtmUK_V8Wm7KV-8zdV3mmpoI8ACd6KHtLRBlhG7B28EiPKZVXf9SU7haiEQ/exec');
+  const [backupEmail, setBackupEmail] = useState(() => localStorage.getItem('gradely_backup_email') || 'abdo2171999m@gmail.com');
+  const [webhookScriptUrl, setWebhookScriptUrl] = useState(() => localStorage.getItem('gradely_webhook_url') || '');
+  const [showGoogleScriptModal, setShowGoogleScriptModal] = useState(false);
+  const [copiedScript, setCopiedScript] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [nextBackupDate, setNextBackupDate] = useState(() => localStorage.getItem('gradely_next_backup') || null);
 
@@ -693,18 +695,20 @@ export default function OverviewTab({ user }) {
     }
 
     setSendingEmail(true);
-    setBackupMessage((isAuto ? '🤖 إرسال تلقائي: ' : '') + 'جاري استخراج وتجهيز كشوف الغياب المنظمة وإرسالها إلى (' + emailToUse + ')...');
+    setBackupMessage((isAuto ? '🤖 إرسال تلقائي: ' : '') + 'جاري استخراج وتجهيز كشوف الغياب والدرجات الشاملة وإرسالها إلى (' + emailToUse + ')...');
 
     try {
-      const [usersRes, subRes, attRes] = await Promise.all([
+      const [usersRes, subRes, attRes, grdRes] = await Promise.all([
         supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects'),
         supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students'),
-        supabase.from('attendance').select('student_id, subject_id, week_number, status')
+        supabase.from('attendance').select('student_id, subject_id, week_number, status'),
+        supabase.from('grades').select('student_id, subject_id, quiz_1, quiz_2, project, attendance_score, final_grade')
       ]);
 
       const allUsers = usersRes.data || [];
       const allSubs = subRes.data || [];
       const allAtt = attRes.data || [];
+      const allGrades = grdRes.data || [];
 
       const freshCurrentUser = allUsers.find(u => u.user_id === user.user_id) || user;
       const rawAssigned = Array.isArray(freshCurrentUser?.assigned_subjects) ? freshCurrentUser.assigned_subjects : [];
@@ -734,11 +738,18 @@ export default function OverviewTab({ user }) {
         attMatrix[r.subject_id][r.student_id][r.week_number] = r.status;
       });
 
+      const gradesMatrix = {};
+      allGrades.forEach(g => {
+        if (!gradesMatrix[g.subject_id]) gradesMatrix[g.subject_id] = {};
+        gradesMatrix[g.subject_id][g.student_id] = g;
+      });
+
       const sheets = [];
 
       mySubs.forEach(sub => {
         const totalWeeks = sub.total_weeks || 12;
         const subAtt = attMatrix[sub.id] || {};
+        const subGrades = gradesMatrix[sub.id] || {};
 
         const enrolled = allUsers.filter(u => {
           if (u.role !== 'student') return false;
@@ -756,11 +767,18 @@ export default function OverviewTab({ user }) {
             return stu.section || 'S1';
           })();
 
+          const stuGrade = subGrades[stu.user_id] || {};
+
           const row = {
             'الرقم الأكاديمي': stu.user_id,
             'اسم الطالب': stu.name,
             'السكشن': stuSubSec,
-            'الفرقة': stu.year_level || sub.year_level || '1'
+            'الفرقة': stu.year_level || sub.year_level || '1',
+            [getColLabel('showQuiz1', 'كويز 1')]: stuGrade.quiz_1 != null ? stuGrade.quiz_1 : 0,
+            [getColLabel('showQuiz2', 'كويز 2')]: stuGrade.quiz_2 != null ? stuGrade.quiz_2 : 0,
+            [getColLabel('showProject', 'المشروع')]: stuGrade.project != null ? stuGrade.project : 0,
+            [getColLabel('showAttendanceScore', 'درجة الحضور')]: stuGrade.attendance_score != null ? stuGrade.attendance_score : 0,
+            [getColLabel('showTotal', 'المجموع الكلي')]: stuGrade.final_grade != null ? stuGrade.final_grade : 0
           };
 
           let presentCount = 0;
@@ -797,10 +815,17 @@ export default function OverviewTab({ user }) {
       // 2. Generate Base64 attachment
       const fileBase64 = await generateMultiSheetExcelBase64(sheets);
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 10);
-      const filename = 'Gradely_Attendance_Matrix_' + timestamp + '.xlsx';
+      const filename = 'Gradely_Full_Grades_And_Attendance_' + timestamp + '.xlsx';
 
       const schedNow = localStorage.getItem('gradely_backup_schedule') || backupSchedule;
-      const targetWebhook = webhookScriptUrl.trim() || 'https://script.google.com/macros/s/AKfycbzBUNCHESyAtmUK_V8Wm7KV-8zdV3mmpoI8ACd6KHtLRBlhG7B28EiPKZVXf9SU7haiEQ/exec';
+      const targetWebhook = (webhookScriptUrl || '').trim();
+
+      if (!targetWebhook || targetWebhook.includes('AKfycbzBUNCHESyAtmUK_V8Wm7KV')) {
+        setShowGoogleScriptModal(true);
+        setBackupMessage('⚠️ يرجى أولاً تفعيل ووضع رابط Google Apps Script Webhook الخاص بك لإرسال الرسائل عبر بريدك.');
+        setSendingEmail(false);
+        return;
+      }
 
       // 3. Send to Google Apps Script Webhook
       const payload = JSON.stringify({
@@ -823,7 +848,7 @@ export default function OverviewTab({ user }) {
       // Schedule next auto backup
       recordBackupSent(schedNow);
 
-      setBackupMessage('🎉 ' + (isAuto ? 'إرسال تلقائي: ' : '') + 'تم إرسال كشف الغياب المنظم بنجاح إلى (' + emailToUse + ') عبر Google Apps Script!');
+      setBackupMessage('🎉 ' + (isAuto ? 'إرسال تلقائي: ' : '') + 'تم إرسال كشف الغياب والدرجات بنجاح إلى (' + emailToUse + ') وحفظه في Google Drive!');
       setTimeout(() => setBackupMessage(''), 9000);
     } catch (err) {
       console.error('Email backup error:', err);
@@ -1505,18 +1530,18 @@ export default function OverviewTab({ user }) {
           </div>
 
           {/* Automated Scheduled Email & Cloud Backup Configuration */}
-          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'10px',padding:'16px 20px',marginBottom:'1.5rem',display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))',gap:'1.2rem',alignItems:'center'}}>
+          <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'10px',padding:'16px 20px',marginBottom:'1.2rem',display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))',gap:'1.2rem',alignItems:'center'}}>
             
             {/* Email Input */}
             <div>
               <label style={{display:'block',marginBottom:'6px',fontSize:'0.85rem',fontWeight:700,color:'var(--primary-hover)'}}>
-                📧 البريد الإلكتروني لاستلام كشوف الغياب الدورية (Gmail / Email):
+                📧 البريد الإلكتروني لاستلام كشوف الغياب والدرجات (Gmail):
               </label>
               <div style={{display:'flex',gap:'8px'}}>
                 <input 
                   type="email" 
                   className="input-field" 
-                  placeholder="admin@university.edu.eg" 
+                  placeholder="abdo2171999m@gmail.com" 
                   value={backupEmail} 
                   onChange={e => setBackupEmail(e.target.value)}
                   onBlur={e => handleSaveBackupEmail(e.target.value)}
@@ -1558,6 +1583,34 @@ export default function OverviewTab({ user }) {
               </span>
             </div>
 
+          </div>
+
+          {/* Webhook Connection & Setup Guide Bar */}
+          <div style={{background:'rgba(79, 70, 229, 0.06)',border:'1px solid rgba(79, 70, 229, 0.25)',borderRadius:'10px',padding:'12px 16px',marginBottom:'1.5rem',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'1rem'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'10px',flex:1,minWidth:'280px'}}>
+              <span style={{fontSize:'1.1rem'}}>☁️</span>
+              <div>
+                <div style={{fontSize:'0.88rem',fontWeight:700,color:'var(--text-main)',display:'flex',alignItems:'center',gap:'6px'}}>
+                  رابط سكريبت Google Apps Script (للإرسال عبر Gmail والحفظ في Google Drive):
+                  {webhookScriptUrl ? (
+                    <span style={{fontSize:'0.72rem',background:'rgba(16,185,129,0.15)',color:'var(--success)',padding:'2px 8px',borderRadius:'10px',fontWeight:700}}>✅ مربوط ونشط</span>
+                  ) : (
+                    <span style={{fontSize:'0.72rem',background:'rgba(245,158,11,0.15)',color:'var(--warning)',padding:'2px 8px',borderRadius:'10px',fontWeight:700}}>⚠️ يتطلب الإعداد لأول مرة</span>
+                  )}
+                </div>
+                <div style={{fontSize:'0.76rem',color:'var(--text-muted)',marginTop:'2px'}}>
+                  {webhookScriptUrl ? `${webhookScriptUrl.slice(0, 50)}...` : 'قم بربط حساب Google الخاص بك ليتم إرسال الملف تلقائياً إلى بريدك وتخزينه في درايف.'}
+                </div>
+              </div>
+            </div>
+            <button 
+              type="button"
+              className="btn-secondary"
+              onClick={() => setShowGoogleScriptModal(true)}
+              style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'0.85rem',padding:'7px 14px',fontWeight:700,borderColor:'rgba(79, 70, 229, 0.4)',color:'var(--primary-hover)',background:'rgba(79, 70, 229, 0.1)'}}
+            >
+              <Settings size={15} /> ⚙️ إعداد / تعديل رابط Google Script
+            </button>
           </div>
 
           <div style={{display:'flex',gap:'1rem',flexWrap:'wrap',alignItems:'center'}}>
@@ -1741,6 +1794,202 @@ export default function OverviewTab({ user }) {
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* GOOGLE APPS SCRIPT SETUP MODAL */}
+      {showGoogleScriptModal && (
+        <div 
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
+          }}
+          onClick={e => { if (e.target === e.currentTarget) setShowGoogleScriptModal(false); }}
+        >
+          <div className="panel fade-in" style={{maxWidth: '680px', width: '100%', maxHeight: '92vh', overflowY: 'auto', border: '1px solid rgba(79, 70, 229, 0.4)', boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.85)', borderRadius: '16px', padding: '1.8rem'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',borderBottom:'1px solid var(--border)',paddingBottom:'0.8rem'}}>
+              <h3 style={{margin:0,fontSize:'1.25rem',color:'var(--primary-hover)',fontWeight:800,display:'flex',alignItems:'center',gap:'8px'}}>
+                ☁️ إعداد الربط التلقائي بـ Google Drive و Gmail
+              </h3>
+              <button 
+                onClick={() => setShowGoogleScriptModal(false)}
+                className="btn-secondary"
+                style={{padding:'4px 10px',fontSize:'0.85rem'}}
+              >
+                ✕ إغلاق
+              </button>
+            </div>
+
+            <div style={{fontSize:'0.9rem',lineHeight:1.7,color:'var(--text-main)',display:'flex',flexDirection:'column',gap:'1.2rem'}}>
+              
+              <div style={{background:'rgba(79, 70, 229, 0.08)',padding:'12px 16px',borderRadius:'10px',border:'1px solid rgba(79, 70, 229, 0.25)'}}>
+                <p style={{margin:0,fontWeight:700,color:'var(--primary-hover)'}}>
+                  💡 كيف يعمل هذا الربط؟
+                </p>
+                <p style={{margin:'4px 0 0 0',fontSize:'0.85rem',color:'var(--text-muted)'}}>
+                  يقوم هذا السكريبت باستقبال ملف الإكسيل الشامل (الذي يحتوي على كافة كشوف الغياب والدرجات لكل المواد) وإرساله مباشرة إلى بريدك الإلكتروني وحفظ نسخة منه في مجلد خاص على Google Drive تلقائياً بدون أي تكلفة أو سيرفر خارجي.
+                </p>
+              </div>
+
+              <div>
+                <h4 style={{margin:'0 0 8px 0',fontSize:'0.95rem',fontWeight:800,color:'var(--text-main)'}}>
+                  خطوات الإعداد السريعة (دقيقتين فقط):
+                </h4>
+                <ol style={{margin:0,paddingRight:'1.4rem',fontSize:'0.88rem',color:'var(--text-muted)',display:'flex',flexDirection:'column',gap:'8px'}}>
+                  <li>
+                    افتح موقع <a href="https://script.google.com" target="_blank" rel="noreferrer" style={{color:'var(--primary-hover)',fontWeight:700,textDecoration:'underline'}}>Google Apps Script (script.google.com) <ExternalLink size={12} style={{display:'inline'}} /></a> وسجل الدخول بحساب Gmail الخاص بك.
+                  </li>
+                  <li>
+                    اضغط على <strong>"New project" (مشروع جديد)</strong>.
+                  </li>
+                  <li>
+                    امسح أي كود موجود هناك، والصق الكود البرمجي الموضح أدناه بالكامل:
+                  </li>
+                </ol>
+              </div>
+
+              {/* Code Box */}
+              <div style={{position:'relative',background:'#0f172a',borderRadius:'10px',border:'1px solid var(--border)',padding:'14px',direction:'ltr',textAlign:'left'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px',direction:'rtl'}}>
+                  <span style={{fontSize:'0.75rem',color:'#94a3b8',fontFamily:'monospace'}}>Google Apps Script (Code.gs)</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const code = `function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    var recipient = data.email || "abdo2171999m@gmail.com";
+    var filename = data.filename || "Gradely_Full_Backup.xlsx";
+    var fileBase64 = data.fileBase64;
+    
+    // 1. Decode Base64 Excel File
+    var decoded = Utilities.base64Decode(fileBase64);
+    var blob = Utilities.newBlob(decoded, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename);
+    
+    // 2. Send Email via Gmail
+    MailApp.sendEmail({
+      to: recipient,
+      subject: "📊 كشف الحضور والغياب والدرجات الشامل - Gradely (" + new Date().toLocaleDateString("ar-EG") + ")",
+      body: "مرحباً يا بشمهندس،\\n\\nمرفق مع هذه الرسالة النسخة الاحتياطية الشاملة لكافة المواد والطلاب (حضور، غياب، وكافة الدرجات) بصيغة Excel.\\n\\nتم الإرسال تلقائياً من منصة Gradely.\\nالتاريخ: " + new Date().toLocaleString("ar-EG"),
+      attachments: [blob]
+    });
+    
+    // 3. Save copy to Google Drive in Gradely_Backups folder
+    try {
+      var folderName = "Gradely_Backups";
+      var folders = DriveApp.getFoldersByName(folderName);
+      var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(folderName);
+      folder.createFile(blob);
+    } catch(errDrive) {}
+    
+    return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", error: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}`;
+                      navigator.clipboard.writeText(code);
+                      setCopiedScript(true);
+                      setTimeout(() => setCopiedScript(false), 3000);
+                    }}
+                    className="btn-primary"
+                    style={{padding:'4px 12px',fontSize:'0.8rem',display:'flex',alignItems:'center',gap:'5px'}}
+                  >
+                    {copiedScript ? <Check size={14} /> : <Copy size={14} />}
+                    {copiedScript ? '✅ تم نسخ الكود!' : '📋 نسخ الكود بالكامل'}
+                  </button>
+                </div>
+                <pre style={{margin:0,fontSize:'0.75rem',color:'#38bdf8',fontFamily:'monospace',maxHeight:'160px',overflowY:'auto',lineHeight:1.4}}>
+{`function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    var recipient = data.email || "abdo2171999m@gmail.com";
+    var filename = data.filename || "Gradely_Full_Backup.xlsx";
+    var fileBase64 = data.fileBase64;
+    
+    // 1. Decode Base64 Excel File
+    var decoded = Utilities.base64Decode(fileBase64);
+    var blob = Utilities.newBlob(decoded, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename);
+    
+    // 2. Send Email via Gmail
+    MailApp.sendEmail({
+      to: recipient,
+      subject: "📊 كشف الحضور والغياب والدرجات الشامل - Gradely (" + new Date().toLocaleDateString("ar-EG") + ")",
+      body: "مرحباً يا بشمهندس،\\n\\nمرفق مع هذه الرسالة النسخة الاحتياطية الشاملة لكافة المواد والطلاب (حضور، غياب، وكافة الدرجات) بصيغة Excel.\\n\\nتم الإرسال تلقائياً من منصة Gradely.\\nالتاريخ: " + new Date().toLocaleString("ar-EG"),
+      attachments: [blob]
+    });
+    
+    // 3. Save copy to Google Drive
+    try {
+      var folderName = "Gradely_Backups";
+      var folders = DriveApp.getFoldersByName(folderName);
+      var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(folderName);
+      folder.createFile(blob);
+    } catch(errDrive) {}
+    
+    return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", error: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}`}
+                </pre>
+              </div>
+
+              <div>
+                <ol start="4" style={{margin:0,paddingRight:'1.4rem',fontSize:'0.88rem',color:'var(--text-muted)',display:'flex',flexDirection:'column',gap:'8px'}}>
+                  <li>
+                    اضغط على زر <strong>"Deploy" (نشر)</strong> بالأعلى ⬅️ واختر <strong>"New deployment" (نشر جديد)</strong>.
+                  </li>
+                  <li>
+                    اضغط على أيقونة الترس ⚙️ بجانب Select type واختر <strong>"Web app"</strong>.
+                  </li>
+                  <li>
+                    في خانة <strong>"Execute as"</strong> اختر: <code>Me (بريدك الإلكتروني)</code>.
+                  </li>
+                  <li>
+                    في خانة <strong>"Who has access"</strong> اختر: <strong style={{color:'var(--success)'}}>Anyone (أي شخص)</strong>.
+                  </li>
+                  <li>
+                    اضغط <strong>Deploy</strong>، وافق على الأذونات (Authorize access)، ثم انسخ <strong>Web app URL</strong> وضعه في الخانة بالأسفل:
+                  </li>
+                </ol>
+              </div>
+
+              {/* Webhook Input Section */}
+              <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'10px',padding:'14px',display:'flex',flexDirection:'column',gap:'8px'}}>
+                <label style={{fontSize:'0.88rem',fontWeight:700,color:'var(--primary-hover)'}}>
+                  🔗 رابط Web App URL الناتج بعد النشر:
+                </label>
+                <div style={{display:'flex',gap:'8px'}}>
+                  <input 
+                    type="url"
+                    className="input-field"
+                    placeholder="https://script.google.com/macros/s/.../exec"
+                    value={webhookScriptUrl}
+                    onChange={e => handleSaveWebhookUrl(e.target.value)}
+                    style={{fontSize:'0.85rem',padding:'10px',direction:'ltr'}}
+                  />
+                  <button 
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => {
+                      handleSaveWebhookUrl(webhookScriptUrl);
+                      setShowGoogleScriptModal(false);
+                      setBackupMessage('✅ تم حفظ رابط Webhook بنجاح! يمكنك الآن الإرسال فوراً.');
+                      setTimeout(() => setBackupMessage(''), 5000);
+                    }}
+                    style={{whiteSpace:'nowrap',fontSize:'0.88rem',padding:'8px 16px',fontWeight:700}}
+                  >
+                    حفظ وتأكيد الرابط
+                  </button>
+                </div>
+              </div>
+
+            </div>
           </div>
         </div>
       )}
