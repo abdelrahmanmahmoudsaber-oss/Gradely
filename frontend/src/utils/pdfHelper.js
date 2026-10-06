@@ -425,10 +425,19 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
       const s = rawLevel.toString().trim();
       if (/أول|الأولى/i.test(s) || s === '1') return '1';
       if (/ثاني|الثانية/i.test(s) || s === '2') return '2';
+      if (/ثاني|الثانية/i.test(s) || s === '2') return '2';
       if (/ثالث|الثالثة/i.test(s) || s === '3') return '3';
       if (/رابع|الرابعة/i.test(s) || s === '4') return '4';
     }
     return '1';
+  };
+
+  const normalizeSection = (sec) => {
+    if (!sec) return 'S1';
+    const s = sec.toString().trim().toUpperCase().replace(/\s+/g, '');
+    const match = s.match(/(\d+)/);
+    if (match) return 'S' + parseInt(match[1], 10);
+    return 'S1';
   };
 
   const cardsHtml = credentialsList.map((item) => `
@@ -674,48 +683,36 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
     </html>
   `;
 
-  // Open print preview reliably across Chrome, Edge, and Safari
   try {
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+    
+    // 1. Try direct window.open
+    const printWindow = window.open(blobUrl, '_blank');
+    if (printWindow) {
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+      return;
+    }
+
+    // 2. If blocked by popup blocker, try temporary anchor click
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+  } catch (err) {
+    console.error('Error opening print preview:', err);
+    // 3. Last fallback: inline document open
     const printWindow = window.open('', '_blank');
     if (printWindow) {
       printWindow.document.open();
       printWindow.document.write(htmlContent);
       printWindow.document.close();
-      return;
+    } else {
+      alert('يرجى السماح بالنوافذ المنبثقة (Popups) لعرض كروت الطباعة');
     }
-  } catch (e) {
-    console.warn('Direct window.open blocked, trying iframe/blob fallback:', e);
-  }
-
-  // Fallback if popup is blocked: use hidden iframe to trigger system print dialog directly
-  try {
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = '0';
-    document.body.appendChild(iframe);
-    
-    const iframeDoc = iframe.contentWindow.document;
-    iframeDoc.open();
-    iframeDoc.write(htmlContent);
-    iframeDoc.close();
-
-    setTimeout(() => {
-      try {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-      } catch (err) {
-        console.error('Iframe print error:', err);
-      } finally {
-        setTimeout(() => document.body.removeChild(iframe), 60000);
-      }
-    }, 600);
-  } catch (err) {
-    console.error('Error generating print preview:', err);
-    alert('يرجى السماح بالنوافذ المنبثقة (Popups) أو إعادة المحاولة');
   }
 }
 
