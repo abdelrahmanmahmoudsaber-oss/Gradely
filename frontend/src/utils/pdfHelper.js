@@ -383,7 +383,7 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
 
 /**
  * Generates and prints ultra-compact A4 admission/credential slips for students.
- * Optimized for 18 to 21 students per page (3 columns x 6-7 rows) with cuttable dashed borders.
+ * Optimized for exactly 21 students per page (3 columns x 7 rows) with no overflow.
  */
 export function printStudentCredentialsSlips({ credentialsList, title = 'كروت كلمات المرور' }) {
   if (!Array.isArray(credentialsList) || credentialsList.length === 0) {
@@ -401,22 +401,22 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
     <div class="credential-card">
       <div class="card-top-row">
         <span class="student-name" title="${item.name}">${item.name || 'طالب'}</span>
-        <span class="meta-tag">ف${item.year_level || '1'} | ${item.section || 'S1'}</span>
+        <span class="meta-tag">ف${item.year_level || '1'} - ${item.section || 'S1'}</span>
       </div>
       
       <div class="card-creds-row">
         <div class="cred-item">
           <span class="cred-label">ID:</span>
-          <span class="cred-val ltr-text">${item.user_id}</span>
+          <span class="cred-val">${item.user_id}</span>
         </div>
         <div class="cred-item">
           <span class="cred-label">Pass:</span>
-          <span class="cred-val pwd-box ltr-text">${item.password}</span>
+          <span class="cred-val pwd-box">${item.password}</span>
         </div>
       </div>
 
       <div class="card-hint-row">
-        * يرجى تغيير كلمة المرور فور تسجيل الدخول
+        * يرجى تغيير كلمة المرور فور الدخول
       </div>
     </div>
   `).join('');
@@ -433,37 +433,45 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
       <style>
         @page {
           size: A4 portrait;
-          margin: 5mm;
+          margin: 6mm 5mm;
         }
         * {
           box-sizing: border-box;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
-        body {
-          font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif;
+        html, body {
+          width: 100%;
+          max-width: 100%;
           margin: 0;
           padding: 0;
           background: #ffffff;
           color: #0f172a;
+          font-family: 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
           font-size: 11px;
+          overflow-x: hidden;
         }
         .cards-grid {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 3mm 3.5mm;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 2.5mm 3mm;
+          width: 100%;
+          max-width: 100%;
         }
         .credential-card {
           border: 1px dashed #64748b;
-          border-radius: 6px;
-          padding: 5px 7px;
+          border-radius: 5px;
+          padding: 4px 6px;
           background: #fafafa;
           page-break-inside: avoid;
+          break-inside: avoid;
           display: flex;
           flex-direction: column;
           justify-content: space-between;
-          height: 38mm;
+          height: 36.5mm;
           box-sizing: border-box;
+          min-width: 0;
+          overflow: hidden;
         }
         .card-top-row {
           display: flex;
@@ -473,71 +481,78 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
           border-bottom: 1px solid #e2e8f0;
           padding-bottom: 2px;
           margin-bottom: 2px;
+          min-width: 0;
         }
         .student-name {
-          font-size: 10.5px;
+          font-size: 10px;
           font-weight: 800;
           color: #0f172a;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          max-width: 70%;
+          flex: 1;
+          min-width: 0;
+          text-align: right;
         }
         .meta-tag {
-          font-size: 8.5px;
-          font-weight: 700;
-          color: #475569;
+          font-size: 8px;
+          font-weight: 800;
+          color: #334155;
           background: #e2e8f0;
           padding: 1px 4px;
           border-radius: 3px;
           white-space: nowrap;
+          flex-shrink: 0;
         }
         .card-creds-row {
           display: flex;
+          direction: ltr;
           justify-content: space-between;
           align-items: center;
           background: #ffffff;
-          padding: 3px 6px;
+          padding: 2.5px 6px;
           border-radius: 4px;
           border: 1px solid #cbd5e1;
-          margin: 2px 0;
+          margin: 1.5px 0;
+          min-width: 0;
         }
         .cred-item {
           display: flex;
           align-items: center;
           gap: 3px;
+          white-space: nowrap;
         }
         .cred-label {
           font-size: 9px;
           color: #64748b;
-          font-weight: 700;
+          font-weight: 800;
+          font-family: 'Cairo', sans-serif;
         }
         .cred-val {
           font-size: 10.5px;
           font-weight: 800;
           color: #0f172a;
+          font-family: 'Consolas', 'Courier New', monospace;
         }
         .pwd-box {
           background: #f1f5f9;
-          padding: 1px 5px;
+          padding: 1px 4px;
           border-radius: 3px;
           border: 1px solid #94a3b8;
           color: #1e1b4b;
-          font-family: 'Consolas', 'Courier New', monospace;
-          letter-spacing: 0.8px;
-          font-size: 11px;
-        }
-        .ltr-text {
-          direction: ltr;
-          text-align: left;
+          font-size: 10.5px;
+          letter-spacing: 0.5px;
         }
         .card-hint-row {
           text-align: center;
-          font-size: 7.5px;
+          font-size: 7px;
           font-weight: 700;
           color: #dc2626;
           border-top: 1px solid #f1f5f9;
-          padding-top: 2px;
+          padding-top: 1.5px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
       </style>
     </head>
