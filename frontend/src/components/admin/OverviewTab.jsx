@@ -71,8 +71,7 @@ export default function OverviewTab({ user }) {
   const [backupMessage, setBackupMessage] = useState('');
   const [backupSchedule, setBackupSchedule] = useState(() => localStorage.getItem('gradely_backup_schedule') || 'weekly');
   const [lastBackupDate, setLastBackupDate] = useState(() => localStorage.getItem('gradely_last_backup') || null);
-  const [backupEmail, setBackupEmail] = useState(() => localStorage.getItem('gradely_backup_email') || 'abdo2171999m@gmail.com');
-  const [webhookScriptUrl, setWebhookScriptUrl] = useState(() => localStorage.getItem('gradely_webhook_url') || '');
+  const [webhookScriptUrl, setWebhookScriptUrl] = useState(() => localStorage.getItem('gradely_webhook_url') || 'https://script.google.com/macros/s/AKfycbykd7LVJ8p0dqrHqW9UUJ04i40qFwRTa0b98YPA1NgXzJ3U0EECa9i-EbiVa70pvHzbiQ/exec');
   const [showGoogleScriptModal, setShowGoogleScriptModal] = useState(false);
   const [copiedScript, setCopiedScript] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
