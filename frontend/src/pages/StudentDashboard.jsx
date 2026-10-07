@@ -846,8 +846,7 @@ export default function StudentDashboard({ user, onLogout }) {
                       ? getSubjectLectureDate(currentSubject, w)
                       : getSubjectWeekDate(currentSubject, w, userPrimarySection);
                     const recordDate = record && record.created_at ? record.created_at.split('T')[0] : '';
-                    const defaultDate = getWeekDefaultDate(w);
-                    const wDate = explicitDate || recordDate || defaultDate;
+                    const wDate = explicitDate || recordDate;
 
                     return (
                       <div key={w} style={{background: bg, border: '1px solid ' + border, borderRadius: '8px', padding: '10px 6px', textAlign: 'center'}}>
@@ -855,7 +854,7 @@ export default function StudentDashboard({ user, onLogout }) {
                           {attSubMode === 'lecture' ? `محاضرة ${w}` : `أسبوع ${w}`}
                         </div>
                         <div style={{fontWeight: 'bold', color: statusColor, fontSize: '0.85rem'}}>{statusLabel}</div>
-                        {hasRecordedAttendance ? (
+                        {hasRecordedAttendance && wDate ? (
                           <div style={{
                             fontSize: '0.73rem',
                             color: attSubMode === 'lecture' ? '#2dd4bf' : '#60a5fa',
@@ -868,16 +867,7 @@ export default function StudentDashboard({ user, onLogout }) {
                           }}>
                             🗓️ {formatDisplayDate(wDate)}
                           </div>
-                        ) : (
-                          <div style={{
-                            fontSize: '0.7rem',
-                            color: 'var(--text-muted)',
-                            marginTop: '5px',
-                            opacity: 0.7
-                          }}>
-                            🗓️ {formatDisplayDate(wDate)}
-                          </div>
-                        )}
+                        ) : null}
                       </div>
                     );
                   })}
