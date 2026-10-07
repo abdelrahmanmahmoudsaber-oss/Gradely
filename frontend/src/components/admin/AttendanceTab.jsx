@@ -97,19 +97,24 @@ export default function AttendanceTab({ user }) {
     const datePrefix = (attendanceType === 'lecture' ? 'LEC_DATE_W' : 'WEEK_DATE_W') + weekNum + ':';
     const secPrefix = (attendanceType === 'section' && selectedSection) ? ('WEEK_DATE_W' + weekNum + '_' + normalizeSection(selectedSection) + ':') : null;
 
-    let kept = currentExcluded.filter(e => typeof e === 'string' && !e.startsWith(datePrefix));
-    if (secPrefix) {
-      kept = kept.filter(e => typeof e === 'string' && !e.startsWith(secPrefix));
-    }
+    let updated = [...currentExcluded];
 
-    const updatedExcluded = [...kept, datePrefix + dateStr];
     if (secPrefix) {
-      updatedExcluded.push(secPrefix + dateStr);
+      // Remove any previous entry for THIS specific section only
+      updated = updated.filter(e => typeof e === 'string' && !e.startsWith(secPrefix));
+      updated.push(secPrefix + dateStr);
+      // Also keep or set general week prefix as fallback if missing
+      if (!updated.some(e => typeof e === 'string' && e.startsWith(datePrefix))) {
+        updated.push(datePrefix + dateStr);
+      }
+    } else {
+      updated = updated.filter(e => typeof e === 'string' && !e.startsWith(datePrefix));
+      updated.push(datePrefix + dateStr);
     }
 
     try {
-      await supabase.from('subjects').update({ excluded_students: updatedExcluded }).eq('id', subId);
-      targetSub.excluded_students = updatedExcluded;
+      await supabase.from('subjects').update({ excluded_students: updated }).eq('id', subId);
+      targetSub.excluded_students = updated;
       cacheManager.invalidate('admin_subjects_base');
     } catch (e) {
       console.warn('saveSubjectWeekDate error:', e);
@@ -317,7 +322,7 @@ export default function AttendanceTab({ user }) {
       setSelectedStudentsList([]);
       setPastedIds('');
     }
-  }, [selectedSubject, week, attendanceType, selectedGroup]);
+  }, [selectedSubject, week, attendanceType, selectedSection, selectedGroup]);
 
   const fetchAttendance = async () => {
     const effWeek = getEffectiveWeekNum();
@@ -361,7 +366,7 @@ export default function AttendanceTab({ user }) {
       // Fetch attendance records from database
       const { data, error } = await supabase
         .from('attendance')
-        .select('student_id, status')
+        .select('student_id, status, created_at')
         .eq('subject_id', selectedSubject)
         .eq('week_number', effWeek);
 
@@ -374,18 +379,40 @@ export default function AttendanceTab({ user }) {
       // Check saved week date in subject config
       const targetSub = (attendanceType === 'lecture' ? allSystemSubjects : subjects).find(s => s.id === selectedSubject);
       if (targetSub && Array.isArray(targetSub.excluded_students)) {
-        const datePrefix = getDatePrefix();
-        const dateEntry = targetSub.excluded_students.find(e => typeof e === 'string' && e.startsWith(datePrefix));
-        if (dateEntry) {
-          foundDate = dateEntry.replace(datePrefix, '');
+        // 1. Check section-specific date first (if section attendance)
+        if (attendanceType === 'section' && selectedSection) {
+          const secPrefix = 'WEEK_DATE_W' + week + '_' + normalizeSection(selectedSection) + ':';
+          const secEntry = targetSub.excluded_students.find(e => typeof e === 'string' && e.startsWith(secPrefix));
+          if (secEntry) {
+            foundDate = secEntry.replace(secPrefix, '');
+          }
+        }
+        // 2. Check general week date
+        if (!foundDate) {
+          const datePrefix = getDatePrefix();
+          const dateEntry = targetSub.excluded_students.find(e => typeof e === 'string' && e.startsWith(datePrefix));
+          if (dateEntry) {
+            foundDate = dateEntry.replace(datePrefix, '');
+          }
         }
       }
 
-      const currWeek = getAcademicWeekFromDate();
-      if (week === currWeek) {
-        foundDate = getTodayDateStr();
-      } else if (!foundDate) {
-        foundDate = getWeekDefaultDate(week);
+      // Check if any existing attendance record in DB has a created_at date
+      if (!foundDate && data && data.length > 0) {
+        const withCreated = data.find(r => r.created_at);
+        if (withCreated && withCreated.created_at) {
+          foundDate = withCreated.created_at.split('T')[0];
+        }
+      }
+
+      // ONLY if NO previous date was found anywhere, initialize to today (for current week) or week default
+      if (!foundDate) {
+        const currWeek = getAcademicWeekFromDate();
+        if (week === currWeek) {
+          foundDate = getTodayDateStr();
+        } else {
+          foundDate = getWeekDefaultDate(week);
+        }
       }
 
       if (data && data.length > 0) {
