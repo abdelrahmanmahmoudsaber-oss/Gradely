@@ -95,14 +95,25 @@ export default function AttendanceTab({ user }) {
     if (!targetSub) return;
     const currentExcluded = Array.isArray(targetSub.excluded_students) ? targetSub.excluded_students : [];
     const datePrefix = (attendanceType === 'lecture' ? 'LEC_DATE_W' : 'WEEK_DATE_W') + weekNum + ':';
-    const existing = currentExcluded.find(e => typeof e === 'string' && e.startsWith(datePrefix));
-    if (existing === datePrefix + dateStr) return;
+    const secPrefix = (attendanceType === 'section' && selectedSection) ? ('WEEK_DATE_W' + weekNum + '_' + normalizeSection(selectedSection) + ':') : null;
 
-    const kept = currentExcluded.filter(e => typeof e === 'string' && !e.startsWith(datePrefix));
+    let kept = currentExcluded.filter(e => typeof e === 'string' && !e.startsWith(datePrefix));
+    if (secPrefix) {
+      kept = kept.filter(e => typeof e === 'string' && !e.startsWith(secPrefix));
+    }
+
     const updatedExcluded = [...kept, datePrefix + dateStr];
-    await supabase.from('subjects').update({ excluded_students: updatedExcluded }).eq('id', subId);
-    targetSub.excluded_students = updatedExcluded;
-    cacheManager.invalidate('admin_subjects_base');
+    if (secPrefix) {
+      updatedExcluded.push(secPrefix + dateStr);
+    }
+
+    try {
+      await supabase.from('subjects').update({ excluded_students: updatedExcluded }).eq('id', subId);
+      targetSub.excluded_students = updatedExcluded;
+      cacheManager.invalidate('admin_subjects_base');
+    } catch (e) {
+      console.warn('saveSubjectWeekDate error:', e);
+    }
   };
 
 
@@ -626,7 +637,7 @@ export default function AttendanceTab({ user }) {
     setAutoSaveStatus('💾 جاري الحفظ...');
 
     try {
-      saveSubjectWeekDate(selectedSubject, week, sessionDate);
+      await saveSubjectWeekDate(selectedSubject, week, sessionDate);
       const { error } = await supabase.from('attendance').upsert({
         student_id: studentId,
         subject_id: selectedSubject,
@@ -751,7 +762,7 @@ export default function AttendanceTab({ user }) {
     setAutoSaveStatus('✓ تم تحضير الكل وحفظه');
     setTimeout(() => setAutoSaveStatus(''), 2000);
 
-    saveSubjectWeekDate(selectedSubject, week, sessionDate);
+    await saveSubjectWeekDate(selectedSubject, week, sessionDate);
     await supabase.from('attendance').upsert(rows, { onConflict: 'student_id,subject_id,week_number' });
   };
 
@@ -779,7 +790,7 @@ export default function AttendanceTab({ user }) {
     setAutoSaveStatus('✓ تم تغييب كافة الطلاب وحفظه');
     setTimeout(() => setAutoSaveStatus(''), 2000);
 
-    saveSubjectWeekDate(selectedSubject, week, sessionDate);
+    await saveSubjectWeekDate(selectedSubject, week, sessionDate);
     await supabase.from('attendance').upsert(rows, { onConflict: 'student_id,subject_id,week_number' });
   };
 

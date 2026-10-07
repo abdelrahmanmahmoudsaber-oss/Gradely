@@ -173,8 +173,13 @@ export default function StudentDashboard({ user, onLogout }) {
     return d.toISOString().split('T')[0];
   };
 
-  const getSubjectWeekDate = (sub, weekNum) => {
+  const getSubjectWeekDate = (sub, weekNum, studentSec) => {
     if (!sub || !Array.isArray(sub.excluded_students)) return '';
+    if (studentSec) {
+      const secPrefix = 'WEEK_DATE_W' + weekNum + '_' + normalizeSection(studentSec) + ':';
+      const secEntry = sub.excluded_students.find(e => typeof e === 'string' && e.startsWith(secPrefix));
+      if (secEntry) return secEntry.replace(secPrefix, '');
+    }
     const prefix = 'WEEK_DATE_W' + weekNum + ':';
     const entry = sub.excluded_students.find(e => typeof e === 'string' && e.startsWith(prefix));
     return entry ? entry.replace(prefix, '') : '';
@@ -714,28 +719,76 @@ export default function StudentDashboard({ user, onLogout }) {
             {viewMode === 'attendance' && (
               <div className="fade-in">
                 {/* Sub-tabs: Section Attendance vs Lecture Attendance */}
-                <div style={{display:'flex',gap:'8px',marginBottom:'1.2rem',background:'var(--bg)',padding:'4px',borderRadius:'10px',border:'1px solid var(--border)',width:'fit-content'}}>
+                <div style={{
+                  display: 'flex',
+                  gap: '10px',
+                  marginBottom: '1.4rem',
+                  background: 'rgba(255, 255, 255, 0.04)',
+                  padding: '6px',
+                  borderRadius: '12px',
+                  border: '1px solid var(--border)',
+                  width: 'fit-content',
+                  flexWrap: 'wrap'
+                }}>
                   <button 
+                    type="button"
                     onClick={() => setAttSubMode('section')}
                     style={{
                       background: attSubMode === 'section' ? 'var(--primary)' : 'transparent',
                       color: attSubMode === 'section' ? 'white' : 'var(--text-muted)',
-                      border: 'none', padding: '6px 14px', borderRadius: '7px', fontWeight: 700, cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', transition: 'all 0.15s'
+                      border: 'none',
+                      padding: '8px 18px',
+                      borderRadius: '9px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '0.9rem',
+                      boxShadow: attSubMode === 'section' ? '0 2px 8px rgba(79, 70, 229, 0.35)' : 'none',
+                      transition: 'all 0.2s'
                     }}
                   >
-                    <span>🏢</span> غياب السكاشن ({currentAttendance.filter(a => a.week_number <= 50 && a.status === 'absent').length} غياب)
+                    <span style={{fontSize:'1.1rem'}}>🏢</span>
+                    <span>غياب السكاشن</span>
+                    <span style={{
+                      background: attSubMode === 'section' ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.06)',
+                      padding: '2px 8px',
+                      borderRadius: '12px',
+                      fontSize: '0.78rem'
+                    }}>
+                      {currentAttendance.filter(a => a.week_number <= 50 && a.status === 'absent').length} غياب
+                    </span>
                   </button>
                   <button 
+                    type="button"
                     onClick={() => setAttSubMode('lecture')}
                     style={{
                       background: attSubMode === 'lecture' ? '#0d9488' : 'transparent',
                       color: attSubMode === 'lecture' ? 'white' : 'var(--text-muted)',
-                      border: 'none', padding: '6px 14px', borderRadius: '7px', fontWeight: 700, cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', transition: 'all 0.15s'
+                      border: 'none',
+                      padding: '8px 18px',
+                      borderRadius: '9px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '0.9rem',
+                      boxShadow: attSubMode === 'lecture' ? '0 2px 8px rgba(13, 148, 136, 0.35)' : 'none',
+                      transition: 'all 0.2s'
                     }}
                   >
-                    <span>🏛️</span> غياب المحاضرات ({currentAttendance.filter(a => a.week_number > 100 && a.status === 'absent').length} غياب)
+                    <span style={{fontSize:'1.1rem'}}>🏛️</span>
+                    <span>غياب المحاضرات</span>
+                    <span style={{
+                      background: attSubMode === 'lecture' ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.06)',
+                      padding: '2px 8px',
+                      borderRadius: '12px',
+                      fontSize: '0.78rem'
+                    }}>
+                      {currentAttendance.filter(a => a.week_number > 100 && a.status === 'absent').length} غياب
+                    </span>
                   </button>
                 </div>
 
@@ -788,11 +841,13 @@ export default function StudentDashboard({ user, onLogout }) {
                     }
 
                     const hasRecordedAttendance = record && record.status && record.status !== 'unrecorded';
+                    const userPrimarySection = getStudentSubSection(user, currentSubject.id);
                     const explicitDate = attSubMode === 'lecture'
                       ? getSubjectLectureDate(currentSubject, w)
-                      : getSubjectWeekDate(currentSubject, w);
+                      : getSubjectWeekDate(currentSubject, w, userPrimarySection);
                     const recordDate = record && record.created_at ? record.created_at.split('T')[0] : '';
-                    const wDate = explicitDate || recordDate;
+                    const defaultDate = getWeekDefaultDate(w);
+                    const wDate = explicitDate || recordDate || defaultDate;
 
                     return (
                       <div key={w} style={{background: bg, border: '1px solid ' + border, borderRadius: '8px', padding: '10px 6px', textAlign: 'center'}}>
@@ -800,7 +855,7 @@ export default function StudentDashboard({ user, onLogout }) {
                           {attSubMode === 'lecture' ? `محاضرة ${w}` : `أسبوع ${w}`}
                         </div>
                         <div style={{fontWeight: 'bold', color: statusColor, fontSize: '0.85rem'}}>{statusLabel}</div>
-                        {hasRecordedAttendance && wDate ? (
+                        {hasRecordedAttendance ? (
                           <div style={{
                             fontSize: '0.73rem',
                             color: attSubMode === 'lecture' ? '#2dd4bf' : '#60a5fa',
@@ -813,7 +868,16 @@ export default function StudentDashboard({ user, onLogout }) {
                           }}>
                             🗓️ {formatDisplayDate(wDate)}
                           </div>
-                        ) : null}
+                        ) : (
+                          <div style={{
+                            fontSize: '0.7rem',
+                            color: 'var(--text-muted)',
+                            marginTop: '5px',
+                            opacity: 0.7
+                          }}>
+                            🗓️ {formatDisplayDate(wDate)}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

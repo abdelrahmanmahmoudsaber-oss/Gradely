@@ -1,5 +1,4 @@
 {
-  "version": 2,
   "buildCommand": "cd frontend && npm install && npm run build && node -e \"const fs=require('fs'); if(!fs.existsSync('../dist')) fs.mkdirSync('../dist'); fs.cpSync('dist', '../dist', {recursive: true});\"",
   "outputDirectory": "dist",
   "rewrites": [
