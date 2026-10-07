@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { exportExcelFile, exportMultiSheetExcelFile, generateMultiSheetExcelBase64 } from '../../utils/excelHelper';
+import { getBackupSettings, saveBackupSettings, sendFullSystemBackupEmail } from '../../utils/backupService';
 import { 
   Users, BookOpen, Clock, Shield, Sliders, Eye, EyeOff, 
   Download, Upload, Database, RefreshCw, CheckCircle2, AlertTriangle, FileSpreadsheet, Calendar,
@@ -69,7 +70,7 @@ export default function OverviewTab({ user }) {
   const [backingUp, setBackingUp] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [backupMessage, setBackupMessage] = useState('');
-  const [backupSchedule, setBackupSchedule] = useState(() => localStorage.getItem('gradely_backup_schedule') || 'weekly');
+  const [backupSchedule, setBackupSchedule] = useState(() => localStorage.getItem('gradely_backup_schedule') || 'daily');
   const [lastBackupDate, setLastBackupDate] = useState(() => localStorage.getItem('gradely_last_backup') || null);
   const [backupEmail, setBackupEmail] = useState(() => localStorage.getItem('gradely_backup_email') || 'abdo2171999m@gmail.com');
   const [webhookScriptUrl, setWebhookScriptUrl] = useState(() => localStorage.getItem('gradely_webhook_url') || 'https://script.google.com/macros/s/AKfycbykd7LVJ8p0dqrHqW9UUJ04i40qFwRTa0b98YPA1NgXzJ3U0EECa9i-EbiVa70pvHzbiQ/exec');
@@ -80,46 +81,16 @@ export default function OverviewTab({ user }) {
 
   const isSuper = isSuperUser(user);
 
-  // Calculate interval in ms for a given schedule key
-  const scheduleToMs = (schedule) => {
-    switch (schedule) {
-      case 'daily':   return 24 * 60 * 60 * 1000;
-      case '3days':   return 3 * 24 * 60 * 60 * 1000;
-      case 'weekly':  return 7 * 24 * 60 * 60 * 1000;
-      case 'monthly': return 30 * 24 * 60 * 60 * 1000;
-      default:        return 7 * 24 * 60 * 60 * 1000;
-    }
-  };
-
-  // Set next backup timestamp after a send
-  const recordBackupSent = (schedule) => {
-    const nowMs = Date.now();
-    const nextMs = nowMs + scheduleToMs(schedule);
-    const nextIso = new Date(nextMs).toISOString();
-    localStorage.setItem('gradely_next_backup', nextIso);
-    setNextBackupDate(nextIso);
-  };
-
   useEffect(() => {
     fetchOverviewData();
-  }, []);
-
-  // Auto-trigger scheduled email backup when page loads if due
-  useEffect(() => {
-    if (!isSuper) return;
-    const email = localStorage.getItem('gradely_backup_email') || '';
-    if (!email || !email.includes('@')) return;
-    const nextIso = localStorage.getItem('gradely_next_backup');
-    if (!nextIso) return; // Never scheduled yet – only fires after first manual send
-    const nextMs = new Date(nextIso).getTime();
-    if (isNaN(nextMs)) return;
-    if (Date.now() >= nextMs) {
-      // Due: auto-send silently
-      setTimeout(() => {
-        handleSendEmailBackup(true);
-      }, 2000); // slight delay to let data load
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Load synchronized backup settings from Supabase
+    getBackupSettings().then(cfg => {
+      if (cfg.email) setBackupEmail(cfg.email);
+      if (cfg.schedule) setBackupSchedule(cfg.schedule);
+      if (cfg.webhookUrl) setWebhookScriptUrl(cfg.webhookUrl);
+      if (cfg.lastBackup) setLastBackupDate(cfg.lastBackup);
+      if (cfg.nextBackup) setNextBackupDate(cfg.nextBackup);
+    });
   }, []);
 
   const parseVisibilityFromSubjects = (subList) => {
@@ -658,211 +629,68 @@ export default function OverviewTab({ user }) {
 
   const handleSaveBackupEmail = async (newEmail) => {
     const trimmed = (newEmail || '').trim();
-    setBackupEmail(trimmed);
-    localStorage.setItem('gradely_backup_email', trimmed);
-    try {
-      // Remove any sensitive backup email from public subjects table
-      const { data: subData } = await supabase.from('subjects').select('id, excluded_students');
-      if (subData && subData.length > 0) {
-        for (const sub of subData) {
-          const currentExcluded = Array.isArray(sub.excluded_students) ? sub.excluded_students : [];
-          const kept = currentExcluded.filter(e => typeof e === 'string' && !e.startsWith('CONFIG_BACKUP_EMAIL:'));
-          if (kept.length !== currentExcluded.length) {
-            await supabase.from('subjects').update({ excluded_students: kept }).eq('id', sub.id);
-          }
-        }
-        cacheManager.invalidate('admin_subjects_base');
-      }
-      setBackupMessage('✅ تم حفظ البريد الإلكتروني للنسخ الدوري: ' + trimmed);
-      setTimeout(() => setBackupMessage(''), 4000);
-    } catch (e) {
-      console.error(e);
+    if (!trimmed || !trimmed.includes('@')) {
+      alert('يرجى كتابة بريد إلكتروني صحيح');
+      return;
     }
+    setBackupEmail(trimmed);
+    await saveBackupSettings({
+      email: trimmed,
+      schedule: backupSchedule,
+      webhookUrl: webhookScriptUrl,
+      lastBackup: lastBackupDate,
+      nextBackup: nextBackupDate
+    });
+    setBackupMessage('✅ تم حفظ وتأكيد البريد الإلكتروني للنسخ الدوري: ' + trimmed);
+    setTimeout(() => setBackupMessage(''), 4000);
   };
 
-  const handleSaveWebhookUrl = (url) => {
-    setWebhookScriptUrl(url);
-    localStorage.setItem('gradely_webhook_url', url);
+  const handleSaveWebhookUrl = async (url) => {
+    const trimmed = (url || '').trim();
+    setWebhookScriptUrl(trimmed);
+    await saveBackupSettings({
+      email: backupEmail,
+      schedule: backupSchedule,
+      webhookUrl: trimmed,
+      lastBackup: lastBackupDate,
+      nextBackup: nextBackupDate
+    });
+    setBackupMessage('✅ تم حفظ رابط سكريبت Google Apps Script بنجاح');
+    setTimeout(() => setBackupMessage(''), 4000);
+  };
+
+  const handleScheduleChange = async (val) => {
+    setBackupSchedule(val);
+    await saveBackupSettings({
+      email: backupEmail,
+      schedule: val,
+      webhookUrl: webhookScriptUrl,
+      lastBackup: lastBackupDate,
+      nextBackup: nextBackupDate
+    });
+    setBackupMessage('✅ تم حفظ وتحديث جدول تكرار الإرسال تلقائياً');
+    setTimeout(() => setBackupMessage(''), 3000);
   };
 
   const handleSendEmailBackup = async (isAuto = false) => {
-    const emailToUse = isAuto
-      ? (localStorage.getItem('gradely_backup_email') || backupEmail)
-      : backupEmail;
-    if (!emailToUse || !emailToUse.includes('@')) {
-      if (!isAuto) alert('يرجى كتابة بريد إلكتروني صحيح أولاً (Gmail / Email)');
-      return;
-    }
-
     setSendingEmail(true);
-    setBackupMessage((isAuto ? '🤖 إرسال تلقائي: ' : '') + 'جاري استخراج وتجهيز كشوف الغياب والدرجات الشاملة وإرسالها إلى (' + emailToUse + ')...');
+    setBackupMessage((isAuto ? '🤖 إرسال تلقائي: ' : '') + 'جاري استخراج وتجهيز كشوف الغياب والدرجات الشاملة وإرسالها إلى (' + backupEmail + ')...');
 
-    try {
-      const [usersRes, subRes, attRes, grdRes] = await Promise.all([
-        supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects'),
-        supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students'),
-        supabase.from('attendance').select('student_id, subject_id, week_number, status'),
-        supabase.from('grades').select('student_id, subject_id, quiz_1, quiz_2, project, attendance_score, final_grade')
-      ]);
+    const res = await sendFullSystemBackupEmail({
+      isAuto,
+      user,
+      customEmail: backupEmail,
+      customWebhook: webhookScriptUrl
+    });
 
-      const allUsers = usersRes.data || [];
-      const allSubs = subRes.data || [];
-      const allAtt = attRes.data || [];
-      const allGrades = grdRes.data || [];
-
-      const freshCurrentUser = allUsers.find(u => u.user_id === user.user_id) || user;
-      const rawAssigned = Array.isArray(freshCurrentUser?.assigned_subjects) ? freshCurrentUser.assigned_subjects : [];
-      const assignedSubIds = rawAssigned.map(e => e.split(':')[0]);
-
-      let mySubs = [];
-      if (isSuper) {
-        mySubs = allSubs;
-      } else {
-        mySubs = allSubs.filter(s => 
-          s.instructor_id === user.user_id || 
-          s.instructor_name === user.name || 
-          assignedSubIds.includes(s.id)
-        );
-      }
-
-      if (mySubs.length === 0) {
-        setBackupMessage('❌ لا توجد مواد مسندة لتصدير كشوفها');
-        setSendingEmail(false);
-        return;
-      }
-
-      const attMatrix = {};
-      allAtt.forEach(r => {
-        if (!attMatrix[r.subject_id]) attMatrix[r.subject_id] = {};
-        if (!attMatrix[r.subject_id][r.student_id]) attMatrix[r.subject_id][r.student_id] = {};
-        attMatrix[r.subject_id][r.student_id][r.week_number] = r.status;
-      });
-
-      const gradesMatrix = {};
-      allGrades.forEach(g => {
-        if (!gradesMatrix[g.subject_id]) gradesMatrix[g.subject_id] = {};
-        gradesMatrix[g.subject_id][g.student_id] = g;
-      });
-
-      const sheets = [];
-
-      mySubs.forEach(sub => {
-        const totalWeeks = sub.total_weeks || 12;
-        const subAtt = attMatrix[sub.id] || {};
-        const subGrades = gradesMatrix[sub.id] || {};
-
-        const enrolled = allUsers.filter(u => {
-          if (u.role !== 'student') return false;
-          const inSub = Array.isArray(sub.enrolled_students) && sub.enrolled_students.includes(u.user_id);
-          const hasAssigned = Array.isArray(u.assigned_subjects) && u.assigned_subjects.some(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
-          return inSub || hasAssigned;
-        });
-
-        const rows = enrolled.map(stu => {
-          const stuSubSec = (() => {
-            if (Array.isArray(stu.assigned_subjects)) {
-              const m = stu.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
-              if (m) return m.split(':')[1];
-            }
-            return stu.section || 'S1';
-          })();
-
-          const stuGrade = subGrades[stu.user_id] || {};
-
-          const row = {
-            'الرقم الأكاديمي': stu.user_id,
-            'اسم الطالب': stu.name,
-            'السكشن': stuSubSec,
-            'الفرقة': stu.year_level || sub.year_level || '1',
-            [getColLabel('showQuiz1', 'كويز 1')]: stuGrade.quiz_1 != null ? stuGrade.quiz_1 : 0,
-            [getColLabel('showQuiz2', 'كويز 2')]: stuGrade.quiz_2 != null ? stuGrade.quiz_2 : 0,
-            [getColLabel('showProject', 'المشروع')]: stuGrade.project != null ? stuGrade.project : 0,
-            [getColLabel('showAttendanceScore', 'درجة الحضور')]: stuGrade.attendance_score != null ? stuGrade.attendance_score : 0,
-            [getColLabel('showTotal', 'المجموع الكلي')]: stuGrade.final_grade != null ? stuGrade.final_grade : 0
-          };
-
-          let presentCount = 0;
-          let absentCount = 0;
-          let lateCount = 0;
-          let excusedCount = 0;
-
-          for (let w = 1; w <= totalWeeks; w++) {
-            const st = subAtt[stu.user_id]?.[w];
-            let label = 'لم يرصد';
-            if (st === 'present') { label = 'حاضر'; presentCount++; }
-            else if (st === 'absent') { label = 'غائب'; absentCount++; }
-            else if (st === 'late') { label = 'تأخير'; lateCount++; presentCount += 0.5; }
-            else if (st === 'excused') { label = 'عذر'; excusedCount++; }
-            row['أسبوع ' + w] = label;
-          }
-
-          const totalRecorded = presentCount + absentCount + (lateCount * 0.5);
-          const attRate = totalRecorded > 0 ? Math.round((presentCount / totalRecorded) * 100) + '%' : '0%';
-
-          row['إجمالي الحضور'] = presentCount;
-          row['إجمالي الغياب'] = absentCount;
-          row['تأخير / عذر'] = lateCount + excusedCount;
-          row['نسبة الالتزام'] = attRate;
-
-          return row;
-        });
-
-        let sheetName = sub.name.replace(/[:\\/?*[\]]/g, '').slice(0, 28);
-        if (!sheetName) sheetName = 'مادة ' + sub.id.slice(0, 6);
-        sheets.push({ name: sheetName, data: rows });
-      });
-
-      // 2. Generate Base64 attachment
-      const fileBase64 = await generateMultiSheetExcelBase64(sheets);
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 10);
-      const filename = 'Gradely_Full_Grades_And_Attendance_' + timestamp + '.xlsx';
-
-      const schedNow = localStorage.getItem('gradely_backup_schedule') || backupSchedule;
-      const targetWebhook = (webhookScriptUrl || '').trim();
-
-      if (!targetWebhook || targetWebhook.includes('AKfycbzBUNCHESyAtmUK_V8Wm7KV')) {
-        setShowGoogleScriptModal(true);
-        setBackupMessage('⚠️ يرجى أولاً تفعيل ووضع رابط Google Apps Script Webhook الخاص بك لإرسال الرسائل عبر بريدك.');
-        setSendingEmail(false);
-        return;
-      }
-
-      // 3. Send to Google Apps Script Webhook
-      const payload = JSON.stringify({
-        email: emailToUse,
-        filename: filename,
-        fileBase64: fileBase64
-      });
-
-      await fetch(targetWebhook, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'text/plain' },
-        body: payload
-      });
-
-      const nowIso = new Date().toLocaleString('ar-EG');
-      setLastBackupDate(nowIso);
-      localStorage.setItem('gradely_last_backup', nowIso);
-
-      // Schedule next auto backup
-      recordBackupSent(schedNow);
-
-      setBackupMessage('🎉 ' + (isAuto ? 'إرسال تلقائي: ' : '') + 'تم إرسال كشف الغياب والدرجات بنجاح إلى (' + emailToUse + ') وحفظه في Google Drive!');
-      setTimeout(() => setBackupMessage(''), 9000);
-    } catch (err) {
-      console.error('Email backup error:', err);
-      setBackupMessage('❌ حدث خطأ أثناء إرسال النسخة: ' + err.message);
-    } finally {
-      setSendingEmail(false);
+    setSendingEmail(false);
+    if (res.needWebhookModal) {
+      setShowGoogleScriptModal(true);
     }
-  };
-
-  const handleScheduleChange = (val) => {
-    setBackupSchedule(val);
-    localStorage.setItem('gradely_backup_schedule', val);
-    setBackupMessage('✅ تم حفظ جدول تذكير النسخ الاحتياطي');
-    setTimeout(() => setBackupMessage(''), 3000);
+    if (res.lastBackup) setLastBackupDate(res.lastBackup);
+    if (res.nextBackup) setNextBackupDate(res.nextBackup);
+    setBackupMessage(res.message);
+    setTimeout(() => setBackupMessage(''), 9000);
   };
 
   const getColLabel = (key, fallback) => {

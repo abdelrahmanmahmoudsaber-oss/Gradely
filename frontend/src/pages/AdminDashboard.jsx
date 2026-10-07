@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { LogOut, BookOpen, Users, CheckSquare, FileText, LayoutDashboard, Menu, X, Printer, KeyRound, Lock, WifiOff, Wifi } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { isSuperUser } from '../utils/dataCache';
+import { checkAndRunScheduledBackup } from '../utils/backupService';
 import OverviewTab from '../components/admin/OverviewTab';
 import SubjectsTab from '../components/admin/SubjectsTab';
 import StudentsTab from '../components/admin/StudentsTab';
@@ -22,6 +23,7 @@ export default function AdminDashboard({ user, onLogout }) {
   const [passwordUpdating, setPasswordUpdating] = useState(false);
 
   const isSuperAdmin = isSuperUser(user);
+  const [autoBackupNotice, setAutoBackupNotice] = useState('');
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -33,6 +35,31 @@ export default function AdminDashboard({ user, onLogout }) {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  // Automatic scheduled background backup checker
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+
+    const runCheck = () => {
+      checkAndRunScheduledBackup(user, (res) => {
+        if (res && res.success) {
+          setAutoBackupNotice('🤖 تم إرسال النسخة الاحتياطية المجدولة تلقائياً إلى بريدك الإلكتروني!');
+          setTimeout(() => setAutoBackupNotice(''), 8000);
+        }
+      });
+    };
+
+    // Check 3 seconds after dashboard load
+    const timeout = setTimeout(runCheck, 3000);
+
+    // Check periodically every 60 seconds
+    const interval = setInterval(runCheck, 60000);
+
+    return () => {
+      clearTimeout(timeout);
+      clearInterval(interval);
+    };
+  }, [isSuperAdmin, user]);
 
   const handleChangePassword = async (e) => {
     e.preventDefault();
@@ -300,6 +327,29 @@ export default function AdminDashboard({ user, onLogout }) {
           >
             <WifiOff size={20} style={{flexShrink:0}} />
             <span>⚠️ تنبيه: انقطع الاتصال بالإنترنت! أنت تعمل الآن في وضع عدم الاتصال (Offline Mode). جميع تسجيلات الغياب والدرجات يتم حفظها محلياً على جهازك بأمان، وستتم المزامنة تلقائياً فور عودة الإنترنت.</span>
+          </div>
+        )}
+
+        {/* Auto Backup Notification Banner */}
+        {autoBackupNotice && (
+          <div 
+            style={{
+              background: 'linear-gradient(90deg, #065f46 0%, #047857 100%)',
+              color: '#ffffff',
+              padding: '10px 1.5rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px',
+              fontSize: '0.92rem',
+              fontWeight: 700,
+              boxShadow: '0 4px 15px rgba(4, 120, 87, 0.4)',
+              zIndex: 35,
+              textAlign: 'center'
+            }}
+            className="fade-in"
+          >
+            <span>{autoBackupNotice}</span>
           </div>
         )}
 
