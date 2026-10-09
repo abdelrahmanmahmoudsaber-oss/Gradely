@@ -52,8 +52,8 @@ export default function AdminDashboard({ user, onLogout }) {
     // Check 3 seconds after dashboard load
     const timeout = setTimeout(runCheck, 3000);
 
-    // Check periodically every 60 seconds
-    const interval = setInterval(runCheck, 60000);
+    // Check periodically every 5 minutes (reduced from 60s to minimize server logs)
+    const interval = setInterval(runCheck, 5 * 60 * 1000);
 
     return () => {
       clearTimeout(timeout);

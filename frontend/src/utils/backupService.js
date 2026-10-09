@@ -22,7 +22,7 @@ let isBackupRunning = false;
 /**
  * Loads backup settings from Supabase (fallback to localStorage)
  */
-export async function getBackupSettings() {
+export async function getBackupSettings(forceFetch = false) {
   const localSettings = {
     email: localStorage.getItem('gradely_backup_email') || DEFAULT_EMAIL,
     schedule: localStorage.getItem('gradely_backup_schedule') || 'daily',
@@ -30,6 +30,11 @@ export async function getBackupSettings() {
     lastBackup: localStorage.getItem('gradely_last_backup') || '',
     nextBackup: localStorage.getItem('gradely_next_backup') || ''
   };
+
+  // Zero-log optimization: if localStorage already has complete settings and we are not forcing a fetch, return immediately
+  if (!forceFetch && localSettings.lastBackup && localSettings.email) {
+    return localSettings;
+  }
 
   try {
     const { data } = await supabase.from('subjects').select('id, excluded_students').limit(15);
