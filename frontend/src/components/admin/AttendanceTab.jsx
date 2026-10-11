@@ -88,6 +88,17 @@ export default function AttendanceTab({ user }) {
   const [importAttendanceStatus, setImportAttendanceStatus] = useState('');
   const [importingAttendance, setImportingAttendance] = useState(false);
 
+  // ─── Smart Attendance Clone State ───────────────────────────────────────────
+  const [showCloneModal, setShowCloneModal] = useState(false);
+  const [cloneSourceSubject, setCloneSourceSubject] = useState('');
+  const [cloneSourceWeek, setCloneSourceWeek] = useState(1);
+  const [cloneSourceType, setCloneSourceType] = useState('lecture'); // 'lecture' | 'section'
+  const [clonePreview, setClonePreview] = useState(null); // { matched, onlyInSource, onlyInTarget }
+  const [cloneLoading, setCloneLoading] = useState(false);
+  const [cloneDefaultForExtra, setCloneDefaultForExtra] = useState('absent'); // 'absent' | 'present' | 'manual'
+  const [cloneManualExtra, setCloneManualExtra] = useState({}); // { [student_id]: 'absent'|'present'|'late' }
+  const [cloneApplying, setCloneApplying] = useState(false);
+
 
   const saveSubjectWeekDate = async (subId, weekNum, dateStr) => {
     if (!subId || !dateStr) return;
@@ -765,6 +776,140 @@ export default function AttendanceTab({ user }) {
     setExcuseInputText('');
   };
 
+  // ─── Smart Attendance Clone: Load Preview ────────────────────────────────────
+  const handleLoadClonePreview = async () => {
+    if (!cloneSourceSubject || !selectedSubject) return;
+    setCloneLoading(true);
+    setClonePreview(null);
+    setCloneManualExtra({});
+
+    try {
+      // Effective week number for source
+      const srcEffWeek = cloneSourceType === 'lecture' ? 100 + cloneSourceWeek : cloneSourceWeek;
+
+      // Fetch source attendance records from DB
+      const { data: srcData, error: srcErr } = await supabase
+        .from('attendance')
+        .select('student_id, status')
+        .eq('subject_id', cloneSourceSubject)
+        .eq('week_number', srcEffWeek);
+
+      if (srcErr) throw srcErr;
+
+      // Build source records map: { student_id -> status }
+      const srcRecords = {};
+      (srcData || []).forEach(r => { srcRecords[r.student_id] = r.status; });
+
+      // Get enrolled students for target subject (current)
+      const targetEnrolledIds = new Set(
+        (currentSub?.enrolled_students || [])
+      );
+
+      // Get enrolled students for source subject
+      const srcSubject = allSystemSubjects.find(s => s.id === cloneSourceSubject);
+      const srcEnrolledIds = new Set(srcSubject?.enrolled_students || []);
+
+      // Students in BOTH (will get cloned status)
+      const matched = allStudents.filter(s =>
+        srcEnrolledIds.has(s.user_id) && targetEnrolledIds.has(s.user_id)
+      ).map(s => ({
+        ...s,
+        srcStatus: srcRecords[s.user_id] || 'unrecorded'
+      }));
+
+      // Students ONLY in source (not in target – will be ignored)
+      const onlyInSource = allStudents.filter(s =>
+        srcEnrolledIds.has(s.user_id) && !targetEnrolledIds.has(s.user_id)
+      );
+
+      // Students ONLY in target (not in source – need decision)
+      const onlyInTarget = allStudents.filter(s =>
+        !srcEnrolledIds.has(s.user_id) && targetEnrolledIds.has(s.user_id)
+      );
+
+      setClonePreview({ matched, onlyInSource, onlyInTarget, srcRecords });
+    } catch (err) {
+      console.error('Clone preview error:', err);
+      setMessage('❌ حدث خطأ أثناء تحميل بيانات المادة المصدر. يرجى المحاولة مرة أخرى.');
+      setTimeout(() => setMessage(''), 4000);
+    } finally {
+      setCloneLoading(false);
+    }
+  };
+
+  // ─── Smart Attendance Clone: Apply ───────────────────────────────────────────
+  const handleApplyClone = async () => {
+    if (!clonePreview || !selectedSubject) return;
+    setCloneApplying(true);
+
+    try {
+      const effWeek = getEffectiveWeekNum();
+      const newRecords = { ...attendanceRecords };
+
+      // 1. Apply matched students (cloned status from source)
+      clonePreview.matched.forEach(stu => {
+        const st = stu.srcStatus;
+        if (st && st !== 'unrecorded') {
+          newRecords[stu.user_id] = st;
+        }
+      });
+
+      // 2. Apply target-only students based on chosen default
+      clonePreview.onlyInTarget.forEach(stu => {
+        if (cloneDefaultForExtra === 'manual') {
+          const manualSt = cloneManualExtra[stu.user_id];
+          if (manualSt) newRecords[stu.user_id] = manualSt;
+        } else {
+          newRecords[stu.user_id] = cloneDefaultForExtra;
+        }
+      });
+
+      // Update local state immediately
+      setAttendanceRecords(newRecords);
+
+      // Save to DB
+      await saveSubjectWeekDate(selectedSubject, week, sessionDate);
+
+      const upsertRows = Object.entries(newRecords)
+        .filter(([, status]) => status && status !== 'unrecorded')
+        .map(([student_id, status]) => ({
+          student_id,
+          subject_id: selectedSubject,
+          week_number: effWeek,
+          status
+        }));
+
+      if (upsertRows.length > 0) {
+        const chunkSize = 20;
+        for (let i = 0; i < upsertRows.length; i += chunkSize) {
+          const chunk = upsertRows.slice(i, i + chunkSize);
+          await supabase.from('attendance').upsert(chunk, { onConflict: 'student_id,subject_id,week_number' });
+        }
+      }
+
+      // Update cache
+      const cacheKey = 'att_' + (attendanceType === 'lecture' ? 'lec_' : 'sec_') + selectedSubject + '_w' + week;
+      const storageKey = 'gradely_local_att_' + (attendanceType === 'lecture' ? 'lec_' : 'sec_') + selectedSubject + '_w' + week;
+      cacheManager.set(cacheKey, { records: newRecords, excuses: excuseReasons, date: sessionDate });
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({ records: newRecords, excuses: excuseReasons, date: sessionDate, updatedAt: Date.now() }));
+      } catch (e) {}
+
+      const matchedCount = clonePreview.matched.filter(s => s.srcStatus && s.srcStatus !== 'unrecorded').length;
+      const extraCount = clonePreview.onlyInTarget.length;
+      setMessage(`✅ تم نسخ الحضور بنجاح! تم تطبيق حالة ${matchedCount} طالب مشترك${extraCount > 0 ? ` وتحديد حالة ${extraCount} طالب إضافي` : ''}.`);
+      setTimeout(() => setMessage(''), 5000);
+      setShowCloneModal(false);
+      setClonePreview(null);
+    } catch (err) {
+      console.error('Clone apply error:', err);
+      setMessage('❌ حدث خطأ أثناء تطبيق النسخ. يرجى المحاولة مرة أخرى.');
+      setTimeout(() => setMessage(''), 4000);
+    } finally {
+      setCloneApplying(false);
+    }
+  };
+
   const handleMarkAllPresent = async () => {
     const updated = { ...attendanceRecords };
     displayedEnrolledStudents.forEach(stu => {
@@ -1111,6 +1256,31 @@ export default function AttendanceTab({ user }) {
           >
             <Download size={18} /> تصدير كشف الأسبوع (.txt / Excel)
           </button>
+          {attendanceType === 'lecture' && (
+            <button
+              className="btn-secondary"
+              onClick={() => {
+                setCloneSourceSubject('');
+                setCloneSourceWeek(week);
+                setCloneSourceType('lecture');
+                setClonePreview(null);
+                setCloneDefaultForExtra('absent');
+                setCloneManualExtra({});
+                setShowCloneModal(true);
+              }}
+              disabled={!selectedSubject}
+              style={{
+                borderColor: 'rgba(13, 148, 136, 0.5)',
+                color: '#2dd4bf',
+                background: 'rgba(13, 148, 136, 0.08)',
+                display: 'flex', alignItems: 'center', gap: '8px',
+                padding: '9px 16px', fontSize: '0.9rem'
+              }}
+              title="نسخ الحضور الذكي من محاضرة أخرى لنفس الدفعة"
+            >
+              <Copy size={18} /> 📋 نسخ الحضور من محاضرة أخرى
+            </button>
+          )}
         </div>
       </div>
 
@@ -2093,6 +2263,349 @@ export default function AttendanceTab({ user }) {
               >
                 <FileSpreadsheet size={16} /> {importingAttendance ? 'جاري الاستيراد...' : 'رفع ورصد الغياب فوراً'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── SMART ATTENDANCE CLONE MODAL ──────────────────────────────────────── */}
+      {showCloneModal && (
+        <div
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(15, 23, 42, 0.88)',
+            backdropFilter: 'blur(10px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 9999, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
+          }}
+          onClick={e => { if (e.target === e.currentTarget) setShowCloneModal(false); }}
+        >
+          <div
+            className="panel fade-in"
+            style={{
+              maxWidth: '660px', width: '100%', maxHeight: '90vh', overflowY: 'auto',
+              border: '1px solid rgba(13, 148, 136, 0.45)',
+              boxShadow: '0 25px 60px -15px rgba(0,0,0,0.9)',
+              borderRadius: '18px', padding: '0'
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(13,148,136,0.2), rgba(6,95,70,0.15))',
+              borderBottom: '1px solid rgba(13,148,136,0.3)',
+              padding: '1.4rem 1.8rem',
+              borderRadius: '18px 18px 0 0',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'
+            }}>
+              <div>
+                <h3 style={{margin: 0, fontSize: '1.25rem', color: '#2dd4bf', display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 800}}>
+                  <Copy size={22} /> 📋 نسخ الحضور الذكي من محاضرة أخرى
+                </h3>
+                <p style={{margin: '6px 0 0 0', fontSize: '0.85rem', color: 'var(--text-muted)'}}>
+                  سيتم نسخ حالة الحضور تلقائياً إلى: <strong style={{color: '#2dd4bf'}}>{currentSub?.name || ''}</strong> — الأسبوع <strong style={{color: '#2dd4bf'}}>{week}</strong>
+                </p>
+              </div>
+              <button onClick={() => setShowCloneModal(false)} style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',padding:'4px'}}>
+                <X size={22} />
+              </button>
+            </div>
+
+            <div style={{padding: '1.6rem 1.8rem', display: 'flex', flexDirection: 'column', gap: '1.4rem'}}>
+
+              {/* Step 1: Select Source Subject */}
+              <div style={{
+                background: 'var(--bg)',
+                border: '1px solid var(--border)',
+                borderRadius: '12px',
+                padding: '1.1rem 1.3rem'
+              }}>
+                <div style={{fontSize: '0.78rem', color: '#2dd4bf', fontWeight: 800, letterSpacing: '0.05em', marginBottom: '0.8rem', textTransform: 'uppercase'}}>
+                  الخطوة 1 — اختر المادة والأسبوع المصدر
+                </div>
+                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px'}}>
+                  <div>
+                    <label style={{display:'block', marginBottom:'6px', fontSize:'0.85rem', fontWeight:700}}>المادة المصدر:</label>
+                    <select
+                      className="input-field"
+                      value={cloneSourceSubject}
+                      onChange={e => { setCloneSourceSubject(e.target.value); setClonePreview(null); }}
+                      style={{width: '100%'}}
+                    >
+                      <option value="">-- اختر المادة --</option>
+                      {allSystemSubjects
+                        .filter(s => s.id !== selectedSubject)
+                        .map(s => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} (فرقة {normalizeYear(s.year_level)})
+                          </option>
+                        ))
+                      }
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{display:'block', marginBottom:'6px', fontSize:'0.85rem', fontWeight:700}}>الأسبوع المصدر:</label>
+                    <select
+                      className="input-field"
+                      value={cloneSourceWeek}
+                      onChange={e => { setCloneSourceWeek(Number(e.target.value)); setClonePreview(null); }}
+                      style={{width: '100%'}}
+                    >
+                      {Array.from({length: currentSub?.total_weeks || 12}, (_, i) => i + 1).map(w => (
+                        <option key={w} value={w}>الأسبوع {w} ({formatDisplayDate(getWeekDefaultDate(w))})</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div style={{marginTop: '10px'}}>
+                  <label style={{display:'block', marginBottom:'6px', fontSize:'0.85rem', fontWeight:700}}>نوع الكشف المصدر:</label>
+                  <div style={{display: 'flex', gap: '10px'}}>
+                    {[
+                      {val: 'lecture', label: '🏛️ محاضرة'},
+                      {val: 'section', label: '🏢 سكشن'}
+                    ].map(opt => (
+                      <label key={opt.val} style={{
+                        display: 'flex', alignItems: 'center', gap: '7px',
+                        padding: '7px 14px', borderRadius: '8px', cursor: 'pointer',
+                        background: cloneSourceType === opt.val ? 'rgba(13,148,136,0.15)' : 'var(--surface)',
+                        border: cloneSourceType === opt.val ? '1px solid #0d9488' : '1px solid var(--border)',
+                        fontWeight: cloneSourceType === opt.val ? 800 : 500,
+                        color: cloneSourceType === opt.val ? '#2dd4bf' : 'var(--text-muted)',
+                        fontSize: '0.88rem'
+                      }}>
+                        <input
+                          type="radio"
+                          name="cloneSourceType"
+                          value={opt.val}
+                          checked={cloneSourceType === opt.val}
+                          onChange={() => { setCloneSourceType(opt.val); setClonePreview(null); }}
+                          style={{display:'none'}}
+                        />
+                        {opt.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  className="btn-primary"
+                  onClick={handleLoadClonePreview}
+                  disabled={!cloneSourceSubject || cloneLoading}
+                  style={{
+                    marginTop: '12px', width: '100%', background: '#0d9488',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    gap: '8px', padding: '9px', fontSize: '0.92rem', fontWeight: 800
+                  }}
+                >
+                  {cloneLoading
+                    ? <><RefreshCw size={16} style={{animation:'spin 1s linear infinite'}} /> جاري تحليل البيانات...</>
+                    : <><Search size={16} /> تحليل ومعاينة التطابق</>
+                  }
+                </button>
+              </div>
+
+              {/* Preview Results */}
+              {clonePreview && (
+                <>
+                  {/* Summary Cards */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gap: '10px'
+                  }}>
+                    <div style={{
+                      background: 'rgba(13,148,136,0.12)', border: '1px solid rgba(13,148,136,0.3)',
+                      borderRadius: '10px', padding: '12px', textAlign: 'center'
+                    }}>
+                      <div style={{fontSize: '1.8rem', fontWeight: 900, color: '#2dd4bf'}}>{clonePreview.matched.length}</div>
+                      <div style={{fontSize: '0.78rem', color: '#2dd4bf', fontWeight: 700, marginTop: '2px'}}>✅ طالب مشترك</div>
+                      <div style={{fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px'}}>سيتم نسخ حالتهم تلقائياً</div>
+                    </div>
+                    <div style={{
+                      background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)',
+                      borderRadius: '10px', padding: '12px', textAlign: 'center'
+                    }}>
+                      <div style={{fontSize: '1.8rem', fontWeight: 900, color: '#f59e0b'}}>{clonePreview.onlyInTarget.length}</div>
+                      <div style={{fontSize: '0.78rem', color: '#f59e0b', fontWeight: 700, marginTop: '2px'}}>⚠️ طالب في المادة الحالية فقط</div>
+                      <div style={{fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px'}}>يحتاجون قرار منك</div>
+                    </div>
+                    <div style={{
+                      background: 'rgba(100,116,139,0.1)', border: '1px solid rgba(100,116,139,0.25)',
+                      borderRadius: '10px', padding: '12px', textAlign: 'center'
+                    }}>
+                      <div style={{fontSize: '1.8rem', fontWeight: 900, color: '#94a3b8'}}>{clonePreview.onlyInSource.length}</div>
+                      <div style={{fontSize: '0.78rem', color: '#94a3b8', fontWeight: 700, marginTop: '2px'}}>⏭️ طالب في المصدر فقط</div>
+                      <div style={{fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '3px'}}>سيتم تجاهلهم تلقائياً</div>
+                    </div>
+                  </div>
+
+                  {/* Matched Students Preview */}
+                  {clonePreview.matched.length > 0 && (
+                    <div style={{
+                      background: 'var(--bg)', border: '1px solid var(--border)',
+                      borderRadius: '12px', padding: '1.1rem 1.3rem'
+                    }}>
+                      <div style={{fontSize: '0.78rem', color: '#2dd4bf', fontWeight: 800, letterSpacing: '0.05em', marginBottom: '0.8rem', textTransform: 'uppercase'}}>
+                        الطلاب المشتركون — سيُنسخ حضورهم تلقائياً
+                      </div>
+                      <div style={{maxHeight: '150px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '5px'}}>
+                        {clonePreview.matched.map(stu => {
+                          const st = stu.srcStatus;
+                          const stColor = st === 'present' ? 'var(--success)' : st === 'absent' ? 'var(--danger)' : st === 'late' ? 'var(--warning)' : st === 'excused' ? '#3b82f6' : 'var(--text-muted)';
+                          const stLabel = st === 'present' ? '✔ حاضر' : st === 'absent' ? '✗ غائب' : st === 'late' ? '⏱ تأخير' : st === 'excused' ? '🔵 عذر' : '— لم يرصد';
+                          return (
+                            <div key={stu.user_id} style={{
+                              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                              padding: '6px 10px', borderRadius: '7px',
+                              background: 'var(--surface)', border: '1px solid var(--border)',
+                              fontSize: '0.84rem'
+                            }}>
+                              <span style={{color: 'var(--text-main)', fontWeight: 600}}>{stu.name} <span style={{color:'var(--text-muted)',fontWeight:400}}>({stu.user_id})</span></span>
+                              <span style={{color: stColor, fontWeight: 800, fontSize: '0.8rem'}}>{stLabel}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Target-only Students: Decision Panel */}
+                  {clonePreview.onlyInTarget.length > 0 && (
+                    <div style={{
+                      background: 'rgba(245,158,11,0.06)',
+                      border: '1px solid rgba(245,158,11,0.35)',
+                      borderRadius: '12px', padding: '1.1rem 1.3rem'
+                    }}>
+                      <div style={{fontSize: '0.78rem', color: '#f59e0b', fontWeight: 800, letterSpacing: '0.05em', marginBottom: '0.8rem', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '7px'}}>
+                        <AlertCircle size={14} /> الطلاب غير الموجودين في المادة المصدر — اختر ما يناسبهم
+                      </div>
+                      {/* Default action picker */}
+                      <div style={{display: 'flex', gap: '8px', marginBottom: '0.9rem', flexWrap: 'wrap'}}>
+                        {[
+                          {val: 'absent', label: '✗ غائبون افتراضياً', color: 'var(--danger)', bg: 'rgba(239,68,68,0.1)', border: 'rgba(239,68,68,0.4)'},
+                          {val: 'present', label: '✔ حاضرون افتراضياً', color: 'var(--success)', bg: 'rgba(16,185,129,0.1)', border: 'rgba(16,185,129,0.4)'},
+                          {val: 'manual', label: '✏️ تحديد فردي لكل طالب', color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.4)'},
+                        ].map(opt => (
+                          <button
+                            key={opt.val}
+                            type="button"
+                            onClick={() => setCloneDefaultForExtra(opt.val)}
+                            style={{
+                              padding: '6px 14px', borderRadius: '8px', cursor: 'pointer', fontWeight: 800, fontSize: '0.83rem',
+                              color: opt.color,
+                              background: cloneDefaultForExtra === opt.val ? opt.bg : 'var(--surface)',
+                              border: cloneDefaultForExtra === opt.val ? '2px solid ' + opt.border : '1px solid var(--border)',
+                              transition: 'all 0.15s'
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Student list with individual controls */}
+                      <div style={{maxHeight: '200px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '5px'}}>
+                        {clonePreview.onlyInTarget.map(stu => {
+                          const curChoice = cloneDefaultForExtra === 'manual'
+                            ? (cloneManualExtra[stu.user_id] || '')
+                            : cloneDefaultForExtra;
+                          const stColor = curChoice === 'present' ? 'var(--success)' : curChoice === 'absent' ? 'var(--danger)' : curChoice === 'late' ? 'var(--warning)' : 'var(--text-muted)';
+                          return (
+                            <div key={stu.user_id} style={{
+                              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                              padding: '7px 10px', borderRadius: '7px',
+                              background: 'var(--surface)', border: '1px solid var(--border)',
+                              fontSize: '0.84rem', gap: '8px'
+                            }}>
+                              <span style={{color: 'var(--text-main)', fontWeight: 600, flex: 1}}>
+                                {stu.name}
+                                <span style={{color:'var(--text-muted)',fontWeight:400}}> ({stu.user_id})</span>
+                                <span style={{
+                                  marginRight: '8px',
+                                  fontSize: '0.72rem',
+                                  padding: '2px 6px', borderRadius: '4px',
+                                  background: 'rgba(245,158,11,0.12)', color: '#f59e0b', fontWeight: 700
+                                }}>في المادة الحالية فقط</span>
+                              </span>
+                              {cloneDefaultForExtra === 'manual' ? (
+                                <div style={{display: 'flex', gap: '4px'}}>
+                                  {[
+                                    {val: 'present', label: 'حاضر', color: 'var(--success)'},
+                                    {val: 'absent', label: 'غائب', color: 'var(--danger)'},
+                                    {val: 'late', label: 'تأخير', color: 'var(--warning)'},
+                                  ].map(btn => (
+                                    <button
+                                      key={btn.val}
+                                      type="button"
+                                      onClick={() => setCloneManualExtra(prev => ({...prev, [stu.user_id]: btn.val}))}
+                                      style={{
+                                        padding: '3px 8px', borderRadius: '5px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700,
+                                        color: btn.color,
+                                        background: cloneManualExtra[stu.user_id] === btn.val ? 'rgba(0,0,0,0.25)' : 'transparent',
+                                        border: cloneManualExtra[stu.user_id] === btn.val ? '1px solid ' + btn.color : '1px solid var(--border)',
+                                      }}
+                                    >{btn.label}</button>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span style={{color: stColor, fontWeight: 800, fontSize: '0.8rem', minWidth: '55px', textAlign: 'center'}}>
+                                  {curChoice === 'present' ? '✔ حاضر' : curChoice === 'absent' ? '✗ غائب' : '⏱ تأخير'}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Apply Button */}
+                  <div style={{display: 'flex', gap: '10px'}}>
+                    <button
+                      className="btn-primary"
+                      onClick={handleApplyClone}
+                      disabled={cloneApplying || (cloneDefaultForExtra === 'manual' && clonePreview.onlyInTarget.some(s => !cloneManualExtra[s.user_id]))}
+                      style={{
+                        flex: 1, background: '#0d9488', padding: '11px',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        gap: '8px', fontSize: '0.95rem', fontWeight: 800
+                      }}
+                    >
+                      {cloneApplying
+                        ? <><RefreshCw size={16} style={{animation:'spin 1s linear infinite'}} /> جاري تطبيق النسخ...</>
+                        : <><Check size={18} /> تطبيق النسخ الذكي الآن</>
+                      }
+                    </button>
+                    <button className="btn-secondary" onClick={() => setShowCloneModal(false)} style={{padding: '11px 20px'}}>
+                      إلغاء
+                    </button>
+                  </div>
+
+                  {cloneDefaultForExtra === 'manual' && clonePreview.onlyInTarget.some(s => !cloneManualExtra[s.user_id]) && (
+                    <div style={{
+                      background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.4)',
+                      color: '#f59e0b', padding: '8px 12px', borderRadius: '8px',
+                      fontSize: '0.83rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '7px'
+                    }}>
+                      <AlertCircle size={14} />
+                      يرجى تحديد الحالة لجميع الطلاب الإضافيين ({clonePreview.onlyInTarget.filter(s => !cloneManualExtra[s.user_id]).length} طالب متبقي)
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Empty state when no preview loaded yet */}
+              {!clonePreview && !cloneLoading && (
+                <div style={{
+                  textAlign: 'center', padding: '1.5rem',
+                  color: 'var(--text-muted)', fontSize: '0.88rem',
+                  border: '1px dashed var(--border)', borderRadius: '10px'
+                }}>
+                  <Copy size={32} style={{opacity: 0.3, marginBottom: '8px'}} />
+                  <div>اختر المادة المصدر والأسبوع ثم اضغط "تحليل ومعاينة التطابق"</div>
+                  <div style={{marginTop: '5px', fontSize: '0.78rem', color: '#94a3b8'}}>
+                    سيتم عرض قائمة تفصيلية بالطلاب المشتركين والطلاب الإضافيين قبل أي تغيير
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
