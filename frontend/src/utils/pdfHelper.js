@@ -4,6 +4,8 @@
  * subject breakdown, full weekly attendance grid, and instructor signature section.
  */
 
+import { getSectionInstructorName as resolveSectionTA } from './sectionHelper';
+
 export function printStudentReportPDF({ student, subjects, grades, attendance, options }) {
   const {
     includeAttendanceDetails = true,
@@ -176,11 +178,16 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
       `;
     }
 
+    const studentSec = getStudentSubSection(student, sub.id);
+    const taName = (typeof options?.getSectionInstructorName === 'function')
+      ? options.getSectionInstructorName(sub.id, studentSec)
+      : resolveSectionTA(sub, studentSec);
+
     subjectsHtml += `
       <div class="subject-block">
         <div class="subject-head">
-          <span class="sub-name">${idx + 1}. ${sub.name} (فرقة المقرر: ${normalizeYear(sub.year_level)}) — <strong style="color: #059669;">السكشن: ${getStudentSubSection(student, sub.id)}</strong></span>
-          <span class="sub-instructor">المشرف / المعيد: <strong>${sub.instructor_name || 'المدير الرئيسي'}</strong></span>
+          <span class="sub-name">${idx + 1}. ${sub.name} (فرقة المقرر: ${normalizeYear(sub.year_level)}) — <strong style="color: #059669;">السكشن: ${studentSec}</strong></span>
+          <span class="sub-instructor">المشرف / المعيد: <strong>${taName}</strong></span>
         </div>
         ${gradesCardsHtml}
         ${weeksGridHtml}

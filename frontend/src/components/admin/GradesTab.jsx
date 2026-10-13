@@ -3,6 +3,7 @@ import { supabase } from '../../supabaseClient';
 import { exportExcelFile, parseExcelFile } from '../../utils/excelHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { Download, Upload, Save, Users, Filter, BookOpen, AlertCircle } from 'lucide-react';
+import { getSectionInstructorName as resolveSectionTA } from '../../utils/sectionHelper';
 
 export default function GradesTab({ user }) {
   const isSuper = isSuperUser(user);
@@ -89,7 +90,7 @@ export default function GradesTab({ user }) {
         );
       }
 
-      setAllAdmins(allUsersList.filter(u => u.role === 'admin'));
+      setAllAdmins(allUsersList.filter(u => u.role === 'admin' || u.role === 'super_admin' || isSuperUser(u)));
       setAllStudents(allUsersList.filter(u => u.role === 'student'));
       setSubjects(accessibleSubjects);
 
@@ -171,13 +172,7 @@ export default function GradesTab({ user }) {
   });
 
   const getSectionInstructorName = (subId, sec) => {
-    for (const adm of allAdmins) {
-      if (Array.isArray(adm.assigned_subjects) && adm.assigned_subjects.includes(subId + ':' + sec)) {
-        return adm.name;
-      }
-    }
-    if (currentSub?.instructor_name) return currentSub.instructor_name;
-    return 'المدير الرئيسي';
+    return resolveSectionTA(subId, sec, allAdmins, subjects);
   };
 
   // Dynamically calculate actual existing sections for the selected subject

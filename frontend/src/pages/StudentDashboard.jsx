@@ -7,6 +7,7 @@ import {
   Award, TrendingUp, Star, CheckCircle2, AlertTriangle, Printer, 
   BarChart3, Sparkles, Trophy, Target, KeyRound, Lock, X
 } from 'lucide-react';
+import { getSectionInstructorName as resolveSectionTA } from '../utils/sectionHelper';
 
 const SUBJECT_COLORS = [
   { bg: 'rgba(79, 70, 229, 0.15)', border: 'var(--primary)', text: 'var(--primary-hover)', tag: '#6366f1' },
@@ -193,15 +194,7 @@ export default function StudentDashboard({ user, onLogout }) {
   };
 
   const getSectionInstructorName = (subId, sec) => {
-    const secNorm = normalizeSection(sec || 'S1');
-    for (const adm of allAdmins) {
-      if (Array.isArray(adm.assigned_subjects) && adm.assigned_subjects.includes(subId + ':' + secNorm)) {
-        return adm.name;
-      }
-    }
-    const subObj = subjects.find(s => s.id === subId);
-    if (subObj?.instructor_name) return subObj.instructor_name;
-    return 'المدير الرئيسي';
+    return resolveSectionTA(subId, sec, allAdmins, subjects, user);
   };
 
   const getColLabel = (subId, key, defaultLabel) => {
@@ -396,7 +389,8 @@ export default function StudentDashboard({ user, onLogout }) {
         includeProject: currentSubVis.showProject,
         includeAttendanceScore: currentSubVis.showAttendanceScore,
         includeTotal: currentSubVis.showTotal,
-        selectedSubjectIds: subjects.map(s => s.id)
+        selectedSubjectIds: subjects.map(s => s.id),
+        getSectionInstructorName: (subId, sec) => getSectionInstructorName(subId, sec)
       }
     });
   };
@@ -459,7 +453,7 @@ export default function StudentDashboard({ user, onLogout }) {
       id: sub.id,
       name: sub.name,
       year: normalizeYear(sub.year_level),
-      instructor: sub.instructor_name || 'المدير الرئيسي',
+      instructor: getSectionInstructorName(sub.id, getStudentSubSection(user, sub.id)) || sub.instructor_name || 'المدير الرئيسي',
       attendedCount,
       absSubCount,
       rate: subRate,

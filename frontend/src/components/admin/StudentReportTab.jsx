@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { printStudentReportPDF } from '../../utils/pdfHelper';
+import { getSectionInstructorName as resolveSectionTA } from '../../utils/sectionHelper';
 import { Search, Printer, Calendar, BookOpen, FileText, CheckCircle2, XCircle, X, ChevronDown, ChevronUp, Sliders, CheckSquare, Square, RefreshCw } from 'lucide-react';
 
 export default function StudentReportTab({ user }) {
@@ -94,15 +95,7 @@ export default function StudentReportTab({ user }) {
   };
 
   const getSectionInstructorName = (subId, sec) => {
-    const secNorm = normalizeSection(sec || 'S1');
-    for (const adm of allAdmins) {
-      if (Array.isArray(adm.assigned_subjects) && adm.assigned_subjects.includes(subId + ':' + secNorm)) {
-        return adm.name;
-      }
-    }
-    const subObj = allSubjects.find(s => s.id === subId);
-    if (subObj?.instructor_name) return subObj.instructor_name;
-    return 'المدير الرئيسي';
+    return resolveSectionTA(subId, sec, allAdmins, allSubjects);
   };
 
   const getStudentSubSection = (student, subId) => {
@@ -136,7 +129,7 @@ export default function StudentReportTab({ user }) {
       ]);
       const allUsersList = userRes.data || [];
       const allSubList = subRes.data || [];
-      const adminsList = allUsersList.filter(u => u.role === 'admin');
+      const adminsList = allUsersList.filter(u => u.role === 'admin' || u.role === 'super_admin' || isSuperUser(u));
       setAllAdmins(adminsList);
 
       const freshCurrentUser = allUsersList.find(u => u.user_id === user.user_id) || user;
@@ -214,7 +207,10 @@ export default function StudentReportTab({ user }) {
       subjects: enrolledSubjects,
       grades: studentGrades,
       attendance: studentAttendance,
-      options: pdfOptions
+      options: {
+        ...pdfOptions,
+        getSectionInstructorName: (subId, sec) => getSectionInstructorName(subId, sec)
+      }
     });
   };
 

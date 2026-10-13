@@ -8,6 +8,7 @@ import {
   Download, Upload, Database, RefreshCw, CheckCircle2, AlertTriangle, FileSpreadsheet, Calendar,
   Edit, Trash2, LayoutDashboard, ExternalLink, Copy, Check, Settings
 } from 'lucide-react';
+import { getSectionInstructorName as resolveSectionTA, syncAllSubjectsSectionTAs } from '../../utils/sectionHelper';
 
 export default function OverviewTab({ user }) {
   const [stats, setStats] = useState({
@@ -52,18 +53,28 @@ export default function OverviewTab({ user }) {
   };
 
   const getSectionInstructorName = (subId, sec) => {
-    const secNorm = normalizeSection(sec || 'S1');
-    const admins = Array.isArray(allAdminsList) ? allAdminsList : [];
-    for (const adm of admins) {
-      if (Array.isArray(adm.assigned_subjects) && adm.assigned_subjects.includes(subId + ':' + secNorm)) {
-        return adm.name;
-      }
-    }
-    const subjects = Array.isArray(allSubjectsList) ? allSubjectsList : [];
-    const subObj = subjects.find(s => s.id === subId);
-    if (subObj?.instructor_name) return subObj.instructor_name;
-    return 'المدير الرئيسي';
+    return resolveSectionTA(subId, sec, allAdminsList, allSubjectsList);
   };
+
+  const [syncingTAs, setSyncingTAs] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
+
+  const handleManualSyncTAs = async () => {
+    try {
+      setSyncingTAs(true);
+      setSyncMsg('');
+      const res = await syncAllSubjectsSectionTAs(allSubjectsList, allAdminsList, supabase);
+      setSyncMsg(`✅ تمت مزامنة معيدي السكاشن بنجاح (${res.updatedCount} مادة تم تحديث بياناتها)`);
+      cacheManager.invalidate('admin_subjects_base');
+      setTimeout(() => setSyncMsg(''), 5000);
+    } catch (e) {
+      console.error(e);
+      setSyncMsg('❌ حدث خطأ أثناء مزامنة معيدي السكاشن');
+    } finally {
+      setSyncingTAs(false);
+    }
+  };
+
   const [editLabelInput, setEditLabelInput] = useState('');
 
   // Backup & Restore State
@@ -187,9 +198,14 @@ export default function OverviewTab({ user }) {
       }
 
       const allStudents = allUsersList.filter(u => u.role === 'student');
-      const allAdmins = allUsersList.filter(u => u.role === 'admin');
+      const allAdmins = allUsersList.filter(u => u.role === 'admin' || u.role === 'super_admin' || isSuperUser(u));
       setAllStudentsList(allStudents);
       setAllAdminsList(allAdmins);
+
+      // Automatically keep subjects' section TA mappings synced so students always see correct TAs
+      syncAllSubjectsSectionTAs(allSubList, allAdmins, supabase).catch(err => {
+        console.warn('Auto sync section TAs notice:', err);
+      });
 
       // Compute total sections strictly for the logged-in user
       let totalSecs = 0;
@@ -883,12 +899,33 @@ export default function OverviewTab({ user }) {
 
   return (
     <div className="fade-in">
-      <div style={{marginBottom:'2rem'}}>
-        <h2 style={{margin:0,fontSize:'1.6rem',fontWeight:800}}>نظرة عامة ومؤشرات النظام</h2>
-        <p className="text-muted" style={{margin:'5px 0 0 0'}}>
-          {isSuper ? 'إحصائيات كاملة لكافة الفرق والمقررات المسجلة في النظام' : 'إحصائيات المقررات والسكاشن المسندة إليك'}
-        </p>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'2rem',flexWrap:'wrap',gap:'1rem'}}>
+        <div>
+          <h2 style={{margin:0,fontSize:'1.6rem',fontWeight:800}}>نظرة عامة ومؤشرات النظام</h2>
+          <p className="text-muted" style={{margin:'5px 0 0 0'}}>
+            {isSuper ? 'إحصائيات كاملة لكافة الفرق والمقررات المسجلة في النظام' : 'إحصائيات المقررات والسكاشن المسندة إليك'}
+          </p>
+        </div>
+        {isSuper && (
+          <button 
+            type="button"
+            className="btn-secondary" 
+            onClick={handleManualSyncTAs}
+            disabled={syncingTAs}
+            style={{display:'flex',alignItems:'center',gap:'8px',padding:'8px 16px',borderRadius:'8px',fontSize:'0.9rem',borderColor:'var(--primary-hover)',color:'var(--primary-hover)'}}
+            title="مزامنة أسماء معيدي السكاشن لجميع المواد ليراها الطلاب بدقة في حساباتهم"
+          >
+            <RefreshCw size={16} className={syncingTAs ? 'spin' : ''} />
+            {syncingTAs ? 'جاري مزامنة المعيدين...' : '🔄 مزامنة معيدي السكاشن للطلاب'}
+          </button>
+        )}
       </div>
+
+      {syncMsg && (
+        <div style={{padding:'10px 14px',borderRadius:'8px',background:'rgba(16, 185, 129, 0.15)',border:'1px solid rgba(16, 185, 129, 0.3)',color:'var(--success)',marginBottom:'1.5rem',fontWeight:600}}>
+          {syncMsg}
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid-cards" style={{marginBottom:'2.5rem',gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))'}}>

@@ -2,7 +2,15 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { parseExcelFile, exportExcelFile } from '../../utils/excelHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
-import { BookOpen, Upload, Plus, Trash2, Edit, Users, UserCheck, X, CheckSquare, Square, Shield, Layers, Download, FileSpreadsheet, Info } from 'lucide-react';
+import { BookOpen, Upload, Plus, Trash2, Edit, Users, UserCheck, X, CheckSquare, Square, Shield, Layers, Download, FileSpreadsheet, Info, RefreshCw } from 'lucide-react';
+import { 
+  embedSectionTAsIntoExcludedStudents, 
+  syncAllSubjectsSectionTAs, 
+  getSectionInstructorName as resolveSectionTA,
+  matchInstructor,
+  extractSubjectSectionTAMapFromExcluded,
+  cleanAndAssignSubjectSections
+} from '../../utils/sectionHelper';
 
 const DEFAULT_SECTIONS = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];
 
@@ -21,6 +29,7 @@ export default function SubjectsTab({ user }) {
   const [instructorId, setInstructorId] = useState('');
   const [sectionInstructors, setSectionInstructors] = useState({}); // { 'S1': 'ta_id_1', 'S2': 'ta_id_2' }
   const [modalCustomSections, setModalCustomSections] = useState([]);
+  const [savingSubject, setSavingSubject] = useState(false);
 
   const [file, setFile] = useState(null);
   const [importing, setImporting] = useState(false);
@@ -74,23 +83,42 @@ export default function SubjectsTab({ user }) {
     if (userRes.data) setAllUsers(userRes.data);
   };
 
-  const instructorsList = allUsers.filter(u => u.role === 'admin');
+  const instructorsList = allUsers.filter(u => u.role === 'admin' || u.role === 'super_admin' || isSuperUser(u));
 
-  // Helper to extract section mapping for a subject from allUsers
+  // Helper to extract section mapping for a subject from both excluded_students metadata and users.assigned_subjects
   const getSubjectSectionMapping = (subId, usersList) => {
     const secMap = {};
-    usersList.forEach(u => {
-      if (u.role === 'admin' && Array.isArray(u.assigned_subjects)) {
+    if (!subId) return secMap;
+
+    // 1. First, check if subject.excluded_students already has section TAs configured
+    const targetSub = subjects.find(s => s.id === subId);
+    if (targetSub) {
+      const fromExcluded = extractSubjectSectionTAMapFromExcluded(targetSub);
+      Object.keys(fromExcluded).forEach(sec => {
+        const taVal = fromExcluded[sec];
+        const matched = matchInstructor(taVal, instructorsList);
+        if (matched) {
+          secMap[sec] = matched.user_id;
+        } else if (taVal) {
+          secMap[sec] = taVal;
+        }
+      });
+    }
+
+    // 2. Supplement or override with explicit section entries from users.assigned_subjects
+    (usersList || []).forEach(u => {
+      const isAdm = u.role === 'admin' || u.role === 'super_admin' || isSuperUser(u);
+      if (isAdm && Array.isArray(u.assigned_subjects)) {
         u.assigned_subjects.forEach(entry => {
-          if (entry === subId) {
-            // General assignment
-          } else if (typeof entry === 'string' && entry.startsWith(subId + ':')) {
-            const sec = entry.split(':')[1];
+          if (typeof entry === 'string' && entry.startsWith(subId + ':')) {
+            const parts = entry.split(':');
+            const sec = normalizeSection(parts[1]);
             if (sec) secMap[sec] = u.user_id;
           }
         });
       }
     });
+
     return secMap;
   };
 
@@ -155,75 +183,90 @@ export default function SubjectsTab({ user }) {
     const trimName = subjectName.trim();
     if (!trimName) return;
 
-    const selectedTA = instructorsList.find(t => t.user_id === instructorId);
-    const instName = selectedTA ? selectedTA.name : instructorId === 'admin' ? 'المدير الرئيسي' : '';
+    try {
+      setSavingSubject(true);
+      setMessage('');
 
-    const payload = {
-      name: trimName,
-      total_weeks: parseInt(totalWeeks, 10) || 12,
-      year_level: studentYearearLevel,
-      instructor_id: instructorId || null,
-      instructor_name: instName || null
-    };
+      const selectedTA = instructorsList.find(t => t.user_id === instructorId);
+      const instName = selectedTA ? selectedTA.name : instructorId === 'admin' ? 'المدير الرئيسي' : '';
 
-    let targetSubjectId = editingId;
+      const payload = {
+        name: trimName,
+        total_weeks: parseInt(totalWeeks, 10) || 12,
+        year_level: yearLevel,
+        instructor_id: instructorId || null,
+        instructor_name: instName || null
+      };
 
-    if (editMode && editingId) {
-      await supabase.from('subjects').update(payload).eq('id', editingId);
-      setMessage('✅ تم تحديث بيانات المادة وتوزيع معيدي السكاشن بنجاح');
-    } else {
-      const targetStudents = allUsers
-        .filter(u => u.role === 'student' && normalizeYear(u.year_level) === yearLevel)
-        .map(u => u.user_id);
+      let targetSubjectId = editingId;
 
-      const insertRes = await supabase.from('subjects').insert({
-        ...payload,
-        enrolled_students: targetStudents,
-        included_students: targetStudents
-      }).select().single();
+      if (editMode && editingId) {
+        const { error: updateErr } = await supabase.from('subjects').update(payload).eq('id', editingId);
+        if (updateErr) throw updateErr;
+      } else {
+        const targetStudents = allUsers
+          .filter(u => u.role === 'student' && normalizeYear(u.year_level) === yearLevel)
+          .map(u => u.user_id);
 
-      if (insertRes.data) targetSubjectId = insertRes.data.id;
-      setMessage('✅ تمت إضافة المادة وتعيين معيدي السكاشن بنجاح');
-    }
+        const insertRes = await supabase.from('subjects').insert({
+          ...payload,
+          enrolled_students: targetStudents,
+          included_students: targetStudents
+        }).select().single();
 
-    // Persist section assignments in users.assigned_subjects
-    if (targetSubjectId) {
-      for (const ta of instructorsList) {
-        if (isSuperUser(ta)) continue;
-
-        // Current assigned items for this TA without this subject
-        const currentEntries = (Array.isArray(ta.assigned_subjects) ? ta.assigned_subjects : [])
-          .filter(e => e !== targetSubjectId && !e.startsWith(targetSubjectId + ':'));
-
-        const newEntriesForThisSub = [];
-
-        // If TA is selected as general instructor
-        if (instructorId === ta.user_id) {
-          newEntriesForThisSub.push(targetSubjectId);
-        }
-
-        // If TA is assigned specific sections
-        DEFAULT_SECTIONS.forEach(sec => {
-          if (sectionInstructors[sec] === ta.user_id) {
-            newEntriesForThisSub.push(targetSubjectId + ':' + sec);
-          }
-        });
-
-        const updatedAssigned = [...new Set([...currentEntries, ...newEntriesForThisSub])];
-        await supabase.from('users').update({ assigned_subjects: updatedAssigned }).eq('id', ta.id);
+        if (insertRes.error) throw insertRes.error;
+        if (insertRes.data) targetSubjectId = insertRes.data.id;
       }
-    }
 
-    setSubjectName('');
-    setTotalWeeks(12);
-    setYearLevel('1');
-    setInstructorId('');
-    setSectionInstructors({});
-    setEditMode(false);
-    setEditingId(null);
-    setShowModal(false);
-    fetchInitial();
-    setTimeout(() => setMessage(''), 4000);
+      // Persist section assignments in users.assigned_subjects and subjects.excluded_students
+      if (targetSubjectId) {
+        await cleanAndAssignSubjectSections({
+          subjectId: targetSubjectId,
+          sectionInstructors: sectionInstructors,
+          generalInstructorId: instructorId,
+          instructorsList: instructorsList,
+          subjectsList: subjects,
+          supabaseClient: supabase
+        });
+      }
+
+      cacheManager.invalidate('admin_subjects_base');
+      cacheManager.invalidate('admin_users_base');
+      setMessage(editMode ? '✅ تم حفظ تعديلات المادة وتوزيع معيدي السكاشن بنجاح' : '✅ تمت إضافة المادة وتعيين معيدي السكاشن بنجاح');
+
+      setSubjectName('');
+      setTotalWeeks(12);
+      setYearLevel('1');
+      setInstructorId('');
+      setSectionInstructors({});
+      setEditMode(false);
+      setEditingId(null);
+      setShowModal(false);
+      await fetchInitial();
+      setTimeout(() => setMessage(''), 5000);
+    } catch (err) {
+      console.error('Save subject error:', err);
+      alert('حدث خطأ أثناء حفظ التعديلات: ' + (err.message || 'يرجى المحاولة مجدداً'));
+    } finally {
+      setSavingSubject(false);
+    }
+  };
+
+  const [syncingTAs, setSyncingTAs] = useState(false);
+  const handleManualSyncTAs = async () => {
+    try {
+      setSyncingTAs(true);
+      setMessage('');
+      const res = await syncAllSubjectsSectionTAs(subjects, instructorsList, supabase);
+      setMessage(`✅ تمت مزامنة معيدي السكاشن بنجاح لجميع المواد (${res.updatedCount} مادة تم تحديث بياناتها)!`);
+      fetchInitial();
+      setTimeout(() => setMessage(''), 5000);
+    } catch (err) {
+      console.error(err);
+      setMessage('❌ حدث خطأ أثناء مزامنة معيدي السكاشن');
+    } finally {
+      setSyncingTAs(false);
+    }
   };
 
   const handleEdit = (sub) => {
@@ -439,6 +482,8 @@ export default function SubjectsTab({ user }) {
 
         if (subName) {
           studentMap[id].subSections[subName] = s;
+          studentMap[id].subTAs = studentMap[id].subTAs || {};
+          if (ta) studentMap[id].subTAs[subName] = ta;
 
           if (!subjectsMap[subName]) {
             subjectsMap[subName] = {
@@ -460,7 +505,7 @@ export default function SubjectsTab({ user }) {
 
       for (const sName of Object.keys(subjectsMap)) {
         const item = subjectsMap[sName];
-        let mainTaObj = instructorsList.find(t => t.name?.toLowerCase().includes(item.taName?.toLowerCase()) || t.user_id === item.taName);
+        let mainTaObj = matchInstructor(item.taName, instructorsList);
         const existingSub = existingSubsList.find(s => s.name.toLowerCase().trim() === sName.toLowerCase().trim());
         const stuArray = [...item.students];
 
@@ -501,45 +546,33 @@ export default function SubjectsTab({ user }) {
         await Promise.all(subjectUpdates);
       }
 
-      // 3. Link TAs in users.assigned_subjects
+      // 3. Link TAs in users.assigned_subjects and embed into subjects.excluded_students
       for (const sName of Object.keys(subjectsMap)) {
         const item = subjectsMap[sName];
         const subId = subNameToId[sName.toLowerCase().trim()];
         if (!subId) continue;
 
-        // Section TAs
+        // Map section -> matched instructor user_id
+        const sectionInstructorsMap = {};
         for (const secKey of Object.keys(item.sectionTAs)) {
           const taStr = item.sectionTAs[secKey];
-          const taFound = instructorsList.find(t => t.name?.toLowerCase().includes(taStr?.toLowerCase()) || t.user_id === taStr);
-          if (taFound) {
-            const currentArr = Array.isArray(taFound.assigned_subjects) ? taFound.assigned_subjects : [];
-            const entry = subId + ':' + secKey;
-            if (!currentArr.includes(entry)) {
-              const updated = [...currentArr, entry];
-              await supabase.from('users').update({ assigned_subjects: updated }).eq('id', taFound.id);
-              taFound.assigned_subjects = updated;
-            }
+          const matched = matchInstructor(taStr, instructorsList);
+          if (matched) {
+            sectionInstructorsMap[normalizeSection(secKey)] = matched.user_id;
           }
         }
 
-        // Main TA
-        let mainTaObj = instructorsList.find(t => t.name?.toLowerCase().includes(item.taName?.toLowerCase()) || t.user_id === item.taName);
-        if (mainTaObj) {
-          const currentArr = Array.isArray(mainTaObj.assigned_subjects) ? mainTaObj.assigned_subjects : [];
-          const hasEntry = currentArr.some(e => typeof e === 'string' && e.startsWith(subId + ':'));
-          if (!hasEntry) {
-            const subSections = new Set();
-            item.students.forEach(stuId => {
-              const stuSec = studentMap[stuId]?.subSections[sName];
-              if (stuSec) subSections.add(stuSec);
-            });
-            if (subSections.size === 0) subSections.add('S1');
-            const newEntries = [...subSections].map(sec => subId + ':' + sec);
-            const merged = [...currentArr, ...newEntries];
-            await supabase.from('users').update({ assigned_subjects: merged }).eq('id', mainTaObj.id);
-            mainTaObj.assigned_subjects = merged;
-          }
-        }
+        const mainTaFound = matchInstructor(item.taName, instructorsList);
+
+        // Conflict-free assignment across instructors & excluded_students
+        await cleanAndAssignSubjectSections({
+          subjectId: subId,
+          sectionInstructors: sectionInstructorsMap,
+          generalInstructorId: mainTaFound ? mainTaFound.user_id : null,
+          instructorsList: instructorsList,
+          subjectsList: existingSubsList,
+          supabaseClient: supabase
+        });
       }
 
       // 4. Batch Prepare & Upsert all students with per-subject assigned_subjects
@@ -549,11 +582,14 @@ export default function SubjectsTab({ user }) {
         const existingUser = userMap[id];
         const currentAssigned = Array.isArray(existingUser?.assigned_subjects) ? existingUser.assigned_subjects : [];
         
-        // Build new subject:section entries
+        // Build new subject:section entries including section-specific TA name
         const newEntries = [];
         for (const [sName, sec] of Object.entries(sData.subSections)) {
           const subId = subNameToId[sName.toLowerCase().trim()];
-          if (subId) newEntries.push(subId + ':' + sec);
+          if (subId) {
+            const taName = sData.subTAs?.[sName] || '';
+            newEntries.push(taName ? `${subId}:${sec}:${taName}` : `${subId}:${sec}`);
+          }
         }
 
         // Merge without duplicating
@@ -622,6 +658,17 @@ export default function SubjectsTab({ user }) {
               <Trash2 size={18} /> حذف المواد المحددة ({selectedSubjectIds.length})
             </button>
           )}
+          <button 
+            type="button"
+            className="btn-secondary" 
+            onClick={handleManualSyncTAs}
+            disabled={syncingTAs}
+            title="مزامنة أسماء معيدي السكاشن لجميع المواد ليراها الطلاب في حساباتهم"
+            style={{borderColor:'var(--primary-hover)',color:'var(--primary-hover)'}}
+          >
+            <RefreshCw size={18} className={syncingTAs ? 'spin' : ''} />
+            {syncingTAs ? 'جاري المزامنة...' : 'مزامنة معيدي السكاشن للطلاب'}
+          </button>
           <button className="btn-secondary" onClick={() => setShowExcelImport(!showExcelImport)}>
             <Upload size={18} /> استيراد مواد وطلاب من Excel
           </button>
@@ -701,10 +748,9 @@ export default function SubjectsTab({ user }) {
                 </label>
                 <select className="input-field" value={instructorId} onChange={e=>setInstructorId(e.target.value)}>
                   <option value="">-- اختياري (المدير الرئيسي افتراضياً) --</option>
-                  <option value="admin">المدير الرئيسي (Admin)</option>
-                  {instructorsList.filter(u => u.user_id !== 'admin').map(inst => (
+                  {instructorsList.map(inst => (
                     <option key={inst.id} value={inst.user_id}>
-                      {inst.name} ({inst.user_id})
+                      {inst.name || inst.user_id} {isSuperUser(inst) ? '(المدير العام)' : `(${inst.user_id})`}
                     </option>
                   ))}
                 </select>
@@ -736,10 +782,9 @@ export default function SubjectsTab({ user }) {
                         style={{padding:'6px 8px',fontSize:'0.85rem',flex:1}}
                       >
                         <option value="">-- نفس المشرف الرئيسي --</option>
-                        <option value="admin">المدير الرئيسي</option>
-                        {instructorsList.filter(u => u.user_id !== 'admin').map(inst => (
+                        {instructorsList.map(inst => (
                           <option key={inst.id} value={inst.user_id}>
-                            {inst.name}
+                            {inst.name || inst.user_id} {isSuperUser(inst) ? '(المدير العام)' : ''}
                           </option>
                         ))}
                       </select>
@@ -759,11 +804,11 @@ export default function SubjectsTab({ user }) {
               </div>
 
               <div style={{display:'flex',gap:'10px',marginTop:'10px',justifyContent:'flex-end'}}>
-                <button className="btn-secondary" type="button" onClick={() => { setShowModal(false); setEditMode(false); }}>
+                <button className="btn-secondary" type="button" disabled={savingSubject} onClick={() => { setShowModal(false); setEditMode(false); }}>
                   إلغاء
                 </button>
-                <button className="btn-primary" type="submit">
-                  {editMode ? 'حفظ التعديلات' : 'إضافة المادة'}
+                <button className="btn-primary" type="submit" disabled={savingSubject}>
+                  {savingSubject ? '⏳ جاري الحفظ...' : (editMode ? 'حفظ التعديلات' : 'إضافة المادة')}
                 </button>
               </div>
             </form>

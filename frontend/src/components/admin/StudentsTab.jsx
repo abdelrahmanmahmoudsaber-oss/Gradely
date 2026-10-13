@@ -507,6 +507,7 @@ export default function StudentsTab({ user }) {
         }
         const pass = (getVal(row, 'Password', 'كلمة السر', 'الباسورد') || id)?.toString().trim();
         const subjectName = (getVal(row, 'Subject', 'المادة', 'اسم المادة', 'المقرر'))?.toString().trim();
+        const ta = (getVal(row, 'TA', 'ta', 'المعيد', 'معيد', 'اسم المعيد', 'المشرف', 'مشرف', 'Instructor', 'Teacher'))?.toString().trim();
 
         if (!studentMap[id]) {
           studentMap[id] = {
@@ -516,7 +517,8 @@ export default function StudentsTab({ user }) {
             section: s,
             group: cleanGroup,
             password: pass,
-            subSections: {}
+            subSections: {},
+            subTAs: {}
           };
         } else {
           studentMap[id].name = n;
@@ -526,6 +528,8 @@ export default function StudentsTab({ user }) {
 
         if (subjectName) {
           studentMap[id].subSections[subjectName] = s;
+          studentMap[id].subTAs = studentMap[id].subTAs || {};
+          if (ta) studentMap[id].subTAs[subjectName] = ta;
         }
       }
 
@@ -539,7 +543,10 @@ export default function StudentsTab({ user }) {
         const newEntries = [];
         for (const [sName, sec] of Object.entries(sData.subSections)) {
           const subId = subNameToId[sName.toLowerCase().trim()];
-          if (subId) newEntries.push(subId + ':' + sec);
+          if (subId) {
+            const taName = sData.subTAs?.[sName] || '';
+            newEntries.push(taName ? `${subId}:${sec}:${taName}` : `${subId}:${sec}`);
+          }
         }
 
         const subIdsInNew = new Set(newEntries.map(e => e.split(':')[0]));

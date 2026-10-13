@@ -8,6 +8,7 @@ import {
   Clock, AlertCircle, LayoutGrid, List, RotateCcw, Copy, Check, MessageSquare, X, FileSpreadsheet,
   WifiOff, Wifi, RefreshCw
 } from 'lucide-react';
+import { getSectionInstructorName as resolveSectionTA } from '../../utils/sectionHelper';
 
 export const SEMESTER_START_DATE = '2026-10-03';
 
@@ -223,7 +224,7 @@ export default function AttendanceTab({ user }) {
         );
       }
 
-      setAllAdmins(allUsersList.filter(u => u.role === 'admin'));
+      setAllAdmins(allUsersList.filter(u => u.role === 'admin' || u.role === 'super_admin' || isSuperUser(u)));
       setAllStudents(allUsersList.filter(u => u.role === 'student'));
       setAllSystemSubjects(allSubList);
       setSubjects(accessibleSubjects);
@@ -513,13 +514,7 @@ export default function AttendanceTab({ user }) {
   });
 
   const getSectionInstructorName = (subId, sec) => {
-    for (const adm of allAdmins) {
-      if (Array.isArray(adm.assigned_subjects) && adm.assigned_subjects.includes(subId + ':' + sec)) {
-        return adm.name;
-      }
-    }
-    if (currentSub?.instructor_name) return currentSub.instructor_name;
-    return 'المدير الرئيسي';
+    return resolveSectionTA(subId, sec, allAdmins, subjects);
   };
 
   // Dynamically calculate actual existing sections for the selected subject
