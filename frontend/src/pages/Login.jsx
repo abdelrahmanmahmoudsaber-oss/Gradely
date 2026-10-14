@@ -35,112 +35,120 @@ export default function Login({ onLogin }) {
     setError('');
 
     try {
-      let trimmedUserId = userId.trim();
-      // Handle RTL bidirectional text flipping where @@ jumps to the start
-      if (trimmedUserId.startsWith('@@') && !trimmedUserId.endsWith('@@')) {
-        trimmedUserId = trimmedUserId.slice(2) + '@@';
-      }
+      const rawInput = userId.trim();
       const trimmedPassword = password.trim();
-      const email = toSafeAuthEmail(trimmedUserId);
-      const authPassword = toAuthPassword(trimmedPassword);
 
-      // ---------------------------------------------------------------
-      // STEP 1: Try normal Supabase Auth sign-in with authPassword
-      // ---------------------------------------------------------------
-      let { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password: authPassword,
-      });
-
-      // Fallback check for passwords >= 6 chars created before padding
-      if ((!authData || !authData.session) && trimmedPassword.length >= 6 && trimmedPassword !== authPassword) {
-        const directTry = await supabase.auth.signInWithPassword({
-          email,
-          password: trimmedPassword,
-        });
-        if (directTry.data && directTry.data.session) {
-          authData = directTry.data;
-          authError = null;
-        }
+      // Generate possible variants to handle RTL bidirectional symbol flipping
+      const candidateUserIds = [rawInput];
+      if (rawInput.startsWith('@@')) {
+        candidateUserIds.push(rawInput.slice(2) + '@@');
+        candidateUserIds.push(rawInput.slice(2));
+      } else if (rawInput.endsWith('@@')) {
+        candidateUserIds.push('@@' + rawInput.slice(0, -2));
+        candidateUserIds.push(rawInput.slice(0, -2));
       }
 
-      if (authData && authData.session) {
-        // Fetch profile from DB
-        let { data: profile } = await supabase
-          .from('users')
-          .select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at')
-          .eq('auth_id', authData.session.user.id)
-          .single();
+      for (const candUserId of candidateUserIds) {
+        const email = toSafeAuthEmail(candUserId);
+        const authPassword = toAuthPassword(trimmedPassword);
 
-        // If not found by auth_id yet, fallback to user_id and auto-link auth_id
-        if (!profile) {
-          const { data: fallbackProfile } = await supabase
+        // ---------------------------------------------------------------
+        // STEP 1: Try normal Supabase Auth sign-in with authPassword
+        // ---------------------------------------------------------------
+        let { data: authData } = await supabase.auth.signInWithPassword({
+          email,
+          password: authPassword,
+        });
+
+        // Fallback check for passwords >= 6 chars created before padding
+        if ((!authData || !authData.session) && trimmedPassword.length >= 6 && trimmedPassword !== authPassword) {
+          const directTry = await supabase.auth.signInWithPassword({
+            email,
+            password: trimmedPassword,
+          });
+          if (directTry.data && directTry.data.session) {
+            authData = directTry.data;
+          }
+        }
+
+        if (authData && authData.session) {
+          // Fetch profile from DB
+          let { data: profile } = await supabase
             .from('users')
             .select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at')
-            .eq('user_id', trimmedUserId)
+            .eq('auth_id', authData.session.user.id)
             .single();
 
-          if (fallbackProfile) {
-            profile = fallbackProfile;
-            try {
-              await supabase.rpc('link_my_auth_id', { p_user_id: trimmedUserId });
-            } catch (linkErr) {
-              console.warn('Auto-link auth_id notice:', linkErr);
+          // If not found by auth_id yet, fallback to user_id and auto-link auth_id
+          if (!profile) {
+            const { data: fallbackProfile } = await supabase
+              .from('users')
+              .select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at')
+              .eq('user_id', candUserId)
+              .single();
+
+            if (fallbackProfile) {
+              profile = fallbackProfile;
+              try {
+                await supabase.rpc('link_my_auth_id', { p_user_id: candUserId });
+              } catch (linkErr) {
+                console.warn('Auto-link auth_id notice:', linkErr);
+              }
             }
+          }
+
+          if (profile) {
+            onLogin(profile);
+            return;
           }
         }
 
-        if (profile) {
-          onLogin(profile);
-          return;
+        // ---------------------------------------------------------------
+        // STEP 2: Attempt legacy verification via RPC
+        // ---------------------------------------------------------------
+        const { data: rpcResult } = await supabase.rpc('verify_legacy_login', {
+          p_user_id: candUserId,
+          p_password: trimmedPassword
+        });
+
+        if (rpcResult && rpcResult.error === 'rate_limited') {
+          throw new Error(rpcResult.message || 'تم تجاوز عدد محاولات الدخول الخاطئة المسموحة. يرجى الانتظار 15 دقيقة ثم المحاولة مجدداً.');
         }
-      }
 
-      // ---------------------------------------------------------------
-      // STEP 2: Attempt legacy verification via RPC
-      // ---------------------------------------------------------------
-      const { data: rpcResult } = await supabase.rpc('verify_legacy_login', {
-        p_user_id: trimmedUserId,
-        p_password: trimmedPassword
-      });
+        if (rpcResult && rpcResult.success) {
+          // Legacy credentials are valid! Create or update Supabase Auth user in background
+          try {
+            await supabase.auth.signUp({
+              email,
+              password: authPassword,
+              options: {
+                data: { user_id: rpcResult.user_id, name: rpcResult.name, role: rpcResult.role }
+              }
+            });
 
-      if (rpcResult && rpcResult.error === 'rate_limited') {
-        throw new Error(rpcResult.message || 'تم تجاوز عدد محاولات الدخول الخاطئة المسموحة. يرجى الانتظار 15 دقيقة ثم المحاولة مجدداً.');
-      }
+            const { data: signedInData } = await supabase.auth.signInWithPassword({
+              email,
+              password: authPassword
+            });
 
-      if (rpcResult && rpcResult.success) {
-        // Legacy credentials are valid! Create or update Supabase Auth user in background
-        try {
-          await supabase.auth.signUp({
-            email,
-            password: authPassword,
-            options: {
-              data: { user_id: rpcResult.user_id, name: rpcResult.name, role: rpcResult.role }
+            if (signedInData && signedInData.session) {
+              await supabase.rpc('link_my_auth_id', { p_user_id: candUserId });
             }
-          });
-
-          const { data: signedInData } = await supabase.auth.signInWithPassword({
-            email,
-            password: authPassword
-          });
-
-          if (signedInData && signedInData.session) {
-            await supabase.rpc('link_my_auth_id', { p_user_id: trimmedUserId });
+          } catch (authErr) {
+            console.warn('Auth sync notice:', authErr);
           }
-        } catch (authErr) {
-          console.warn('Auth sync notice:', authErr);
-        }
 
-        // Fetch verified profile from database
-        let { data: profile } = await supabase
-          .from('users')
-          .select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at')
-          .eq('user_id', trimmedUserId)
-          .single();
+          // Fetch verified profile from database
+          let { data: profile } = await supabase
+            .from('users')
+            .select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at')
+            .eq('user_id', rpcResult.user_id || candUserId)
+            .single();
 
-        if (profile) {
-          onLogin(profile);
-          return;
+          if (profile) {
+            onLogin(profile);
+            return;
+          }
         }
       }
 
@@ -152,6 +160,7 @@ export default function Login({ onLogin }) {
       setLoading(false);
     }
   };
+
 
   return (
     <div
