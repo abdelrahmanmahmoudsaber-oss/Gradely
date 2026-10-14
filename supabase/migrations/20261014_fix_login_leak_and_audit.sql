@@ -182,3 +182,15 @@ DROP TRIGGER IF EXISTS trg_audit_users ON public.users;
 CREATE TRIGGER trg_audit_users
   AFTER INSERT OR UPDATE OR DELETE ON public.users
   FOR EACH ROW EXECUTE FUNCTION public.process_audit_log();
+
+
+-- ------------------------------------------------------------------------------
+-- 5. ENSURE SUPER ADMIN USER HAS SUPER_ADMIN ROLE IN DATABASE
+-- ------------------------------------------------------------------------------
+UPDATE public.users 
+SET role = 'super_admin' 
+WHERE LOWER(user_id) = 'admin' 
+   OR LOWER(user_id) LIKE '%amahmoudsaber%'
+   OR name LIKE '%المعيد الرئيسي%'
+   OR name LIKE '%مدير%';
+

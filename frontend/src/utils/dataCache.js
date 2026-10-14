@@ -42,9 +42,22 @@ export const cacheManager = {
  */
 export const isSuperUser = (user) => {
   if (!user) return false;
+  const role = (user.role || '').toLowerCase();
   const uid = (user.user_id || '').toString().trim().toLowerCase();
-  return (
-    user.role === 'super_admin' ||
-    uid === 'admin'
-  );
+
+  // 1. Explicit super_admin role in DB
+  if (role === 'super_admin') return true;
+
+  // 2. Primary admin identifiers
+  if (uid === 'admin' || uid.includes('amahmoudsaber')) return true;
+
+  // 3. Admin account with no restricted assigned subjects is a full system admin
+  if (role === 'admin') {
+    const rawAssigned = Array.isArray(user.assigned_subjects) ? user.assigned_subjects : [];
+    if (rawAssigned.length === 0) {
+      return true;
+    }
+  }
+
+  return false;
 };
