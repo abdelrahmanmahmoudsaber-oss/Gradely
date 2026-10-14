@@ -185,7 +185,57 @@ CREATE TRIGGER trg_audit_users
 
 
 -- ------------------------------------------------------------------------------
--- 5. ENSURE SUPER ADMIN USER HAS SUPER_ADMIN ROLE IN DATABASE
+-- 5. ALLOW SQL EDITOR / SERVICE_ROLE EXECUTION IN ROLE PROTECTION TRIGGER
+-- ------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.protect_user_role_and_permissions()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  is_caller_admin boolean;
+BEGIN
+  -- Allow direct SQL executions from dashboard SQL editor (where auth.uid() is null)
+  -- or service_role backend operations
+  IF auth.uid() IS NULL OR (COALESCE(auth.jwt() ->> 'role', '') = 'service_role') THEN
+    RETURN NEW;
+  END IF;
+
+  -- Check if caller is an established admin
+  SELECT EXISTS (
+    SELECT 1 FROM public.users u
+    WHERE u.auth_id = auth.uid() AND u.role IN ('admin', 'super_admin')
+  ) INTO is_caller_admin;
+
+  -- Protect 'role' column from unauthorized modification
+  IF (NEW.role IS DISTINCT FROM OLD.role) THEN
+    IF NOT is_caller_admin THEN
+      RAISE EXCEPTION 'Unauthorized: Only administrators can modify roles' USING errcode = '42501';
+    END IF;
+  END IF;
+
+  -- Protect 'assigned_subjects' column for admins
+  IF (NEW.assigned_subjects IS DISTINCT FROM OLD.assigned_subjects) THEN
+    IF (OLD.role IN ('admin', 'super_admin') OR NEW.role IN ('admin', 'super_admin')) AND NOT is_caller_admin THEN
+      RAISE EXCEPTION 'Unauthorized: Only administrators can modify admin assigned subjects' USING errcode = '42501';
+    END IF;
+  END IF;
+
+  -- Prevent stealing or changing an already linked auth_id
+  IF (OLD.auth_id IS NOT NULL AND NEW.auth_id IS DISTINCT FROM OLD.auth_id) THEN
+    IF NOT is_caller_admin THEN
+      RAISE EXCEPTION 'Unauthorized: Cannot rebind an already assigned auth_id' USING errcode = '42501';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+
+-- ------------------------------------------------------------------------------
+-- 6. ENSURE SUPER ADMIN USER HAS SUPER_ADMIN ROLE IN DATABASE
 -- ------------------------------------------------------------------------------
 UPDATE public.users 
 SET role = 'super_admin' 
@@ -193,4 +243,5 @@ WHERE LOWER(user_id) = 'admin'
    OR LOWER(user_id) LIKE '%amahmoudsaber%'
    OR name LIKE '%المعيد الرئيسي%'
    OR name LIKE '%مدير%';
+
 
