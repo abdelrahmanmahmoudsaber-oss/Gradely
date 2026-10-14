@@ -78,7 +78,11 @@ export default function Login({ onLogin }) {
 
           if (fallbackProfile) {
             profile = fallbackProfile;
-            supabase.from('users').update({ auth_id: authData.session.user.id }).eq('id', fallbackProfile.id).then();
+            try {
+              await supabase.rpc('link_my_auth_id', { p_user_id: trimmedUserId });
+            } catch (linkErr) {
+              console.warn('Auto-link auth_id notice:', linkErr);
+            }
           }
         }
 
