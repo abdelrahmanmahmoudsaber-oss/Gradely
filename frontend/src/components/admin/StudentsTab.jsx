@@ -617,7 +617,7 @@ export default function StudentsTab({ user }) {
     });
 
   const allStudentsList = allUsers.filter(u => u.role === 'student');
-  const adminsList = allUsers.filter(u => u.role === 'admin');
+  const adminsList = allUsers.filter(u => u.role === 'admin' || u.role === 'super_admin');
 
   const toggleSelectAllFiltered = () => {
     if (selectedStudentIds.length === filteredStudents.length && filteredStudents.length > 0) {

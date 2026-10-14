@@ -149,14 +149,14 @@ export default function App() {
             <Route
               path="/"
               element={!user ? <Login onLogin={handleLogin} /> : (
-                user.role === 'admin'
+                (user.role === 'admin' || user.role === 'super_admin')
                   ? <Navigate to="/admin" />
                   : <Navigate to="/dashboard" />
               )}
             />
             <Route
               path="/admin"
-              element={user && user.role === 'admin'
+              element={user && (user.role === 'admin' || user.role === 'super_admin')
                 ? <AdminDashboard user={user} onLogout={handleLogout} />
                 : <Navigate to="/" />}
             />
