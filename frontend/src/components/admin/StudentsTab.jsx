@@ -505,7 +505,8 @@ export default function StudentsTab({ user }) {
         if (groupRaw) {
           cleanGroup = groupRaw.toString().toUpperCase().replace('GROUP', '').replace('مجموعة', '').replace('جروب', '').trim();
         }
-        const pass = (getVal(row, 'Password', 'كلمة السر', 'الباسورد') || id)?.toString().trim();
+        const passVal = getVal(row, 'Password', 'كلمة السر', 'الباسورد');
+        const pass = passVal != null && passVal.toString().trim() !== '' ? passVal.toString().trim() : null;
         const subjectName = (getVal(row, 'Subject', 'المادة', 'اسم المادة', 'المقرر'))?.toString().trim();
         const ta = (getVal(row, 'TA', 'ta', 'المعيد', 'معيد', 'اسم المعيد', 'المشرف', 'مشرف', 'Instructor', 'Teacher'))?.toString().trim();
 
@@ -554,7 +555,7 @@ export default function StudentsTab({ user }) {
         const groupEntry = sData.group ? ['GROUP:' + sData.group] : [];
         const mergedAssigned = [...keptOld, ...groupEntry, ...newEntries];
 
-        studentsToUpsert.push({
+        const studentPayload = {
           user_id: id,
           name: sData.name,
           role: 'student',
@@ -562,7 +563,14 @@ export default function StudentsTab({ user }) {
           section: sData.section,
           assigned_subjects: mergedAssigned,
           auth_id: existingUser ? existingUser.auth_id : null
-        });
+        };
+        if (sData.password) {
+          studentPayload.password = sData.password;
+        } else if (!existingUser) {
+          studentPayload.password = id;
+        }
+
+        studentsToUpsert.push(studentPayload);
       }
 
       // 3. Ultra-fast Chunked Upsert
@@ -741,13 +749,17 @@ export default function StudentsTab({ user }) {
       for (let i = 0; i < credsList.length; i += BATCH_SIZE) {
         const chunk = credsList.slice(i, i + BATCH_SIZE);
         await Promise.all(chunk.map(async (c) => {
-          try {
-            await supabase.rpc('admin_update_user_password', {
-              p_user_id: c.user_id,
-              p_new_password: c.password
-            });
-          } catch (e) {
-            await supabase.from('users').update({ password: c.password }).eq('user_id', c.user_id);
+          const { error: rpcErr } = await supabase.rpc('admin_update_user_password', {
+            p_user_id: c.user_id,
+            p_new_password: c.password
+          });
+          if (rpcErr) {
+            // Fallback attempt to users table directly
+            const { error: directErr } = await supabase.from('users').update({ password: c.password }).eq('user_id', c.user_id);
+            if (directErr) {
+              console.error('Password sync error for', c.user_id, rpcErr, directErr);
+              throw new Error(rpcErr.message || directErr.message || 'فشل في حفظ كلمة المرور في قاعدة البيانات');
+            }
           }
         }));
         setSyncCredsProgress({ current: Math.min(i + BATCH_SIZE, credsList.length), total: credsList.length });
