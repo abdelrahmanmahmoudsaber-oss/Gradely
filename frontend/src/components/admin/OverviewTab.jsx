@@ -1407,7 +1407,7 @@ export default function OverviewTab({ user }) {
                 <input 
                   type="email" 
                   className="input-field" 
-                  placeholder="abdo2171999m@gmail.com" 
+                  placeholder="your.email@gmail.com" 
                   value={backupEmail} 
                   onChange={e => setBackupEmail(e.target.value)}
                   onBlur={e => handleSaveBackupEmail(e.target.value)}
@@ -1725,7 +1725,7 @@ export default function OverviewTab({ user }) {
                       const code = `function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
-    var recipient = data.email || "abdo2171999m@gmail.com";
+    var recipient = data.email || "your-email@gmail.com";
     var filename = data.filename || "Gradely_Full_Backup.xlsx";
     var fileBase64 = data.fileBase64;
     
@@ -1771,7 +1771,7 @@ export default function OverviewTab({ user }) {
 {`function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
-    var recipient = data.email || "abdo2171999m@gmail.com";
+    var recipient = data.email || "your-email@gmail.com";
     var filename = data.filename || "Gradely_Full_Backup.xlsx";
     var fileBase64 = data.fileBase64;
     

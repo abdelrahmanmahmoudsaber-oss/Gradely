@@ -40,6 +40,7 @@ export const matchInstructor = (query, instructorsList = []) => {
   if (!query || !Array.isArray(instructorsList) || instructorsList.length === 0) return null;
   const qStr = query.toString().trim().toLowerCase();
   const qNorm = normalizeArabicName(qStr);
+  const isAbdelrahmanQuery = /عبد\s*الرحمن|عبدالرحمن|abdelrahman|abdurrahman|abdulrahman/i.test(qStr);
 
   // 1. Direct match on user_id
   const directId = instructorsList.find(i => (i.user_id || '').toLowerCase() === qStr);
