@@ -76,7 +76,7 @@ export default function SubjectsTab({ user }) {
   const fetchInitial = async () => {
     const [subRes, userRes] = await Promise.all([
       supabase.from('subjects').select('*').order('created_at', { ascending: false }),
-      supabase.from('users').select('*')
+      supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at')
     ]);
 
     if (subRes.data) setSubjects(subRes.data);

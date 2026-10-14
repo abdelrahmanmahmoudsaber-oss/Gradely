@@ -61,10 +61,9 @@ export const matchInstructor = (query, instructorsList = []) => {
     }
 
     // Abdelrahman aliases (handles Abdelrahman Mahmoud / amahmoud... / admin)
-    const isAbdelrahmanQuery = /عبد\s*الرحمن|عبدالرحمن|abdelrahman|abdurrahman|abdulrahman/i.test(qStr);
     const isAbdelrahmanInst = /عبد\s*الرحمن|عبدالرحمن|abdelrahman|abdurrahman|abdulrahman/i.test(inst.name || '') ||
                               iIdNorm === 'admin' ||
-                              iIdNorm.includes('amahmoud');
+                              inst.role === 'super_admin';
     if (isAbdelrahmanQuery && isAbdelrahmanInst) {
       return inst;
     }

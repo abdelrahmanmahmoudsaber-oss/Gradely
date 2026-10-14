@@ -2,8 +2,8 @@ import { supabase } from '../supabaseClient';
 import { generateMultiSheetExcelBase64 } from './excelHelper';
 import { isSuperUser } from './dataCache';
 
-const DEFAULT_EMAIL = 'abdo2171999m@gmail.com';
-const DEFAULT_WEBHOOK = 'https://script.google.com/macros/s/AKfycbykd7LVJ8p0dqrHqW9UUJ04i40qFwRTa0b98YPA1NgXzJ3U0EECa9i-EbiVa70pvHzbiQ/exec';
+const DEFAULT_EMAIL = '';
+const DEFAULT_WEBHOOK = '';
 
 // Interval to ms
 export const scheduleToMs = (schedule) => {
@@ -20,80 +20,51 @@ export const scheduleToMs = (schedule) => {
 let isBackupRunning = false;
 
 /**
- * Loads backup settings from Supabase (fallback to localStorage)
+ * Loads backup settings securely from the Super Admin's private browser storage
  */
-export async function getBackupSettings(forceFetch = false) {
-  const localSettings = {
-    email: localStorage.getItem('gradely_backup_email') || DEFAULT_EMAIL,
+export async function getBackupSettings() {
+  return {
+    email: localStorage.getItem('gradely_backup_email') || '',
     schedule: localStorage.getItem('gradely_backup_schedule') || 'daily',
-    webhookUrl: localStorage.getItem('gradely_webhook_url') || DEFAULT_WEBHOOK,
+    webhookUrl: localStorage.getItem('gradely_webhook_url') || '',
     lastBackup: localStorage.getItem('gradely_last_backup') || '',
     nextBackup: localStorage.getItem('gradely_next_backup') || ''
   };
-
-  // Zero-log optimization: if localStorage already has complete settings and we are not forcing a fetch, return immediately
-  if (!forceFetch && localSettings.lastBackup && localSettings.email) {
-    return localSettings;
-  }
-
-  try {
-    const { data } = await supabase.from('subjects').select('id, excluded_students').limit(15);
-    if (data && Array.isArray(data)) {
-      for (const s of data) {
-        if (Array.isArray(s.excluded_students)) {
-          const cfg = s.excluded_students.find(e => typeof e === 'string' && e.startsWith('CONFIG_BACKUP_SETTINGS:'));
-          if (cfg) {
-            const parsed = JSON.parse(cfg.replace('CONFIG_BACKUP_SETTINGS:', ''));
-            const merged = { ...localSettings, ...parsed };
-            // sync to localStorage
-            if (merged.email) localStorage.setItem('gradely_backup_email', merged.email);
-            if (merged.schedule) localStorage.setItem('gradely_backup_schedule', merged.schedule);
-            if (merged.webhookUrl) localStorage.setItem('gradely_webhook_url', merged.webhookUrl);
-            if (merged.lastBackup) localStorage.setItem('gradely_last_backup', merged.lastBackup);
-            if (merged.nextBackup) localStorage.setItem('gradely_next_backup', merged.nextBackup);
-            return merged;
-          }
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('getBackupSettings Supabase error:', e);
-  }
-
-  return localSettings;
 }
 
 /**
- * Saves backup settings to Supabase and localStorage
+ * Saves backup settings securely to private browser storage
  */
 export async function saveBackupSettings(settings) {
-  const email = settings.email || DEFAULT_EMAIL;
+  const email = (settings.email || '').trim();
   const schedule = settings.schedule || 'daily';
-  const webhookUrl = settings.webhookUrl || DEFAULT_WEBHOOK;
+  const webhookUrl = (settings.webhookUrl || '').trim();
   const lastBackup = settings.lastBackup || localStorage.getItem('gradely_last_backup') || '';
   const nextBackup = settings.nextBackup || localStorage.getItem('gradely_next_backup') || '';
 
-  localStorage.setItem('gradely_backup_email', email);
-  localStorage.setItem('gradely_backup_schedule', schedule);
-  localStorage.setItem('gradely_webhook_url', webhookUrl);
+  if (email) localStorage.setItem('gradely_backup_email', email);
+  if (schedule) localStorage.setItem('gradely_backup_schedule', schedule);
+  if (webhookUrl) localStorage.setItem('gradely_webhook_url', webhookUrl);
   if (lastBackup) localStorage.setItem('gradely_last_backup', lastBackup);
   if (nextBackup) localStorage.setItem('gradely_next_backup', nextBackup);
+}
 
-  const payload = { email, schedule, webhookUrl, lastBackup, nextBackup, updatedAt: Date.now() };
-  const prefix = 'CONFIG_BACKUP_SETTINGS:';
-
+/**
+ * Cleans up any legacy backup settings leaked into subjects.excluded_students
+ */
+export async function cleanupBackupSettingsFromSubjects() {
   try {
     const { data: subs } = await supabase.from('subjects').select('id, excluded_students');
     if (subs && subs.length > 0) {
       for (const s of subs) {
-        const cur = Array.isArray(s.excluded_students) ? [...s.excluded_students] : [];
-        const filtered = cur.filter(e => typeof e === 'string' && !e.startsWith(prefix));
-        filtered.push(prefix + JSON.stringify(payload));
-        await supabase.from('subjects').update({ excluded_students: filtered }).eq('id', s.id);
+        if (Array.isArray(s.excluded_students) && s.excluded_students.some(e => typeof e === 'string' && e.startsWith('CONFIG_BACKUP_SETTINGS:'))) {
+          const filtered = s.excluded_students.filter(e => typeof e !== 'string' || !e.startsWith('CONFIG_BACKUP_SETTINGS:'));
+          await supabase.from('subjects').update({ excluded_students: filtered }).eq('id', s.id);
+        }
       }
     }
   } catch (e) {
-    console.warn('saveBackupSettings error:', e);
+    console.warn('cleanupBackupSettingsFromSubjects notice:', e);
   }
 }
 
@@ -106,11 +77,15 @@ export async function sendFullSystemBackupEmail({ isAuto = false, user, customEm
   }
 
   const settings = await getBackupSettings();
-  const emailToUse = customEmail || settings.email || DEFAULT_EMAIL;
-  const targetWebhook = (customWebhook || settings.webhookUrl || DEFAULT_WEBHOOK).trim();
+  const emailToUse = (customEmail || settings.email || '').trim();
+  const targetWebhook = (customWebhook || settings.webhookUrl || '').trim();
 
   if (!emailToUse || !emailToUse.includes('@')) {
-    return { success: false, message: 'يرجى كتابة بريد إلكتروني صحيح أولاً' };
+    return { success: false, message: 'يرجى كتابة بريد إلكتروني صحيح للنسخ الاحتياطي أولاً' };
+  }
+
+  if (!targetWebhook || !targetWebhook.startsWith('https://script.google.com/')) {
+    return { success: false, needWebhookModal: true, message: 'يرجى تفعيل وإدخال رابط Google Apps Script الخاص بك أولاً' };
   }
 
   if (!targetWebhook || targetWebhook.includes('AKfycbzBUNCHESyAtmUK_V8Wm7KV')) {
