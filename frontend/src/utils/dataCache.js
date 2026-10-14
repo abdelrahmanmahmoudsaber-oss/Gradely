@@ -48,16 +48,8 @@ export const isSuperUser = (user) => {
   // 1. Explicit super_admin role in DB
   if (role === 'super_admin') return true;
 
-  // 2. Primary admin identifiers
-  if (uid === 'admin' || uid.includes('amahmoudsaber')) return true;
-
-  // 3. Admin account with no restricted assigned subjects is a full system admin
-  if (role === 'admin') {
-    const rawAssigned = Array.isArray(user.assigned_subjects) ? user.assigned_subjects : [];
-    if (rawAssigned.length === 0) {
-      return true;
-    }
-  }
+  // 2. The Main Administrator account ONLY (Never regular TAs like amahmoudsaber2026)
+  if (uid === 'admin' || uid === 'amahmoudsaber20262027217@@') return true;
 
   return false;
 };

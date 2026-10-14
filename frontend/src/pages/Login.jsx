@@ -35,7 +35,11 @@ export default function Login({ onLogin }) {
     setError('');
 
     try {
-      const trimmedUserId = userId.trim();
+      let trimmedUserId = userId.trim();
+      // Handle RTL bidirectional text flipping where @@ jumps to the start
+      if (trimmedUserId.startsWith('@@') && !trimmedUserId.endsWith('@@')) {
+        trimmedUserId = trimmedUserId.slice(2) + '@@';
+      }
       const trimmedPassword = password.trim();
       const email = toSafeAuthEmail(trimmedUserId);
       const authPassword = toAuthPassword(trimmedPassword);
