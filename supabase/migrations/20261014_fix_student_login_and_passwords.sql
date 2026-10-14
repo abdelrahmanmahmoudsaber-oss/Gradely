@@ -142,23 +142,49 @@ BEGIN
       );
 
       -- Add identity row for email provider (required by GoTrue)
-      INSERT INTO auth.identities (
-        id,
-        user_id,
-        identity_data,
-        provider,
-        last_sign_in_at,
-        created_at,
-        updated_at
-      ) VALUES (
-        v_new_id,
-        v_new_id,
-        jsonb_build_object('sub', v_new_id::text, 'email', v_email),
-        'email',
-        now(),
-        now(),
-        now()
-      ) ON CONFLICT (provider, id) DO NOTHING;
+      BEGIN
+        INSERT INTO auth.identities (
+          id,
+          provider_id,
+          user_id,
+          identity_data,
+          provider,
+          last_sign_in_at,
+          created_at,
+          updated_at
+        ) VALUES (
+          gen_random_uuid(),
+          v_new_id::text,
+          v_new_id,
+          jsonb_build_object('sub', v_new_id::text, 'email', v_email),
+          'email',
+          now(),
+          now(),
+          now()
+        );
+      EXCEPTION WHEN OTHERS THEN
+        BEGIN
+          INSERT INTO auth.identities (
+            id,
+            user_id,
+            identity_data,
+            provider,
+            last_sign_in_at,
+            created_at,
+            updated_at
+          ) VALUES (
+            v_new_id,
+            v_new_id,
+            jsonb_build_object('sub', v_new_id::text, 'email', v_email),
+            'email',
+            now(),
+            now(),
+            now()
+          );
+        EXCEPTION WHEN OTHERS THEN
+          NULL;
+        END;
+      END;
 
       -- Link to public.users
       UPDATE public.users
