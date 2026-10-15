@@ -9,109 +9,9 @@
 -- ==============================================================================
 
 -- ------------------------------------------------------------------------------
--- 1. RESET SUPER ADMIN & TA ABDELRAHMAN PASSWORDS
+-- 1. تم استثناء المعيد الرئيسي والمعيد عبدالرحمن (للحفاظ على كلمات المرور الحالية لهما كما هي دون أي مساس)
 -- ------------------------------------------------------------------------------
-DO $$
-DECLARE
-  v_super_pw text := 'Gradely@2026';  -- كلمة مرور المدير العام الرئيسي
-  v_ta_pw    text := '123456';        -- كلمة مرور المعيد عبدالرحمن
-  v_super_hashed text;
-  v_ta_hashed    text;
-  v_super_auth_id uuid;
-  v_ta_auth_id    uuid;
-BEGIN
-  v_super_hashed := extensions.crypt(v_super_pw, extensions.gen_salt('bf'));
-  v_ta_hashed    := extensions.crypt(
-    CASE WHEN length(v_ta_pw) < 6 THEN 'Gradely#' || v_ta_pw ELSE v_ta_pw END, 
-    extensions.gen_salt('bf')
-  );
 
-  -- A. SUPER ADMIN AUTH UPDATE
-  UPDATE auth.users
-  SET encrypted_password = v_super_hashed,
-      email_confirmed_at = COALESCE(email_confirmed_at, now()),
-      updated_at = now()
-  WHERE email IN (
-    'amahmoudsaber20262027217__@gradely.app',
-    '__amahmoudsaber20262027217@gradely.app',
-    'amahmoudsaber20262027217@gradely.app',
-    'admin@gradely.app'
-  );
-
-  SELECT id INTO v_super_auth_id 
-  FROM auth.users 
-  WHERE email IN (
-    'amahmoudsaber20262027217__@gradely.app',
-    '__amahmoudsaber20262027217@gradely.app',
-    'amahmoudsaber20262027217@gradely.app',
-    'admin@gradely.app'
-  ) LIMIT 1;
-
-  IF v_super_auth_id IS NULL THEN
-    v_super_auth_id := gen_random_uuid();
-    INSERT INTO auth.users (
-      instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
-      raw_app_meta_data, raw_user_meta_data, created_at, updated_at
-    ) VALUES (
-      '00000000-0000-0000-0000-000000000000',
-      v_super_auth_id,
-      'authenticated',
-      'authenticated',
-      'amahmoudsaber20262027217__@gradely.app',
-      v_super_hashed,
-      now(),
-      '{"provider":"email","providers":["email"]}'::jsonb,
-      jsonb_build_object('user_id', 'Amahmoudsaber20262027217@@', 'role', 'super_admin'),
-      now(),
-      now()
-    );
-  END IF;
-
-  UPDATE public.users
-  SET role = 'super_admin',
-      auth_id = v_super_auth_id,
-      password = v_super_pw
-  WHERE user_id ILIKE '%20262027217%' OR user_id = 'admin';
-
-  -- B. TA ABDELRAHMAN AUTH UPDATE
-  UPDATE auth.users
-  SET encrypted_password = v_ta_hashed,
-      email_confirmed_at = COALESCE(email_confirmed_at, now()),
-      updated_at = now()
-  WHERE email = 'amahmoudsaber2026@gradely.app';
-
-  SELECT id INTO v_ta_auth_id 
-  FROM auth.users 
-  WHERE email = 'amahmoudsaber2026@gradely.app' LIMIT 1;
-
-  IF v_ta_auth_id IS NULL THEN
-    v_ta_auth_id := gen_random_uuid();
-    INSERT INTO auth.users (
-      instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
-      raw_app_meta_data, raw_user_meta_data, created_at, updated_at
-    ) VALUES (
-      '00000000-0000-0000-0000-000000000000',
-      v_ta_auth_id,
-      'authenticated',
-      'authenticated',
-      'amahmoudsaber2026@gradely.app',
-      v_ta_hashed,
-      now(),
-      '{"provider":"email","providers":["email"]}'::jsonb,
-      jsonb_build_object('user_id', 'amahmoudsaber2026', 'role', 'admin'),
-      now(),
-      now()
-    );
-  END IF;
-
-  UPDATE public.users
-  SET role = 'admin',
-      auth_id = v_ta_auth_id,
-      password = v_ta_pw
-  WHERE user_id = 'amahmoudsaber2026';
-
-END;
-$$;
 
 
 -- ------------------------------------------------------------------------------
@@ -781,6 +681,8 @@ CREATE POLICY "Admins can view and manage all users"
 -- ------------------------------------------------------------------------------
 -- 6. تحديث دالة التحقق الآمن verify_legacy_login
 -- ------------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.verify_legacy_login(text, text);
+
 CREATE OR REPLACE FUNCTION public.verify_legacy_login(p_user_id text, p_password text)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -827,12 +729,10 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'invalid_credentials');
   END IF;
 
-  -- 3. مطابقة كلمة المرور
+  -- 3. مطابقة كلمة المرور مع الباسورد الفعلي للمستخدم دون أي تغيير
   IF v_user.password IS NOT NULL AND (
      v_user.password = p_password 
      OR v_user.password = TRIM(p_password)
-     OR (v_user.role = 'super_admin' AND p_password = 'Gradely@2026')
-     OR (v_user.user_id = 'amahmoudsaber2026' AND p_password IN ('123456', 'Gradely#123456'))
   ) THEN
     -- مسح المحاولات الخاطئة عند نجاح الدخول
     DELETE FROM public.login_attempts WHERE user_id = p_user_id;
