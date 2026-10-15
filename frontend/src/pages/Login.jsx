@@ -104,48 +104,23 @@ export default function Login({ onLogin }) {
         }
 
         // ---------------------------------------------------------------
-        // STEP 2: Attempt legacy verification via RPC
+        // STEP 2: Attempt verification via RPC
         // ---------------------------------------------------------------
-        const { data: rpcResult } = await supabase.rpc('verify_legacy_login', {
+        const { data: rpcResult, error: rpcErr } = await supabase.rpc('verify_legacy_login', {
           p_user_id: candUserId,
           p_password: trimmedPassword
         });
+
+        if (rpcErr) {
+          console.warn('RPC verify notice:', rpcErr);
+        }
 
         if (rpcResult && rpcResult.error === 'rate_limited') {
           throw new Error(rpcResult.message || 'تم تجاوز عدد محاولات الدخول الخاطئة المسموحة. يرجى الانتظار 15 دقيقة ثم المحاولة مجدداً.');
         }
 
         if (rpcResult && rpcResult.success) {
-          // Legacy credentials are valid! Create or update Supabase Auth user in background
-          try {
-            await supabase.auth.signUp({
-              email,
-              password: authPassword,
-              options: {
-                data: { user_id: rpcResult.user_id, name: rpcResult.name, role: rpcResult.role }
-              }
-            });
-
-            const { data: signedInData } = await supabase.auth.signInWithPassword({
-              email,
-              password: authPassword
-            });
-
-            if (signedInData && signedInData.session) {
-              await supabase.rpc('link_my_auth_id', { p_user_id: candUserId });
-            }
-          } catch (authErr) {
-            console.warn('Auth sync notice:', authErr);
-          }
-
-          // Fetch verified profile from database
-          let { data: profile } = await supabase
-            .from('users')
-            .select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at')
-            .eq('user_id', rpcResult.user_id || candUserId)
-            .single();
-
-          const finalUser = profile || {
+          const finalUser = {
             user_id: rpcResult.user_id || candUserId,
             name: rpcResult.name,
             role: rpcResult.role || 'student',

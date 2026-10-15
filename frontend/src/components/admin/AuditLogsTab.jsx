@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
-import { ShieldAlert, RefreshCw, Search, Filter, History, Clock, User, ArrowRight, Eye, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { ShieldAlert, RefreshCw, Search, Filter, History, Clock, User, Eye, CheckCircle2, AlertTriangle, BookOpen, Calendar, GraduationCap } from 'lucide-react';
 
 export default function AuditLogsTab({ user }) {
   const [logs, setLogs] = useState([]);
@@ -9,11 +9,44 @@ export default function AuditLogsTab({ user }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [tableFilter, setTableFilter] = useState('all'); // 'all', 'grades', 'attendance', 'users'
   const [actionFilter, setActionFilter] = useState('all'); // 'all', 'INSERT', 'UPDATE', 'DELETE'
+  const [actorFilter, setActorFilter] = useState('all');
   const [selectedLog, setSelectedLog] = useState(null);
+
+  // Lookup maps for human readable names
+  const [subjectsMap, setSubjectsMap] = useState({});
+  const [studentsMap, setStudentsMap] = useState({});
+  const [actorsList, setActorsList] = useState([]);
+
+  useEffect(() => {
+    fetchMetadata();
+  }, []);
 
   useEffect(() => {
     fetchAuditLogs();
-  }, [tableFilter, actionFilter]);
+  }, [tableFilter, actionFilter, actorFilter]);
+
+  const fetchMetadata = async () => {
+    try {
+      const [subRes, stuRes] = await Promise.all([
+        supabase.from('subjects').select('id, name'),
+        supabase.from('users').select('user_id, name, year_level, section')
+      ]);
+
+      const subMap = {};
+      (subRes.data || []).forEach(s => {
+        subMap[s.id] = s.name;
+      });
+      setSubjectsMap(subMap);
+
+      const stuMap = {};
+      (stuRes.data || []).forEach(u => {
+        stuMap[u.user_id] = u.name;
+      });
+      setStudentsMap(stuMap);
+    } catch (e) {
+      console.warn('Metadata fetch error in AuditLogsTab:', e);
+    }
+  };
 
   const fetchAuditLogs = async () => {
     try {
@@ -24,7 +57,7 @@ export default function AuditLogsTab({ user }) {
         .from('audit_logs')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(200);
+        .limit(300);
 
       if (tableFilter !== 'all') {
         query = query.eq('table_name', tableFilter);
@@ -34,13 +67,23 @@ export default function AuditLogsTab({ user }) {
         query = query.eq('action', actionFilter);
       }
 
+      if (actorFilter !== 'all') {
+        query = query.eq('actor_user_id', actorFilter);
+      }
+
       const { data, error: fetchErr } = await query;
 
       if (fetchErr) {
         throw fetchErr;
       }
 
-      setLogs(data || []);
+      const rawLogs = data || [];
+      setLogs(rawLogs);
+
+      // Extract unique actors for filter
+      const uniqueActors = Array.from(new Set(rawLogs.map(l => l.actor_user_id).filter(Boolean)));
+      setActorsList(uniqueActors);
+
     } catch (err) {
       console.error('Audit logs fetch error:', err);
       setError('تعذر تحميل سجل الرقابة والتغييرات: ' + (err.message || 'يرجى التأكد من تشغيل سكريبت إنشاء الجدول'));
@@ -73,32 +116,124 @@ export default function AuditLogsTab({ user }) {
     }
   };
 
-  // Compare old and new data to extract diffs
-  const getDiffDescription = (log) => {
-    if (log.action === 'INSERT') {
-      const studentId = log.new_data?.student_id || log.new_data?.user_id || log.record_id || '';
-      return `إضافة سجل جديد ${studentId ? `للطالب (${studentId})` : ''}`;
+  const statusAr = (s) => {
+    if (s === 'present') return 'حاضر ✓';
+    if (s === 'absent') return 'غائب ✗';
+    if (s === 'late') return 'تأخير';
+    if (s === 'excused') return 'عذر';
+    if (s === 'unrecorded') return 'لم يرصد';
+    return s || '—';
+  };
+
+  // Compare old and new data to extract clean, informative diffs
+  const renderLogDetails = (log) => {
+    const data = log.new_data || log.old_data || {};
+    const subName = subjectsMap[data.subject_id] || '';
+    const stuId = data.student_id || data.user_id || log.record_id || '';
+    const stuName = studentsMap[stuId] || '';
+    const week = data.week_number ? `أسبوع ${data.week_number}` : '';
+
+    if (log.table_name === 'attendance') {
+      const oldStatus = log.old_data?.status;
+      const newStatus = log.new_data?.status;
+
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+            {subName && (
+              <span style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', padding: '2px 7px', borderRadius: '4px', fontSize: '0.78rem', fontWeight: 700 }}>
+                📚 {subName}
+              </span>
+            )}
+            {week && (
+              <span style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', padding: '2px 7px', borderRadius: '4px', fontSize: '0.78rem', fontWeight: 700 }}>
+                🗓️ {week}
+              </span>
+            )}
+            <span style={{ background: 'rgba(255, 255, 255, 0.08)', color: 'var(--text-main)', padding: '2px 7px', borderRadius: '4px', fontSize: '0.78rem' }}>
+              👤 {stuName ? `${stuName} (${stuId})` : stuId}
+            </span>
+          </div>
+
+          <div style={{ fontSize: '0.82rem', marginTop: '2px', color: 'var(--text-muted)' }}>
+            {log.action === 'UPDATE' && oldStatus && newStatus ? (
+              <span>
+                تغيير حالة الحضور: <span style={{ textDecoration: 'line-through', opacity: 0.7 }}>{statusAr(oldStatus)}</span> ⬅️ <strong style={{ color: newStatus === 'present' ? 'var(--success)' : 'var(--danger)' }}>{statusAr(newStatus)}</strong>
+              </span>
+            ) : log.action === 'INSERT' ? (
+              <span>رصد غياب مبدئي: <strong style={{ color: newStatus === 'present' ? 'var(--success)' : 'var(--danger)' }}>{statusAr(newStatus)}</strong></span>
+            ) : (
+              <span>حذف سجل غياب</span>
+            )}
+          </div>
+        </div>
+      );
     }
-    if (log.action === 'DELETE') {
-      const studentId = log.old_data?.student_id || log.old_data?.user_id || log.record_id || '';
-      return `حذف السجل ${studentId ? `الخاص بـ (${studentId})` : ''}`;
-    }
-    if (log.action === 'UPDATE' && log.old_data && log.new_data) {
-      const changedKeys = [];
-      const ignored = ['updated_at', 'id', 'created_at'];
-      for (const k of Object.keys(log.new_data)) {
-        if (!ignored.includes(k) && JSON.stringify(log.old_data[k]) !== JSON.stringify(log.new_data[k])) {
-          changedKeys.push({
-            key: k,
-            oldVal: log.old_data[k],
-            newVal: log.new_data[k]
-          });
+
+    if (log.table_name === 'grades') {
+      const gradeChanges = [];
+      const keys = ['quiz_1', 'quiz_2', 'project', 'attendance_score', 'final_grade'];
+      const labels = { quiz_1: 'كويز 1', quiz_2: 'كويز 2', project: 'المشروع', attendance_score: 'درجة الحضور', final_grade: 'النهائي' };
+
+      if (log.action === 'UPDATE' && log.old_data && log.new_data) {
+        for (const k of keys) {
+          if (log.old_data[k] !== log.new_data[k]) {
+            gradeChanges.push(`${labels[k]}: (${log.old_data[k] ?? 'لم ترصد'} ⬅️ ${log.new_data[k] ?? 'لم ترصد'})`);
+          }
         }
       }
-      if (changedKeys.length === 0) return 'تعديل طفيف في بيانات السجل';
-      return changedKeys.map(c => `${c.key}: (${c.oldVal ?? 'فارغ'} ⬅️ ${c.newVal ?? 'فارغ'})`).join(' | ');
+
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+            {subName && (
+              <span style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', padding: '2px 7px', borderRadius: '4px', fontSize: '0.78rem', fontWeight: 700 }}>
+                📚 {subName}
+              </span>
+            )}
+            <span style={{ background: 'rgba(255, 255, 255, 0.08)', color: 'var(--text-main)', padding: '2px 7px', borderRadius: '4px', fontSize: '0.78rem' }}>
+              👤 {stuName ? `${stuName} (${stuId})` : stuId}
+            </span>
+          </div>
+
+          <div style={{ fontSize: '0.82rem', marginTop: '2px', color: '#38bdf8', fontWeight: 600 }}>
+            {gradeChanges.length > 0 ? gradeChanges.join(' | ') : 'تحديث درجات الطالب'}
+          </div>
+        </div>
+      );
     }
-    return 'تعديل في السجل';
+
+    if (log.table_name === 'users') {
+      const roleName = data.role === 'admin' ? 'معيد' : data.role === 'super_admin' ? 'مدير نظام' : 'طالب';
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
+            <span style={{ background: 'rgba(255, 255, 255, 0.08)', color: 'var(--text-main)', padding: '2px 7px', borderRadius: '4px', fontSize: '0.78rem' }}>
+              👤 {stuName ? `${stuName} (${stuId})` : stuId}
+            </span>
+            <span style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', padding: '2px 7px', borderRadius: '4px', fontSize: '0.78rem' }}>
+              {roleName}
+            </span>
+          </div>
+          <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+            {log.action === 'INSERT' ? 'إضافة حساب جديد' : 'تحديث بيانات الحساب الأكاديمي'}
+          </div>
+        </div>
+      );
+    }
+
+    return <div style={{ fontSize: '0.85rem', color: 'var(--text-main)' }}>عملية مسجلة على جدول {getTableLabel(log.table_name)}</div>;
+  };
+
+  // Strip sensitive security fields before showing raw JSON modal
+  const cleanDataForDisplay = (obj) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    const copy = { ...obj };
+    delete copy.password;
+    delete copy.encrypted_password;
+    delete copy.confirmation_token;
+    delete copy.recovery_token;
+    return copy;
   };
 
   // Filter logs by search term
@@ -108,8 +243,12 @@ export default function AuditLogsTab({ user }) {
     const actor = (l.actor_user_id || '').toLowerCase();
     const table = (l.table_name || '').toLowerCase();
     const recId = (l.record_id || '').toLowerCase();
-    const desc = getDiffDescription(l).toLowerCase();
-    return actor.includes(term) || table.includes(term) || recId.includes(term) || desc.includes(term);
+    const data = l.new_data || l.old_data || {};
+    const stuId = (data.student_id || data.user_id || '').toLowerCase();
+    const stuName = (studentsMap[stuId] || '').toLowerCase();
+    const subName = (subjectsMap[data.subject_id] || '').toLowerCase();
+
+    return actor.includes(term) || table.includes(term) || recId.includes(term) || stuId.includes(term) || stuName.includes(term) || subName.includes(term);
   });
 
   return (
@@ -147,98 +286,137 @@ export default function AuditLogsTab({ user }) {
         </div>
       )}
 
-      {/* Control Bar: Search & Filters */}
+      {/* Control Bar: Search & Rich Filters */}
       <div className="panel" style={{ padding: '1.2rem', marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: '1 1 260px' }}>
+        
+        {/* Search */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: '1 1 280px' }}>
           <div style={{ position: 'relative', width: '100%' }}>
             <Search size={18} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input 
               type="text"
-              placeholder="ابحث برقم المستخدم / المعيد / الطالب..."
+              placeholder="ابحث برقم الطالب / الاسم / المادة / المعيد..."
               className="input-field"
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
-              style={{ width: '100%', paddingRight: '38px', boxSizing: 'border-box' }}
+              style={{ width: '100%', paddingRight: '40px', boxSizing: 'border-box' }}
             />
           </div>
         </div>
 
-        {/* Table Filter */}
+        {/* Filter Pills */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>القسم:</span>
-          {['all', 'grades', 'attendance', 'users'].map(tabKey => (
-            <button
-              key={tabKey}
-              onClick={() => setTableFilter(tabKey)}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '8px',
-                fontSize: '0.82rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: '1px solid',
-                borderColor: tableFilter === tabKey ? 'var(--primary-hover)' : 'var(--border)',
-                background: tableFilter === tabKey ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
-                color: tableFilter === tabKey ? 'var(--primary-hover)' : 'var(--text-muted)',
-                transition: 'all 0.2s'
-              }}
-            >
-              {tabKey === 'all' ? 'الكل' : getTableLabel(tabKey)}
-            </button>
-          ))}
-        </div>
+          
+          {/* Actor / TA Filter */}
+          {actorsList.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>المعيد:</span>
+              <select 
+                value={actorFilter} 
+                onChange={e => setActorFilter(e.target.value)}
+                className="input-field"
+                style={{ padding: '6px 10px', fontSize: '0.85rem' }}
+              >
+                <option value="all">جميع المنفّذين</option>
+                {actorsList.map(act => (
+                  <option key={act} value={act}>{act}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
-        {/* Action Filter */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}>العملية:</span>
-          {['all', 'UPDATE', 'INSERT', 'DELETE'].map(actKey => (
-            <button
-              key={actKey}
-              onClick={() => setActionFilter(actKey)}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '8px',
-                fontSize: '0.82rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: '1px solid',
-                borderColor: actionFilter === actKey ? 'var(--primary-hover)' : 'var(--border)',
-                background: actionFilter === actKey ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
-                color: actionFilter === actKey ? 'var(--primary-hover)' : 'var(--text-muted)',
-                transition: 'all 0.2s'
-              }}
-            >
-              {actKey === 'all' ? 'الكل' : actKey === 'UPDATE' ? 'تعديل' : actKey === 'INSERT' ? 'إضافة' : 'حذف'}
-            </button>
-          ))}
+          {/* Table / Section Filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>القسم:</span>
+            <div style={{ display: 'flex', gap: '4px', background: 'var(--bg)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              {[
+                { id: 'all', label: 'الكل' },
+                { id: 'attendance', label: 'كشف الغياب' },
+                { id: 'grades', label: 'رصد الدرجات' },
+                { id: 'users', label: 'المستخدمين' }
+              ].map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setTableFilter(f.id)}
+                  style={{
+                    background: tableFilter === f.id ? 'var(--primary-hover)' : 'transparent',
+                    color: tableFilter === f.id ? '#ffffff' : 'var(--text-muted)',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '4px 10px',
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                    fontWeight: tableFilter === f.id ? 700 : 500,
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Action Filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>العملية:</span>
+            <div style={{ display: 'flex', gap: '4px', background: 'var(--bg)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              {[
+                { id: 'all', label: 'الكل' },
+                { id: 'UPDATE', label: 'تعديل' },
+                { id: 'INSERT', label: 'إضافة' },
+                { id: 'DELETE', label: 'حذف' }
+              ].map(a => (
+                <button
+                  key={a.id}
+                  onClick={() => setActionFilter(a.id)}
+                  style={{
+                    background: actionFilter === a.id ? 'var(--primary-hover)' : 'transparent',
+                    color: actionFilter === a.id ? '#ffffff' : 'var(--text-muted)',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '4px 10px',
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                    fontWeight: actionFilter === a.id ? 700 : 500,
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  {a.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
         </div>
       </div>
 
-      {/* Logs Table */}
-      <div className="panel" style={{ overflow: 'hidden', padding: 0 }}>
+      {/* Audit Log Table */}
+      <div className="panel" style={{ padding: 0, overflow: 'hidden' }}>
         {loading ? (
           <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-            <div style={{ fontSize: '2rem', marginBottom: '1rem', animation: 'spin 1s linear infinite' }}>⏳</div>
-            جاري فحص وتحديث سجل العمليات...
+            <RefreshCw size={28} className="spin" style={{ margin: '0 auto 10px auto' }} />
+            <div>جاري تحميل السجل ومطابقة بيانات الطلاب والمواد...</div>
           </div>
         ) : filteredLogs.length === 0 ? (
-          <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-            <History size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
-            <h3 style={{ margin: '0 0 6px 0', color: 'var(--text-main)' }}>لا توجد عمليات مسجلة حتى الآن</h3>
+          <div style={{ padding: '4rem 2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+            <History size={48} style={{ margin: '0 auto 1rem auto', opacity: 0.3 }} />
+            <h3 style={{ margin: '0 0 6px 0', color: 'var(--text-main)' }}>لا توجد عمليات مطابقة</h3>
             <p style={{ margin: 0, fontSize: '0.9rem' }}>
-              سيتم تسجيل أي عملية تعديل على الدرجات أو رصد الغياب فور حدوثها في هذا السجل تلقائياً.
+              {searchTerm || tableFilter !== 'all' || actionFilter !== 'all' || actorFilter !== 'all' 
+                ? 'جرب تغيير معايير البحث أو الفلاتر لعرض نتائج أخرى.'
+                : 'سيتم تسجيل أي عملية تعديل على الدرجات أو رصد الغياب فور حدوثها في هذا السجل تلقائياً.'}
             </p>
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '0.9rem' }}>
               <thead>
-                <tr style={{ background: 'rgba(255, 255, 255, 0.02)', borderBottom: '1px solid var(--border)' }}>
+                <tr style={{ background: 'var(--bg)', borderBottom: '1px solid var(--border)' }}>
                   <th style={{ padding: '14px 16px', fontWeight: 700, color: 'var(--text-muted)' }}>الوقت والتاريخ</th>
                   <th style={{ padding: '14px 16px', fontWeight: 700, color: 'var(--text-muted)' }}>منفّذ العملية</th>
                   <th style={{ padding: '14px 16px', fontWeight: 700, color: 'var(--text-muted)' }}>نوع العملية</th>
                   <th style={{ padding: '14px 16px', fontWeight: 700, color: 'var(--text-muted)' }}>القسم</th>
-                  <th style={{ padding: '14px 16px', fontWeight: 700, color: 'var(--text-muted)' }}>التفاصيل الدقيقة</th>
+                  <th style={{ padding: '14px 16px', fontWeight: 700, color: 'var(--text-muted)' }}>التفاصيل الأكاديمية الدقيقة</th>
                   <th style={{ padding: '14px 16px', fontWeight: 700, color: 'var(--text-muted)', textAlign: 'center' }}>معاينة</th>
                 </tr>
               </thead>
@@ -264,7 +442,7 @@ export default function AuditLogsTab({ user }) {
                       <td style={{ padding: '14px 16px', fontWeight: 700, color: 'var(--primary-hover)' }}>
                         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                           <User size={15} />
-                          <span>{log.actor_user_id || 'مستخدم غير معروف'}</span>
+                          <span>{log.actor_user_id || 'مدير النظام'}</span>
                         </div>
                       </td>
 
@@ -276,10 +454,8 @@ export default function AuditLogsTab({ user }) {
                         {getTableLabel(log.table_name)}
                       </td>
 
-                      <td style={{ padding: '14px 16px', color: 'var(--text-main)', maxWidth: '420px', lineHeight: 1.5 }}>
-                        <span style={{ fontFamily: 'monospace', fontSize: '0.82rem', background: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: '4px', wordBreak: 'break-all' }}>
-                          {getDiffDescription(log)}
-                        </span>
+                      <td style={{ padding: '14px 16px', color: 'var(--text-main)', maxWidth: '520px', lineHeight: 1.5 }}>
+                        {renderLogDetails(log)}
                       </td>
 
                       <td style={{ padding: '14px 16px', textAlign: 'center' }}>
@@ -300,7 +476,7 @@ export default function AuditLogsTab({ user }) {
         )}
       </div>
 
-      {/* Log Detail Modal */}
+      {/* Log Detail Modal (Zero Password Leakage) */}
       {selectedLog && (
         <div 
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}
@@ -322,14 +498,14 @@ export default function AuditLogsTab({ user }) {
             <div style={{ marginBottom: '1.2rem' }}>
               <h4 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', color: '#f87171' }}>البيانات قبل التعديل (Old Data):</h4>
               <pre style={{ background: '#0f172a', padding: '12px', borderRadius: '8px', fontSize: '0.8rem', overflowX: 'auto', direction: 'ltr', color: '#94a3b8' }}>
-                {JSON.stringify(selectedLog.old_data, null, 2) || 'لا توجد بيانات سابقة (سجل جديد)'}
+                {JSON.stringify(cleanDataForDisplay(selectedLog.old_data), null, 2) || 'لا توجد بيانات سابقة (سجل جديد)'}
               </pre>
             </div>
 
             <div>
               <h4 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', color: '#34d399' }}>البيانات بعد التعديل (New Data):</h4>
               <pre style={{ background: '#0f172a', padding: '12px', borderRadius: '8px', fontSize: '0.8rem', overflowX: 'auto', direction: 'ltr', color: '#94a3b8' }}>
-                {JSON.stringify(selectedLog.new_data, null, 2) || 'تم حذف السجل'}
+                {JSON.stringify(cleanDataForDisplay(selectedLog.new_data), null, 2) || 'تم حذف السجل'}
               </pre>
             </div>
           </div>

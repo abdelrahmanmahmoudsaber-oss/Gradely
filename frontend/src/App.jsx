@@ -78,8 +78,21 @@ export default function App() {
           localStorage.removeItem('gradely_user_display');
         }
       } else {
+        // Fallback for students who authenticated via secure verify_legacy_login
+        const studentSession = localStorage.getItem('gradely_student_session');
+        if (studentSession) {
+          try {
+            const parsed = JSON.parse(studentSession);
+            if (parsed && parsed.role === 'student' && parsed.user_id) {
+              setUser(parsed);
+              setAuthLoading(false);
+              return;
+            }
+          } catch (e) {}
+        }
         setUser(null);
         localStorage.removeItem('gradely_user_display');
+        localStorage.removeItem('gradely_student_session');
         cacheManager.clear();
       }
       setAuthLoading(false);
@@ -102,6 +115,7 @@ export default function App() {
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
         localStorage.removeItem('gradely_user_display');
+        localStorage.removeItem('gradely_student_session');
       }
     });
 
@@ -109,14 +123,16 @@ export default function App() {
   }, []);
 
   const handleLogin = (userData) => {
-    // Called from Login.jsx after successful Supabase Auth sign-in.
-    // userData comes from DB profile fetch — not from user input directly.
+    // Called from Login.jsx after successful verification
     setUser(userData);
     localStorage.setItem('gradely_user_display', JSON.stringify({
       name: userData.name,
       role: userData.role,
       user_id: userData.user_id,
     }));
+    if (userData.role === 'student') {
+      localStorage.setItem('gradely_student_session', JSON.stringify(userData));
+    }
   };
 
   const handleLogout = async () => {
@@ -124,6 +140,7 @@ export default function App() {
     await supabase.auth.signOut();
     setUser(null);
     localStorage.removeItem('gradely_user_display');
+    localStorage.removeItem('gradely_student_session');
     // Remove legacy key too if it still exists
     localStorage.removeItem('gradely_user');
   };
