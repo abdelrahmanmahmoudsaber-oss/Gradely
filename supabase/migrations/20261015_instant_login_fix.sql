@@ -160,3 +160,23 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION public.verify_legacy_login(text, text) TO anon, authenticated, service_role;
+ALTER FUNCTION public.verify_legacy_login(text, text) OWNER TO postgres;
+
+-- 5. LOCK DOWN student_credentials_vault (ZERO DIRECT CLIENT ACCESS)
+REVOKE ALL ON public.student_credentials_vault FROM anon, authenticated, public;
+GRANT ALL ON public.student_credentials_vault TO postgres, service_role;
+ALTER TABLE public.student_credentials_vault ENABLE ROW LEVEL SECURITY;
+
+-- 6. LOCK DOWN login_attempts (ZERO DIRECT CLIENT ACCESS)
+REVOKE ALL ON public.login_attempts FROM anon, authenticated, public;
+GRANT ALL ON public.login_attempts TO postgres, service_role;
+ALTER TABLE public.login_attempts ENABLE ROW LEVEL SECURITY;
+
+-- 7. HIDE SUPER ADMIN FROM ANONYMOUS USERS COMPLETELY
+DROP POLICY IF EXISTS "Allow anon read admin directory" ON public.users;
+CREATE POLICY "Allow anon read admin directory" 
+  ON public.users 
+  FOR SELECT 
+  TO anon 
+  USING (role = 'admin'); -- ONLY regular teaching assistants; super_admin is completely hidden!
+
