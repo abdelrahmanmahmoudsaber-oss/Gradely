@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { LogOut, BookOpen, Users, CheckSquare, FileText, LayoutDashboard, Menu, X, Printer, KeyRound, Lock, WifiOff, Wifi } from 'lucide-react';
+import { LogOut, BookOpen, Users, CheckSquare, FileText, LayoutDashboard, Menu, X, Printer, KeyRound, Lock, WifiOff, Wifi, History } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { isSuperUser } from '../utils/dataCache';
 import { checkAndRunScheduledBackup } from '../utils/backupService';
@@ -9,6 +9,7 @@ import StudentsTab from '../components/admin/StudentsTab';
 import AttendanceTab from '../components/admin/AttendanceTab';
 import GradesTab from '../components/admin/GradesTab';
 import StudentReportTab from '../components/admin/StudentReportTab';
+import AuditLogsTab from '../components/admin/AuditLogsTab';
 
 export default function AdminDashboard({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview');
@@ -102,6 +103,7 @@ export default function AdminDashboard({ user, onLogout }) {
       case 'attendance': return 'سجل الغياب';
       case 'grades': return 'الدرجات التفصيلية';
       case 'report': return 'تقرير الطالب الشامل';
+      case 'audit': return 'سجل الرقابة والتغييرات';
       default: return '';
     }
   };
@@ -113,6 +115,7 @@ export default function AdminDashboard({ user, onLogout }) {
     { id: 'attendance', label: 'سجل الغياب', icon: <CheckSquare size={20} />, superOnly: false },
     { id: 'grades', label: 'الدرجات التفصيلية', icon: <FileText size={20} />, superOnly: false },
     { id: 'report', label: 'تقرير طالب شامل', icon: <Printer size={20} />, superOnly: false },
+    { id: 'audit', label: 'سجل الرقابة والتغييرات', icon: <History size={20} />, superOnly: true },
   ];
 
   const navItems = allNavItems.filter(item => isSuperAdmin || !item.superOnly);
@@ -361,6 +364,7 @@ export default function AdminDashboard({ user, onLogout }) {
           {activeTab === 'attendance' && <AttendanceTab user={user} />}
           {activeTab === 'grades' && <GradesTab user={user} />}
           {activeTab === 'report' && <StudentReportTab user={user} />}
+          {activeTab === 'audit' && isSuperAdmin && <AuditLogsTab user={user} />}
         </main>
       </div>
 
