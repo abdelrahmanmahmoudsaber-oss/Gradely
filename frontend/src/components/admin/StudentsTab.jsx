@@ -3,7 +3,13 @@ import { supabase } from '../../supabaseClient';
 import { parseExcelFile, exportExcelFile } from '../../utils/excelHelper';
 import { printStudentCredentialsSlips } from '../../utils/pdfHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
-import { Users, Upload, UserPlus, Edit, Trash2, Search, Shield, GraduationCap, X, ChevronDown, KeyRound, Filter, CheckSquare, Square, BookOpen, Lock, Download, FileSpreadsheet, Info, Printer, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { verifyTOTPCode, getGoogleAuthQrUrl, generateRandomBase32 } from '../../utils/totp';
+import { 
+  Users, Upload, UserPlus, Edit, Trash2, Search, Shield, GraduationCap, 
+  X, ChevronDown, KeyRound, Filter, CheckSquare, Square, BookOpen, Lock, 
+  Download, FileSpreadsheet, Info, Printer, RefreshCw, CheckCircle2,
+  Clock, ShieldCheck, Copy, Check, Key
+} from 'lucide-react';
 
 export default function StudentsTab({ user }) {
   const [allUsers, setAllUsers] = useState([]);
@@ -14,7 +20,21 @@ export default function StudentsTab({ user }) {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showExcelImport, setShowExcelImport] = useState(false);
   const [showCredentialsModal, setShowCredentialsModal] = useState(false);
+  const [show2FAVerifyModal, setShow2FAVerifyModal] = useState(false);
+  const [show2FASettingsModal, setShow2FASettingsModal] = useState(false);
   const [importTargetSubject, setImportTargetSubject] = useState('');
+
+  // 2FA Security States
+  const [totpSecret, setTotpSecret] = useState('JBSWY3DPEHPK3PXP');
+  const [backupPin, setBackupPin] = useState('2026217');
+  const [twoFactorInput, setTwoFactorInput] = useState('');
+  const [twoFactorError, setTwoFactorError] = useState('');
+  const [twoFactorLoading, setTwoFactorLoading] = useState(false);
+  const [testTwoFactorInput, setTestTwoFactorInput] = useState('');
+  const [testResult, setTestResult] = useState('');
+  const [copiedSecret, setCopiedSecret] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState('');
 
   // Credentials Generator State
   const [credentialsScope, setCredentialsScope] = useState('all');
@@ -170,13 +190,28 @@ export default function StudentsTab({ user }) {
 
   useEffect(() => {
     fetchData();
+    if (isSuper) {
+      load2FASettings();
+    }
   }, []);
+
+  const load2FASettings = async () => {
+    try {
+      const { data } = await supabase.rpc('get_super_admin_2fa_config');
+      if (data) {
+        if (data.totp_secret) setTotpSecret(data.totp_secret);
+        if (data.backup_pin) setBackupPin(data.backup_pin);
+      }
+    } catch (err) {
+      console.warn('Load 2FA config notice:', err);
+    }
+  };
 
   const fetchData = async () => {
     // SECURITY HARDENING: Never select plaintext password field
     const { data: usersData } = await supabase
       .from('users')
-      .select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at')
+      .select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at, last_sign_in_at')
       .order('created_at', { ascending: false });
     if (usersData) setAllUsers(usersData);
 
@@ -192,38 +227,10 @@ export default function StudentsTab({ user }) {
     }
   }, [yearLevel, addingType, allSubjects, editMode]);
 
-  const handleManualAdd = async (e) => {
-    e.preventDefault();
-    setModalError('');
+  const executeUserSave = async () => {
     const trimId = userId.trim();
     const trimName = name.trim();
     const trimPass = password.trim();
-    const trimConfirm = confirmPassword.trim();
-    if (!trimId || !trimName) return;
-
-    if (!editMode) {
-      if (!trimPass) {
-        setModalError('❌ يرجى إدخال كلمة المرور');
-        return;
-      }
-      if (trimPass.length < 6) {
-        setModalError('❌ يجب أن تتكون كلمة المرور من 6 أحرف أو أرقام على الأقل');
-        return;
-      }
-      if (trimPass !== trimConfirm) {
-        setModalError('❌ تأكيد كلمة المرور غير متطابق');
-        return;
-      }
-    } else if (trimPass) {
-      if (trimPass.length < 6) {
-        setModalError('❌ يجب أن تتكون كلمة المرور الجديدة من 6 أحرف أو أرقام على الأقل');
-        return;
-      }
-      if (trimPass !== trimConfirm) {
-        setModalError('❌ تأكيد كلمة المرور الجديدة غير متطابق');
-        return;
-      }
-    }
 
     setSubmittingUser(true);
     try {
@@ -316,6 +323,84 @@ export default function StudentsTab({ user }) {
       setModalError('❌ حدث خطأ غير متوقع: ' + (err?.message || err));
     } finally {
       setSubmittingUser(false);
+    }
+  };
+
+  const handleManualAdd = async (e) => {
+    e.preventDefault();
+    setModalError('');
+    const trimId = userId.trim();
+    const trimName = name.trim();
+    const trimPass = password.trim();
+    const trimConfirm = confirmPassword.trim();
+    if (!trimId || !trimName) return;
+
+    if (!editMode) {
+      if (!trimPass) {
+        setModalError('❌ يرجى إدخال كلمة المرور');
+        return;
+      }
+      if (trimPass.length < 6) {
+        setModalError('❌ يجب أن تتكون كلمة المرور من 6 أحرف أو أرقام على الأقل');
+        return;
+      }
+      if (trimPass !== trimConfirm) {
+        setModalError('❌ تأكيد كلمة المرور غير متطابق');
+        return;
+      }
+    } else if (trimPass) {
+      if (trimPass.length < 6) {
+        setModalError('❌ يجب أن تتكون كلمة المرور الجديدة من 6 أحرف أو أرقام على الأقل');
+        return;
+      }
+      if (trimPass !== trimConfirm) {
+        setModalError('❌ تأكيد كلمة المرور الجديدة غير متطابق');
+        return;
+      }
+    }
+
+    // SECURITY CHECK: If creating an admin or promoting a user to admin, require Google Authenticator 2FA
+    if (addingType === 'admin') {
+      setTwoFactorInput('');
+      setTwoFactorError('');
+      setShow2FAVerifyModal(true);
+      return;
+    }
+
+    await executeUserSave();
+  };
+
+  const handleVerify2FAAndSave = async (e) => {
+    if (e) e.preventDefault();
+    setTwoFactorError('');
+    setTwoFactorLoading(true);
+
+    try {
+      const isValid = await verifyTOTPCode(twoFactorInput, totpSecret, backupPin);
+      
+      let rpcValid = false;
+      if (!isValid) {
+        try {
+          const { data } = await supabase.rpc('verify_super_admin_2fa', { p_code: twoFactorInput.trim() });
+          rpcValid = !!data;
+        } catch (rpcErr) {
+          console.warn('RPC 2FA check notice:', rpcErr);
+        }
+      }
+
+      if (!isValid && !rpcValid) {
+        setTwoFactorError('❌ كود التحقق غير صحيح أو منتهي الصلاحية! يرجى إدخال الكود المكون من 6 أرقام من تطبيق Google Authenticator على هاتفك.');
+        setTwoFactorLoading(false);
+        return;
+      }
+
+      setShow2FAVerifyModal(false);
+      setTwoFactorLoading(false);
+      await executeUserSave();
+    } catch (err) {
+      console.error('2FA error:', err);
+      setTwoFactorError('حدث خطأ أثناء التحقق من كود الأمان');
+      setTwoFactorLoading(false);
     }
   };
 
@@ -846,6 +931,22 @@ export default function StudentsTab({ user }) {
             </button>
           )}
 
+          {isSuper && (
+            <button 
+              className="btn-secondary" 
+              onClick={() => {
+                setShow2FASettingsModal(true);
+                setSettingsMessage('');
+                setTestResult('');
+                setTestTwoFactorInput('');
+              }}
+              style={{color:'#38bdf8', borderColor:'rgba(56, 189, 248, 0.4)', background:'rgba(56, 189, 248, 0.1)', display:'flex', alignItems:'center', gap:'6px', fontWeight:700}}
+              title="إعداد تطبيق Google Authenticator ورمز الأمان لمنع أي تلاعب بالصلاحيات"
+            >
+              <ShieldCheck size={18} /> 🛡️ أمان المدير العام (Google 2FA)
+            </button>
+          )}
+
           <button 
             className="btn-secondary" 
             onClick={() => { setFile(null); setShowExcelImport(true); }}
@@ -977,6 +1078,7 @@ export default function StudentsTab({ user }) {
                   <th style={{padding:'14px 16px'}}>اسم الطالب</th>
                   <th style={{padding:'14px 16px'}}>الفرقة</th>
                   <th style={{padding:'14px 16px'}}>السكشن</th>
+                  <th style={{padding:'14px 16px'}}>آخر تسجيل دخول</th>
                   <th style={{padding:'14px 16px'}}>الحالة الأمنية</th>
                   <th style={{padding:'14px 16px',textAlign:'center'}}>إجراءات</th>
                 </tr>
@@ -1009,6 +1111,16 @@ export default function StudentsTab({ user }) {
                         </span>
                       </td>
                       <td style={{padding:'14px 16px'}}>
+                        {stu.last_sign_in_at ? (
+                          <span className="badge" style={{background:'rgba(16, 185, 129, 0.1)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.2)',fontSize:'0.78rem',display:'inline-flex',alignItems:'center',gap:'4px'}}>
+                            <span style={{width:'6px',height:'6px',borderRadius:'50%',background:'var(--success)',display:'inline-block'}}></span>
+                            {new Date(stu.last_sign_in_at).toLocaleDateString('ar-EG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        ) : (
+                          <span style={{color:'var(--text-muted)',fontSize:'0.8rem'}}>لم يسجل بعد</span>
+                        )}
+                      </td>
+                      <td style={{padding:'14px 16px'}}>
                         <span className="badge" style={{background:'rgba(16, 185, 129, 0.1)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.2)',display:'inline-flex',alignItems:'center',gap:'4px'}}>
                           <Shield size={13} /> محمي ومشفر
                         </span>
@@ -1028,7 +1140,7 @@ export default function StudentsTab({ user }) {
                 })}
                 {filteredStudents.length === 0 && (
                   <tr>
-                    <td colSpan="7" style={{textAlign:'center',padding:'3rem',color:'var(--text-muted)'}}>
+                    <td colSpan="8" style={{textAlign:'center',padding:'3rem',color:'var(--text-muted)'}}>
                       لا توجد بيانات طلاب مطابقة
                     </td>
                   </tr>
@@ -1048,6 +1160,7 @@ export default function StudentsTab({ user }) {
                 <th style={{padding:'14px 16px'}}>اسم المستخدم</th>
                 <th style={{padding:'14px 16px'}}>الاسم</th>
                 <th style={{padding:'14px 16px'}}>الصلاحية / الدور</th>
+                <th style={{padding:'14px 16px'}}>آخر تسجيل دخول</th>
                 <th style={{padding:'14px 16px'}}>الحالة الأمنية</th>
                 <th style={{padding:'14px 16px'}}>المواد المصرّح بها (للمعيدين)</th>
                 <th style={{padding:'14px 16px',textAlign:'center'}}>إجراءات</th>
@@ -1064,6 +1177,16 @@ export default function StudentsTab({ user }) {
                       <span className="badge" style={{background: isSuper ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)', color: isSuper ? 'var(--danger)' : 'var(--success)', border: isSuper ? '1px solid rgba(239, 68, 68, 0.2)' : '1px solid rgba(16, 185, 129, 0.2)'}}>
                         {isSuper ? 'مدير عام (Super Admin)' : 'معيد / مشرف مادة (TA)'}
                       </span>
+                    </td>
+                    <td style={{padding:'14px 16px'}}>
+                      {adm.last_sign_in_at ? (
+                        <span className="badge" style={{background:'rgba(59, 130, 246, 0.1)',color:'#60a5fa',border:'1px solid rgba(59, 130, 246, 0.2)',fontSize:'0.78rem',display:'inline-flex',alignItems:'center',gap:'4px'}}>
+                          <Clock size={12} />
+                          {new Date(adm.last_sign_in_at).toLocaleDateString('ar-EG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      ) : (
+                        <span style={{color:'var(--text-muted)',fontSize:'0.8rem'}}>—</span>
+                      )}
                     </td>
                     <td style={{padding:'14px 16px'}}>
                       <span className="badge" style={{background:'rgba(16, 185, 129, 0.1)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.2)',display:'inline-flex',alignItems:'center',gap:'4px'}}>
@@ -1609,6 +1732,245 @@ export default function StudentsTab({ user }) {
                   )}
                 </div>
               )}
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2FA VERIFICATION MODAL (PROTECT ADMIN CREATION & PROMOTION) */}
+      {show2FAVerifyModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', background: 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100000, padding: '1rem', boxSizing: 'border-box'
+        }}>
+          <div className="panel fade-in" style={{maxWidth: '460px', width: '100%', border: '1px solid rgba(56, 189, 248, 0.4)', boxShadow: '0 25px 60px -15px rgba(0,0,0,0.9)', borderRadius: '16px', padding: '1.8rem'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',borderBottom:'1px solid var(--border)',paddingBottom:'0.8rem'}}>
+              <h3 style={{margin:0,fontSize:'1.2rem',display:'flex',alignItems:'center',gap:'8px',color:'#38bdf8'}}>
+                <ShieldCheck size={24} /> تأكيد أمان المدير العام (2FA)
+              </h3>
+              <button onClick={() => setShow2FAVerifyModal(false)} style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <p style={{fontSize:'0.88rem',color:'var(--text-muted)',lineHeight:1.6,margin:'0 0 1.2rem 0'}}>
+              منح صلاحيات إدارية أو ترقية مستخدم إلى معيد/مشرف يتطلب إدخال كود التحقق الأمني المكون من 6 أرقام من تطبيق <strong>Google Authenticator</strong> على هاتفك (أو رمز الأمان الرئيسي).
+            </p>
+
+            <form onSubmit={handleVerify2FAAndSave} style={{display:'flex',flexDirection:'column',gap:'1rem'}}>
+              <div>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'0.88rem',fontWeight:700,color:'var(--text-main)'}}>
+                  كود التحقق (6 أرقام):
+                </label>
+                <input 
+                  type="text" 
+                  autoFocus
+                  placeholder="مثال: 492813" 
+                  value={twoFactorInput}
+                  onChange={e => setTwoFactorInput(e.target.value)}
+                  className="input-field"
+                  style={{textAlign:'center',fontFamily:'monospace',fontSize:'1.5rem',letterSpacing:'6px',fontWeight:800}}
+                  maxLength={10}
+                />
+              </div>
+
+              {twoFactorError && (
+                <div style={{color:'var(--danger)',background:'rgba(239, 68, 68, 0.1)',padding:'8px 12px',borderRadius:'8px',fontSize:'0.82rem',border:'1px solid rgba(239, 68, 68, 0.2)'}}>
+                  {twoFactorError}
+                </div>
+              )}
+
+              <div style={{display:'flex',gap:'10px',marginTop:'0.5rem'}}>
+                <button 
+                  type="submit" 
+                  className="btn-primary" 
+                  disabled={twoFactorLoading || !twoFactorInput.trim()}
+                  style={{flex:1,padding:'10px',fontWeight:700}}
+                >
+                  {twoFactorLoading ? 'جاري التحقق...' : 'تأكيد وحفظ التغييرات'}
+                </button>
+                <button 
+                  type="button" 
+                  className="btn-secondary" 
+                  onClick={() => setShow2FAVerifyModal(false)}
+                  style={{padding:'10px'}}
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 2FA SETTINGS MODAL (CONFIGURE GOOGLE AUTHENTICATOR & BACKUP PIN) */}
+      {show2FASettingsModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', background: 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100000, padding: '1rem', boxSizing: 'border-box'
+        }}>
+          <div className="panel fade-in" style={{maxWidth: '560px', width: '100%', maxHeight:'90vh', overflowY:'auto', border: '1px solid rgba(56, 189, 248, 0.4)', boxShadow: '0 25px 60px -15px rgba(0,0,0,0.9)', borderRadius: '16px', padding: '1.8rem'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',borderBottom:'1px solid var(--border)',paddingBottom:'0.8rem'}}>
+              <h3 style={{margin:0,fontSize:'1.25rem',display:'flex',alignItems:'center',gap:'8px',color:'#38bdf8'}}>
+                <ShieldCheck size={24} /> مركز أمان المدير العام (Google Authenticator 2FA)
+              </h3>
+              <button onClick={() => setShow2FASettingsModal(false)} style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{display:'flex',flexDirection:'column',gap:'1.2rem',fontSize:'0.88rem'}}>
+              
+              <div style={{background:'rgba(56, 189, 248, 0.08)',padding:'12px',borderRadius:'10px',border:'1px solid rgba(56, 189, 248, 0.25)',lineHeight:1.6}}>
+                🔒 <strong>حماية فائقة 100%:</strong> بربط حسابك بتطبيق Google Authenticator، لن يتمكن أي شخص على الإطلاق من ترقية نفسه إلى معيد أو مدير أو التلاعب بالحسابات دون مسك هاتفك المحمول وإدخال الكود الحي المتجدد كل 30 ثانية.
+              </div>
+
+              {/* QR Code and Secret */}
+              <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'12px',padding:'1.2rem',display:'flex',flexDirection:'column',alignItems:'center',textAlign:'center',gap:'12px'}}>
+                <div style={{background:'#ffffff',padding:'10px',borderRadius:'10px',boxShadow:'0 4px 12px rgba(0,0,0,0.3)'}}>
+                  <img 
+                    src={getGoogleAuthQrUrl(user?.user_id, totpSecret)} 
+                    alt="Google Authenticator QR" 
+                    style={{width:'180px',height:'180px',display:'block'}}
+                  />
+                </div>
+                <div style={{fontSize:'0.82rem',color:'var(--text-muted)'}}>
+                  امسح الباركود بتطبيق <strong>Google Authenticator</strong> أو <strong>Microsoft Authenticator</strong>
+                </div>
+
+                <div style={{display:'flex',alignItems:'center',gap:'8px',width:'100%',maxWidth:'340px'}}>
+                  <input 
+                    type="text" 
+                    readOnly 
+                    value={totpSecret} 
+                    className="input-field" 
+                    style={{textAlign:'center',fontFamily:'monospace',fontSize:'0.95rem',fontWeight:700,letterSpacing:'2px'}}
+                  />
+                  <button 
+                    type="button" 
+                    className="btn-secondary"
+                    onClick={() => {
+                      navigator.clipboard.writeText(totpSecret);
+                      setCopiedSecret(true);
+                      setTimeout(() => setCopiedSecret(false), 2500);
+                    }}
+                    title="نسخ المفتاح السري"
+                    style={{padding:'8px 12px'}}
+                  >
+                    {copiedSecret ? <Check size={16} color="var(--success)" /> : <Copy size={16} />}
+                  </button>
+                  <button 
+                    type="button" 
+                    className="btn-secondary"
+                    onClick={() => setTotpSecret(generateRandomBase32())}
+                    title="توليد مفتاح أمان عشوائي جديد"
+                    style={{padding:'8px 12px'}}
+                  >
+                    <RefreshCw size={16} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Backup Master PIN */}
+              <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'12px',padding:'1.2rem'}}>
+                <label style={{display:'block',fontWeight:700,marginBottom:'6px'}}>
+                  🔑 رمز الأمان الاحتياطي (Master Backup PIN):
+                </label>
+                <p style={{margin:'0 0 8px 0',fontSize:'0.8rem',color:'var(--text-muted)'}}>
+                  رمز احتياطي خاص بك يمكنك استخدامه كبديل في حال لم يكن هاتفك معك في أي وقت (يمكنك تغييره هنا في أي وقت):
+                </p>
+                <input 
+                  type="text"
+                  value={backupPin}
+                  onChange={e => setBackupPin(e.target.value)}
+                  className="input-field"
+                  style={{fontFamily:'monospace',fontWeight:700,letterSpacing:'2px',fontSize:'1.1rem'}}
+                  placeholder="مثال: 2026217"
+                />
+              </div>
+
+              {/* Test 2FA Code Live */}
+              <div style={{background:'rgba(255,255,255,0.02)',border:'1px solid var(--border)',borderRadius:'12px',padding:'1.2rem'}}>
+                <label style={{display:'block',fontWeight:700,marginBottom:'6px'}}>
+                  🧪 تجربة واختبار كود التطبيق قبل الحفظ:
+                </label>
+                <div style={{display:'flex',gap:'8px'}}>
+                  <input 
+                    type="text"
+                    placeholder="أدخل الكود الظاهر على هاتفك (6 أرقام)"
+                    value={testTwoFactorInput}
+                    onChange={e => setTestTwoFactorInput(e.target.value)}
+                    className="input-field"
+                    style={{fontFamily:'monospace',fontSize:'1rem',textAlign:'center'}}
+                    maxLength={10}
+                  />
+                  <button 
+                    type="button" 
+                    className="btn-secondary"
+                    onClick={async () => {
+                      const ok = await verifyTOTPCode(testTwoFactorInput, totpSecret, backupPin);
+                      if (ok) setTestResult('✅ الكود متطابق ويعمل بنجاح 100%!');
+                      else setTestResult('❌ الكود غير مطابق، تأكد من ضبط وقت هاتفك أو مسح الباركود بشكل صحيح.');
+                    }}
+                    style={{whiteSpace:'nowrap',padding:'8px 14px',fontWeight:700}}
+                  >
+                    فحص الكود
+                  </button>
+                </div>
+                {testResult && (
+                  <div style={{marginTop:'8px',fontSize:'0.82rem',color:testResult.startsWith('✅') ? 'var(--success)' : 'var(--danger)',fontWeight:700}}>
+                    {testResult}
+                  </div>
+                )}
+              </div>
+
+              {settingsMessage && (
+                <div style={{color: settingsMessage.startsWith('✅') ? 'var(--success)' : 'var(--danger)', background: settingsMessage.startsWith('✅') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)', padding:'10px', borderRadius:'8px', fontWeight:700, textAlign:'center'}}>
+                  {settingsMessage}
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div style={{display:'flex',gap:'10px',marginTop:'0.5rem'}}>
+                <button 
+                  type="button"
+                  className="btn-primary"
+                  disabled={savingSettings}
+                  onClick={async () => {
+                    setSavingSettings(true);
+                    setSettingsMessage('');
+                    try {
+                      const { error } = await supabase.rpc('update_super_admin_2fa_config', {
+                        p_secret: totpSecret.trim(),
+                        p_pin: backupPin.trim()
+                      });
+                      if (error) throw error;
+                      setSettingsMessage('✅ تم حفظ وتأمين إعدادات Google Authenticator ورمز الأمان بنجاح!');
+                      setTimeout(() => {
+                        setShow2FASettingsModal(false);
+                        setSettingsMessage('');
+                      }, 2000);
+                    } catch (err) {
+                      console.error('Update 2FA settings error:', err);
+                      setSettingsMessage('❌ فشل في حفظ الإعدادات: ' + (err.message || ''));
+                    } finally {
+                      setSavingSettings(false);
+                    }
+                  }}
+                  style={{flex:1,padding:'11px',fontWeight:700,fontSize:'0.95rem'}}
+                >
+                  {savingSettings ? 'جاري الحفظ المشفر...' : '💾 حفظ وتفعيل الإعدادات الأمنية'}
+                </button>
+                <button 
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setShow2FASettingsModal(false)}
+                  style={{padding:'11px'}}
+                >
+                  إغلاق
+                </button>
+              </div>
 
             </div>
           </div>

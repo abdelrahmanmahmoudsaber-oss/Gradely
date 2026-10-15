@@ -14,8 +14,12 @@ export default function AuditLogsTab({ user }) {
 
   // Lookup maps for human readable names
   const [subjectsMap, setSubjectsMap] = useState({});
+  const [subjectsList, setSubjectsList] = useState([]);
   const [studentsMap, setStudentsMap] = useState({});
+  const [studentsYearMap, setStudentsYearMap] = useState({});
   const [actorsList, setActorsList] = useState([]);
+  const [yearFilter, setYearFilter] = useState('all');
+  const [subjectFilter, setSubjectFilter] = useState('all');
 
   useEffect(() => {
     fetchMetadata();
@@ -33,16 +37,22 @@ export default function AuditLogsTab({ user }) {
       ]);
 
       const subMap = {};
+      const subArr = [];
       (subRes.data || []).forEach(s => {
         subMap[s.id] = s.name;
+        subArr.push({ id: s.id, name: s.name });
       });
       setSubjectsMap(subMap);
+      setSubjectsList(subArr);
 
       const stuMap = {};
+      const stuYrMap = {};
       (stuRes.data || []).forEach(u => {
         stuMap[u.user_id] = u.name;
+        stuYrMap[u.user_id] = u.year_level;
       });
       setStudentsMap(stuMap);
+      setStudentsYearMap(stuYrMap);
     } catch (e) {
       console.warn('Metadata fetch error in AuditLogsTab:', e);
     }
@@ -204,19 +214,58 @@ export default function AuditLogsTab({ user }) {
     }
 
     if (log.table_name === 'users') {
-      const roleName = data.role === 'admin' ? 'معيد' : data.role === 'super_admin' ? 'مدير نظام' : 'طالب';
+      const oldD = log.old_data || {};
+      const newD = log.new_data || {};
+      const roleName = (newD.role || oldD.role) === 'admin' ? 'معيد' : (newD.role || oldD.role) === 'super_admin' ? 'مدير نظام' : 'طالب';
+      
+      const userDiffs = [];
+      if (log.action === 'UPDATE') {
+        if (oldD.section !== newD.section && (oldD.section || newD.section)) {
+          userDiffs.push(`السكشن: (${oldD.section || '—'} ⬅️ ${newD.section || '—'})`);
+        }
+        if (oldD.year_level !== newD.year_level && (oldD.year_level || newD.year_level)) {
+          userDiffs.push(`الفرقة: (${oldD.year_level || '—'} ⬅️ ${newD.year_level || '—'})`);
+        }
+        if (oldD.name !== newD.name && (oldD.name || newD.name)) {
+          userDiffs.push(`تعديل الاسم: (${oldD.name || '—'} ⬅️ ${newD.name || '—'})`);
+        }
+        if (oldD.role !== newD.role && (oldD.role || newD.role)) {
+          userDiffs.push(`تغيير الصلاحية: (${oldD.role || '—'} ⬅️ ${newD.role || '—'})`);
+        }
+        // Readable assigned subjects check
+        const oldSubs = Array.isArray(oldD.assigned_subjects) ? oldD.assigned_subjects : [];
+        const newSubs = Array.isArray(newD.assigned_subjects) ? newD.assigned_subjects : [];
+        if (JSON.stringify(oldSubs) !== JSON.stringify(newSubs)) {
+          const readableNew = newSubs.map(entry => {
+            if (typeof entry !== 'string') return '';
+            const [sid, sec] = entry.split(':');
+            return `${subjectsMap[sid] || sid}${sec ? ' (' + sec + ')' : ''}`;
+          }).filter(Boolean);
+          userDiffs.push(`المقررات: ${readableNew.length > 0 ? readableNew.join(', ') : 'إلغاء تخصيص المواد'}`);
+        }
+      }
+
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
             <span style={{ background: 'rgba(255, 255, 255, 0.08)', color: 'var(--text-main)', padding: '2px 7px', borderRadius: '4px', fontSize: '0.78rem' }}>
-              👤 {stuName ? `${stuName} (${stuId})` : stuId}
+              👤 المستخدم المعني: {stuName ? `${stuName} (${stuId})` : stuId}
             </span>
             <span style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', padding: '2px 7px', borderRadius: '4px', fontSize: '0.78rem' }}>
               {roleName}
             </span>
+            {log.actor_user_id && (
+              <span style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#60a5fa', padding: '2px 7px', borderRadius: '4px', fontSize: '0.75rem' }}>
+                ✍️ بواسطة: {log.actor_user_id}
+              </span>
+            )}
           </div>
-          <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-            {log.action === 'INSERT' ? 'إضافة حساب جديد' : 'تحديث بيانات الحساب الأكاديمي'}
+          <div style={{ fontSize: '0.82rem', color: userDiffs.length > 0 ? '#38bdf8' : 'var(--text-muted)', fontWeight: userDiffs.length > 0 ? 600 : 400 }}>
+            {log.action === 'INSERT' 
+              ? `➕ إنشاء حساب جديد (${roleName})` 
+              : log.action === 'DELETE' 
+              ? '🗑️ حذف الحساب نهائياً'
+              : userDiffs.length > 0 ? userDiffs.join(' | ') : 'تحديث بيانات الحساب الأكاديمي'}
           </div>
         </div>
       );
@@ -225,7 +274,7 @@ export default function AuditLogsTab({ user }) {
     return <div style={{ fontSize: '0.85rem', color: 'var(--text-main)' }}>عملية مسجلة على جدول {getTableLabel(log.table_name)}</div>;
   };
 
-  // Strip sensitive security fields before showing raw JSON modal
+  // Strip sensitive security fields and translate cryptic course UUIDs before displaying
   const cleanDataForDisplay = (obj) => {
     if (!obj || typeof obj !== 'object') return obj;
     const copy = { ...obj };
@@ -233,22 +282,55 @@ export default function AuditLogsTab({ user }) {
     delete copy.encrypted_password;
     delete copy.confirmation_token;
     delete copy.recovery_token;
+
+    // Convert cryptic assigned_subjects UUIDs to human readable course names
+    if (Array.isArray(copy.assigned_subjects)) {
+      copy.assigned_subjects = copy.assigned_subjects.map(item => {
+        if (typeof item === 'string' && item.includes(':')) {
+          const [subId, sec] = item.split(':');
+          const friendly = subjectsMap[subId] || subId;
+          return `${friendly} (${sec})`;
+        } else if (typeof item === 'string' && subjectsMap[item]) {
+          return subjectsMap[item];
+        }
+        return item;
+      });
+    }
+
+    // Convert subject_id to readable course name
+    if (copy.subject_id && subjectsMap[copy.subject_id]) {
+      copy.course_name = subjectsMap[copy.subject_id];
+    }
+
     return copy;
   };
 
-  // Filter logs by search term
+  // Filter logs by search term, year level, and subject
   const filteredLogs = logs.filter(l => {
+    const data = l.new_data || l.old_data || {};
+    const stuId = data.student_id || data.user_id || l.record_id || '';
+    
+    // Cohort / Year filter
+    if (yearFilter !== 'all') {
+      const studentYear = studentsYearMap[stuId] || data.year_level;
+      if (String(studentYear) !== String(yearFilter)) return false;
+    }
+
+    // Subject filter
+    if (subjectFilter !== 'all') {
+      const subId = data.subject_id;
+      if (subId !== subjectFilter) return false;
+    }
+
     if (!searchTerm) return true;
     const term = searchTerm.toLowerCase().trim();
     const actor = (l.actor_user_id || '').toLowerCase();
     const table = (l.table_name || '').toLowerCase();
     const recId = (l.record_id || '').toLowerCase();
-    const data = l.new_data || l.old_data || {};
-    const stuId = (data.student_id || data.user_id || '').toLowerCase();
     const stuName = (studentsMap[stuId] || '').toLowerCase();
     const subName = (subjectsMap[data.subject_id] || '').toLowerCase();
 
-    return actor.includes(term) || table.includes(term) || recId.includes(term) || stuId.includes(term) || stuName.includes(term) || subName.includes(term);
+    return actor.includes(term) || table.includes(term) || recId.includes(term) || String(stuId).toLowerCase().includes(term) || stuName.includes(term) || subName.includes(term);
   });
 
   return (
@@ -276,6 +358,14 @@ export default function AuditLogsTab({ user }) {
         </button>
       </div>
 
+      {/* Security & Permissions Reassurance Banner */}
+      <div style={{ background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.25)', color: 'var(--text-main)', padding: '12px 16px', borderRadius: '10px', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <ShieldAlert size={22} color="#60a5fa" style={{ flexShrink: 0 }} />
+        <div style={{ fontSize: '0.88rem', lineHeight: 1.6 }}>
+          <strong>🔒 تنبيه الأمان والصلاحيات:</strong> حسابات الطلاب لا تمتلك أي صلاحية لتعديل البيانات في النظام مطلقاً. أي سجل يظهر هنا تم تنفيذه حصرياً بواسطة المعيد أو مدير النظام، واسم الطالب يظهر فقط كطرف متأثّر بالتعديل (مثل رصد غياب أو تعديل درجات أو تغيير سكشن).
+        </div>
+      </div>
+
       {/* Error alert if table not ready */}
       {error && (
         <div style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', padding: '14px 18px', borderRadius: '10px', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -290,7 +380,7 @@ export default function AuditLogsTab({ user }) {
       <div className="panel" style={{ padding: '1.2rem', marginBottom: '1.5rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center', justifyContent: 'space-between' }}>
         
         {/* Search */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: '1 1 280px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: '1 1 240px' }}>
           <div style={{ position: 'relative', width: '100%' }}>
             <Search size={18} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input 
@@ -386,6 +476,41 @@ export default function AuditLogsTab({ user }) {
               ))}
             </div>
           </div>
+
+          {/* Cohort / Year Level Filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>الفرقة:</span>
+            <select
+              value={yearFilter}
+              onChange={e => setYearFilter(e.target.value)}
+              className="input-field"
+              style={{ padding: '6px 10px', fontSize: '0.85rem' }}
+            >
+              <option value="all">جميع الفرق</option>
+              <option value="1">الفرقة الأولى (1)</option>
+              <option value="2">الفرقة الثانية (2)</option>
+              <option value="3">الفرقة الثالثة (3)</option>
+              <option value="4">الفرقة الرابعة (4)</option>
+            </select>
+          </div>
+
+          {/* Subject Filter */}
+          {subjectsList.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>المادة:</span>
+              <select
+                value={subjectFilter}
+                onChange={e => setSubjectFilter(e.target.value)}
+                className="input-field"
+                style={{ padding: '6px 10px', fontSize: '0.85rem', maxWidth: '180px' }}
+              >
+                <option value="all">جميع المواد</option>
+                {subjectsList.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
         </div>
       </div>
@@ -488,26 +613,43 @@ export default function AuditLogsTab({ user }) {
               <button onClick={() => setSelectedLog(null)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
             </h3>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '1.5rem', fontSize: '0.88rem' }}>
-              <div><strong>منفّذ العملية:</strong> {selectedLog.actor_user_id || 'غير معروف'}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '1.2rem', fontSize: '0.88rem', background: 'rgba(255, 255, 255, 0.03)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <div><strong>منفّذ العملية:</strong> <span style={{ color: 'var(--primary-hover)', fontWeight: 700 }}>{selectedLog.actor_user_id || 'مدير النظام'}</span></div>
               <div><strong>نوع العملية:</strong> {getActionBadge(selectedLog.action)}</div>
-              <div><strong>الجدول:</strong> {getTableLabel(selectedLog.table_name)}</div>
-              <div><strong>الوقت:</strong> {new Date(selectedLog.created_at).toLocaleString('ar-EG')}</div>
+              <div><strong>القسم:</strong> {getTableLabel(selectedLog.table_name)}</div>
+              <div><strong>الوقت:</strong> <span style={{ direction: 'ltr', display: 'inline-block' }}>{new Date(selectedLog.created_at).toLocaleString('ar-EG')}</span></div>
             </div>
 
-            <div style={{ marginBottom: '1.2rem' }}>
-              <h4 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', color: '#f87171' }}>البيانات قبل التعديل (Old Data):</h4>
-              <pre style={{ background: '#0f172a', padding: '12px', borderRadius: '8px', fontSize: '0.8rem', overflowX: 'auto', direction: 'ltr', color: '#94a3b8' }}>
-                {JSON.stringify(cleanDataForDisplay(selectedLog.old_data), null, 2) || 'لا توجد بيانات سابقة (سجل جديد)'}
-              </pre>
+            {/* Human Readable Summary */}
+            <div style={{ background: 'rgba(79, 70, 229, 0.08)', border: '1px solid rgba(79, 70, 229, 0.25)', padding: '12px 16px', borderRadius: '8px', marginBottom: '1.2rem' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--primary-hover)', marginBottom: '4px' }}>
+                📋 ملخص التغييرات:
+              </div>
+              <div>
+                {renderLogDetails(selectedLog)}
+              </div>
             </div>
 
-            <div>
-              <h4 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', color: '#34d399' }}>البيانات بعد التعديل (New Data):</h4>
-              <pre style={{ background: '#0f172a', padding: '12px', borderRadius: '8px', fontSize: '0.8rem', overflowX: 'auto', direction: 'ltr', color: '#94a3b8' }}>
-                {JSON.stringify(cleanDataForDisplay(selectedLog.new_data), null, 2) || 'تم حذف السجل'}
-              </pre>
-            </div>
+            {/* Collapsible Technical Inspection */}
+            <details style={{ marginTop: '1rem', border: '1px solid var(--border)', borderRadius: '8px', padding: '10px' }}>
+              <summary style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                ⚙️ المعاينة الفنية المتقدمة (JSON مطهّر وخالي من كلمات المرور)
+              </summary>
+              <div style={{ marginTop: '12px' }}>
+                <div style={{ marginBottom: '1rem' }}>
+                  <h4 style={{ margin: '0 0 6px 0', fontSize: '0.85rem', color: '#f87171' }}>البيانات قبل التعديل:</h4>
+                  <pre style={{ background: '#0f172a', padding: '12px', borderRadius: '8px', fontSize: '0.78rem', overflowX: 'auto', direction: 'ltr', color: '#94a3b8' }}>
+                    {JSON.stringify(cleanDataForDisplay(selectedLog.old_data), null, 2) || 'لا توجد بيانات سابقة (سجل جديد)'}
+                  </pre>
+                </div>
+                <div>
+                  <h4 style={{ margin: '0 0 6px 0', fontSize: '0.85rem', color: '#34d399' }}>البيانات بعد التعديل:</h4>
+                  <pre style={{ background: '#0f172a', padding: '12px', borderRadius: '8px', fontSize: '0.78rem', overflowX: 'auto', direction: 'ltr', color: '#94a3b8' }}>
+                    {JSON.stringify(cleanDataForDisplay(selectedLog.new_data), null, 2) || 'تم حذف السجل'}
+                  </pre>
+                </div>
+              </div>
+            </details>
           </div>
         </div>
       )}
