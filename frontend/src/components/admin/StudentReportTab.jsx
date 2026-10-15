@@ -87,11 +87,29 @@ export default function StudentReportTab({ user }) {
     }
   };
 
-  const getSubjectWeekDate = (sub, weekNum) => {
-    if (!sub || !Array.isArray(sub.excluded_students)) return '';
-    const prefix = 'WEEK_DATE_W' + weekNum + ':';
-    const entry = sub.excluded_students.find(e => typeof e === 'string' && e.startsWith(prefix));
-    return entry ? entry.replace(prefix, '') : '';
+  const getSubjectWeekDate = (sub, weekNum, studentSec, record) => {
+    if (sub && Array.isArray(sub.excluded_students)) {
+      if (studentSec) {
+        const sec = normalizeSection(studentSec);
+        const secPrefix = 'WEEK_DATE_W' + weekNum + '_' + sec + ':';
+        const secEntry = sub.excluded_students.find(e => typeof e === 'string' && e.startsWith(secPrefix));
+        if (secEntry) return secEntry.replace(secPrefix, '');
+      }
+      const genPrefix = 'WEEK_DATE_W' + weekNum + ':';
+      const genEntry = sub.excluded_students.find(e => typeof e === 'string' && e.startsWith(genPrefix));
+      if (genEntry) return genEntry.replace(genPrefix, '');
+
+      const lecPrefix = 'LEC_DATE_W' + weekNum + ':';
+      const lecEntry = sub.excluded_students.find(e => typeof e === 'string' && e.startsWith(lecPrefix));
+      if (lecEntry) return lecEntry.replace(lecPrefix, '');
+    }
+    if (record && record.date) return record.date;
+    if (record && record.created_at) {
+      try {
+        return record.created_at.split('T')[0];
+      } catch (e) {}
+    }
+    return '';
   };
 
   const getSectionInstructorName = (subId, sec) => {
@@ -159,7 +177,7 @@ export default function StudentReportTab({ user }) {
     try {
       // Direct live queries to attendance & grades (query only valid columns)
       const [attRes, grdRes] = await Promise.all([
-        supabase.from('attendance').select('student_id, subject_id, week_number, status').eq('student_id', stu.user_id),
+        supabase.from('attendance').select('student_id, subject_id, week_number, status, created_at').eq('student_id', stu.user_id),
         supabase.from('grades').select('student_id, subject_id, quiz_1, quiz_2, project, attendance_score, final_grade').eq('student_id', stu.user_id)
       ]);
 
@@ -378,14 +396,25 @@ export default function StudentReportTab({ user }) {
                               else if (record.status === 'excused') { stLabel = 'عذر'; stColor = '#3b82f6'; stBg = 'rgba(59, 130, 246, 0.1)'; stBorder = 'rgba(59, 130, 246, 0.25)'; }
                             }
 
-                            const wDate = getSubjectWeekDate(sub, w);
+                            const stuSec = getStudentSubSection(selectedStudent, sub.id);
+                            const wDate = getSubjectWeekDate(sub, w, stuSec, record);
                             return (
                               <div key={w} style={{background: stBg, border: '1px solid ' + stBorder, borderRadius: '6px', padding: '6px 4px', textAlign: 'center'}}>
                                 <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>أسبوع {w}</div>
                                 <div style={{fontWeight: 'bold', color: stColor, fontSize: '0.8rem', marginTop: '2px'}}>{stLabel}</div>
                                 {wDate && (
-                                  <div style={{fontSize:'0.68rem',color:'#60a5fa',marginTop:'3px',background:'rgba(59, 130, 246, 0.08)',padding:'1px 4px',borderRadius:'4px',fontWeight:700}}>
-                                    {formatDisplayDate(wDate)}
+                                  <div style={{
+                                    fontSize:'0.72rem',
+                                    color:'#60a5fa',
+                                    marginTop:'4px',
+                                    background:'rgba(59, 130, 246, 0.12)',
+                                    padding:'2px 5px',
+                                    borderRadius:'4px',
+                                    fontWeight:700,
+                                    border:'1px solid rgba(59, 130, 246, 0.25)',
+                                    display:'inline-block'
+                                  }}>
+                                    🗓️ {formatDisplayDate(wDate)}
                                   </div>
                                 )}
                               </div>

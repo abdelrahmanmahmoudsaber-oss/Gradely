@@ -145,8 +145,17 @@ export default function Login({ onLogin }) {
             .eq('user_id', rpcResult.user_id || candUserId)
             .single();
 
-          if (profile) {
-            onLogin(profile);
+          const finalUser = profile || {
+            user_id: rpcResult.user_id || candUserId,
+            name: rpcResult.name,
+            role: rpcResult.role || 'student',
+            year_level: rpcResult.year_level,
+            section: rpcResult.section,
+            assigned_subjects: rpcResult.assigned_subjects || []
+          };
+
+          if (finalUser && finalUser.user_id) {
+            onLogin(finalUser);
             return;
           }
         }

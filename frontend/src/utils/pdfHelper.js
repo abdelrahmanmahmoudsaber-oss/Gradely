@@ -72,11 +72,23 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
     }
   };
 
-  const getSubjectWeekDate = (sub, weekNum) => {
-    if (!sub || !Array.isArray(sub.excluded_students)) return '';
-    const prefix = 'WEEK_DATE_W' + weekNum + ':';
-    const entry = sub.excluded_students.find(e => typeof e === 'string' && e.startsWith(prefix));
-    return entry ? entry.replace(prefix, '') : '';
+  const getSubjectWeekDate = (sub, weekNum, studentSec, record) => {
+    if (sub && Array.isArray(sub.excluded_students)) {
+      if (studentSec) {
+        const sec = normalizeSection(studentSec);
+        const secPrefix = 'WEEK_DATE_W' + weekNum + '_' + sec + ':';
+        const secEntry = sub.excluded_students.find(e => typeof e === 'string' && e.startsWith(secPrefix));
+        if (secEntry) return secEntry.replace(secPrefix, '');
+      }
+      const prefix = 'WEEK_DATE_W' + weekNum + ':';
+      const entry = sub.excluded_students.find(e => typeof e === 'string' && e.startsWith(prefix));
+      if (entry) return entry.replace(prefix, '');
+    }
+    if (record && record.date) return record.date;
+    if (record && record.created_at) {
+      try { return record.created_at.split('T')[0]; } catch (e) {}
+    }
+    return '';
   };
 
   const getSubjectLectureDate = (sub, weekNum) => {
@@ -146,7 +158,8 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
         const record = subAtt.find(a => a.week_number === w);
         let statusText = '—';
         let statusClass = 'unrecorded';
-        const wDate = getSubjectWeekDate(sub, w);
+        const stuSec = getStudentSubSection(student, sub.id);
+        const wDate = getSubjectWeekDate(sub, w, stuSec, record);
         let dateHint = wDate ? `<div class="w-date" style="color:#2563eb;font-weight:bold;font-size:0.65rem;">${formatDisplayDate(wDate)}</div>` : '';
         
         if (record) {
