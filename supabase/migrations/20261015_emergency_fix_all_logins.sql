@@ -13,7 +13,18 @@ DECLARE
 BEGIN
   v_admin_hashed := extensions.crypt(v_admin_pw, extensions.gen_salt('bf'));
 
-  -- Find existing auth user for admin
+  -- Update any existing auth users for admin
+  UPDATE auth.users
+  SET encrypted_password = v_admin_hashed,
+      email_confirmed_at = COALESCE(email_confirmed_at, now()),
+      updated_at = now()
+  WHERE email IN (
+    'amahmoudsaber20262027217__@gradely.app',
+    '__amahmoudsaber20262027217@gradely.app',
+    'amahmoudsaber20262027217@gradely.app',
+    'admin@gradely.app'
+  );
+
   SELECT id INTO v_admin_auth_id 
   FROM auth.users 
   WHERE email IN (
@@ -23,13 +34,7 @@ BEGIN
     'admin@gradely.app'
   ) LIMIT 1;
 
-  IF v_admin_auth_id IS NOT NULL THEN
-    UPDATE auth.users
-    SET encrypted_password = v_admin_hashed,
-        email_confirmed_at = COALESCE(email_confirmed_at, now()),
-        updated_at = now()
-    WHERE id = v_admin_auth_id;
-  ELSE
+  IF v_admin_auth_id IS NULL THEN
     v_admin_auth_id := gen_random_uuid();
     INSERT INTO auth.users (
       instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
