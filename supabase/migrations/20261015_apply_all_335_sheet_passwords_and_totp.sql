@@ -20,18 +20,15 @@ ALTER TABLE public.users ADD COLUMN IF NOT EXISTS last_sign_in_at timestamptz;
 -- ------------------------------------------------------------------------------
 -- 2. FIX & RESET login_attempts TABLE
 -- ------------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.login_attempts (
+DROP TABLE IF EXISTS public.login_attempts CASCADE;
+
+CREATE TABLE public.login_attempts (
   user_id text PRIMARY KEY,
   attempts int DEFAULT 1,
   last_attempt timestamptz DEFAULT now(),
   locked_until timestamptz
 );
 
-ALTER TABLE public.login_attempts ADD COLUMN IF NOT EXISTS attempts int DEFAULT 1;
-ALTER TABLE public.login_attempts ADD COLUMN IF NOT EXISTS last_attempt timestamptz DEFAULT now();
-ALTER TABLE public.login_attempts ADD COLUMN IF NOT EXISTS locked_until timestamptz;
-
-TRUNCATE TABLE public.login_attempts;
 GRANT ALL ON public.login_attempts TO postgres, service_role;
 GRANT ALL ON public.login_attempts TO authenticated, anon;
 
@@ -428,8 +425,6 @@ DECLARE
   v_user RECORD;
   v_clean_id text;
   v_clean_pass text;
-  v_attempts int;
-  v_lock_until timestamptz;
   v_pass_valid boolean := false;
 BEGIN
   v_clean_id := TRIM(COALESCE(p_user_id, ''));
@@ -439,22 +434,19 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'invalid_credentials');
   END IF;
 
-  -- 1. Rate limiting check
-  BEGIN
-    SELECT attempts, locked_until INTO v_attempts, v_lock_until
-    FROM public.login_attempts
-    WHERE user_id = v_clean_id;
-
-    IF v_lock_until IS NOT NULL AND v_lock_until > now() THEN
-      RETURN jsonb_build_object(
-        'success', false,
-        'error', 'rate_limited',
-        'message', 'تم تجاوز عدد محاولات الدخول الخاطئة المسموحة. يرجى الانتظار 15 دقيقة.'
-      );
-    END IF;
-  EXCEPTION WHEN OTHERS THEN
-    NULL;
-  END;
+  -- 1. Rate limiting check (using robust subquery check)
+  IF EXISTS (
+    SELECT 1 FROM public.login_attempts
+    WHERE user_id = v_clean_id 
+      AND locked_until IS NOT NULL 
+      AND locked_until > now()
+  ) THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'error', 'rate_limited',
+      'message', 'تم تجاوز عدد محاولات الدخول الخاطئة المسموحة. يرجى الانتظار 15 دقيقة.'
+    );
+  END IF;
 
   -- 2. Fetch user record
   SELECT id, user_id, name, role, password, encrypted_password, year_level, section, assigned_subjects, auth_id, last_sign_in_at
