@@ -30,6 +30,12 @@ export const getWeekDefaultDate = (weekNum) => {
   return d.toISOString().split('T')[0];
 };
 
+export const getWeekEndDate = (weekNum) => {
+  const start = new Date(SEMESTER_START_DATE);
+  const d = new Date(start.getTime() + ((weekNum - 1) * 7 + 6) * 24 * 60 * 60 * 1000);
+  return d.toISOString().split('T')[0];
+};
+
 export const getTodayDateStr = () => {
   const d = new Date();
   const year = d.getFullYear();
@@ -58,6 +64,7 @@ export default function AttendanceTab({ user }) {
   const [studentSearch, setStudentSearch] = useState('');
   const [viewMode, setViewMode] = useState('cards'); // 'cards' or 'table'
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'present' | 'absent' | 'late' | 'excused' | 'unrecorded'
+  const [bulkActionConfirm, setBulkActionConfirm] = useState(null);
 
   // Offline and Sync Handling States
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -962,7 +969,6 @@ export default function AttendanceTab({ user }) {
   };
 
   const handleResetCurrentAttendance = async () => {
-    if (!window.confirm('هل تريد إلغاء تحديد الحضور والغياب لكافة الطلاب المعروضين في هذا الأسبوع؟')) return;
     const updated = { ...attendanceRecords };
     displayedEnrolledStudents.forEach(stu => {
       delete updated[stu.user_id];
@@ -985,6 +991,19 @@ export default function AttendanceTab({ user }) {
     setAutoSaveStatus('✓ تمت إعادة ضبط كشف الأسبوع');
     setTimeout(() => setAutoSaveStatus(''), 2000);
     await supabase.from('attendance').upsert(rows, { onConflict: 'student_id,subject_id,week_number' });
+  };
+
+  const executeBulkAction = async () => {
+    if (!bulkActionConfirm) return;
+    const type = bulkActionConfirm.type;
+    setBulkActionConfirm(null);
+    if (type === 'present') {
+      await handleMarkAllPresent();
+    } else if (type === 'absent') {
+      await handleMarkAllAbsent();
+    } else if (type === 'reset') {
+      await handleResetCurrentAttendance();
+    }
   };
 
   // ADVANCED CUSTOM EXPORT (.TXT or .XLSX) BASED ON SELECTION
@@ -1365,22 +1384,50 @@ export default function AttendanceTab({ user }) {
         )}
 
         {currentSub && (
-          <div style={{flex:1.2,minWidth:'150px'}}>
+          <div style={{flex:1.5,minWidth:'180px'}}>
             <label style={{display:'block',marginBottom:'8px',fontSize:'0.9rem',fontWeight:'bold'}}>4. رقم الأسبوع:</label>
             <select className="input-field" value={week} onChange={e => setWeek(Number(e.target.value))}>
-              {Array.from({length:currentSub.total_weeks || 12},(_,i)=>i+1).map(w => (
-                <option key={w} value={w}>
-                  الأسبوع {w} ({formatDisplayDate(getWeekDefaultDate(w))})
-                </option>
-              ))}
+              {Array.from({length:currentSub.total_weeks || 12},(_,i)=>i+1).map(w => {
+                const isCurrent = w === getAcademicWeekFromDate();
+                const startStr = formatDisplayDate(getWeekDefaultDate(w));
+                const endStr = formatDisplayDate(getWeekEndDate(w));
+                return (
+                  <option key={w} value={w}>
+                    الأسبوع {w} ({startStr} - {endStr}){isCurrent ? ' 📍 (الأسبوع الحالي)' : ''}
+                  </option>
+                );
+              })}
             </select>
           </div>
         )}
 
-        <div style={{flex:1.2,minWidth:'160px'}}>
-          <label style={{display:'block',marginBottom:'8px',fontSize:'0.9rem',fontWeight:'bold',color:'var(--primary-hover)'}}>
-            5. تاريخ المحاضرة:
-          </label>
+        <div style={{flex:1.4,minWidth:'175px'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px'}}>
+            <label style={{fontSize:'0.9rem',fontWeight:'bold',color:'var(--primary-hover)',margin:0}}>
+              5. تاريخ المحاضرة/السكشن:
+            </label>
+            <button
+              type="button"
+              onClick={async () => {
+                const today = getTodayDateStr();
+                setSessionDate(today);
+                await saveSubjectWeekDate(selectedSubject, week, today);
+              }}
+              style={{
+                background: sessionDate === getTodayDateStr() ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.15)',
+                color: sessionDate === getTodayDateStr() ? 'var(--success)' : 'var(--primary-hover)',
+                border: '1px solid ' + (sessionDate === getTodayDateStr() ? 'var(--success)' : 'var(--primary)'),
+                borderRadius: '5px',
+                padding: '2px 8px',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                cursor: 'pointer'
+              }}
+              title="الضغط هنا لضبط تاريخ الكشف على تاريخ اليوم الحالي فوراً"
+            >
+              {sessionDate === getTodayDateStr() ? '✓ مسجل بتاريخ اليوم' : `📅 اليوم (${formatDisplayDate(getTodayDateStr())})`}
+            </button>
+          </div>
           <input 
             type="date" 
             className="input-field" 
@@ -1584,7 +1631,15 @@ export default function AttendanceTab({ user }) {
             </button>
             <button 
               className="btn-secondary" 
-              onClick={handleMarkAllPresent}
+              onClick={() => setBulkActionConfirm({
+                type: 'present',
+                title: 'تأكيد تحضير الكل',
+                message: `هل أنت متأكد من تحضير جميع الطلاب المعروضين (${displayedEnrolledStudents.length} طالب) في هذا الكشف؟`,
+                details: 'سيتم تعيين حالة جميع الطلاب المعروضين إلى (حاضر) لهذا الأسبوع وحفظها فوراً.',
+                btnText: 'نعم، تحضير الكل الآن',
+                btnColor: 'var(--success)',
+                icon: 'check'
+              })}
               style={{color:'var(--success)',borderColor:'rgba(16, 185, 129, 0.4)',background:'rgba(16, 185, 129, 0.08)',fontSize:'0.85rem',padding:'6px 12px',fontWeight:700}}
               title="تعيين جميع الطلاب المعروضين كـ حاضر دفعة واحدة"
             >
@@ -1592,7 +1647,15 @@ export default function AttendanceTab({ user }) {
             </button>
             <button 
               className="btn-secondary" 
-              onClick={handleMarkAllAbsent}
+              onClick={() => setBulkActionConfirm({
+                type: 'absent',
+                title: 'تأكيد تغييب الكل',
+                message: `هل أنت متأكد من تغييب جميع الطلاب المعروضين (${displayedEnrolledStudents.length} طالب) في هذا الكشف؟`,
+                details: 'تنبيه: سيتم تعيين حالة جميع الطلاب المعروضين إلى (غائب) لهذا الأسبوع وحفظها فوراً.',
+                btnText: 'نعم، تغييب الكل الآن',
+                btnColor: 'var(--danger)',
+                icon: 'x'
+              })}
               style={{color:'var(--danger)',borderColor:'rgba(239, 68, 68, 0.4)',background:'rgba(239, 68, 68, 0.08)',fontSize:'0.85rem',padding:'6px 12px',fontWeight:700}}
               title="تعيين وتغييب جميع الطلاب المعروضين في هذا الكشف دفعة واحدة وحفظها في قاعدة البيانات"
             >
@@ -1600,7 +1663,15 @@ export default function AttendanceTab({ user }) {
             </button>
             <button 
               className="btn-secondary" 
-              onClick={handleResetCurrentAttendance}
+              onClick={() => setBulkActionConfirm({
+                type: 'reset',
+                title: 'تأكيد إعادة تعيين كشف الأسبوع',
+                message: `هل أنت متأكد من إلغاء وتفريغ رصد الحضور لكافة الطلاب المعروضين (${displayedEnrolledStudents.length} طالب)؟`,
+                details: 'سيتم إرجاع حالة جميع الطلاب في هذا الأسبوع إلى (غير مسجل) للبدء من جديد.',
+                btnText: 'نعم، إعادة الضبط',
+                btnColor: '#f59e0b',
+                icon: 'rotate'
+              })}
               style={{color:'var(--text-muted)',fontSize:'0.85rem',padding:'6px 10px'}}
               title="إعادة تعيين وإلغاء تحديد الحضور والغياب"
             >
@@ -2601,6 +2672,105 @@ export default function AttendanceTab({ user }) {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BULK ACTION CONFIRMATION MODAL */}
+      {bulkActionConfirm && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 99999,
+          padding: '20px'
+        }}>
+          <div style={{
+            background: 'var(--card-bg, #1e293b)',
+            border: '1px solid var(--border, #334155)',
+            borderRadius: '16px',
+            maxWidth: '480px',
+            width: '100%',
+            padding: '24px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+            direction: 'rtl',
+            color: 'var(--text, #f8fafc)'
+          }}>
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'16px'}}>
+              <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+                <div style={{
+                  background: bulkActionConfirm.type === 'present' ? 'rgba(16, 185, 129, 0.2)' : bulkActionConfirm.type === 'absent' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                  color: bulkActionConfirm.btnColor,
+                  padding: '10px',
+                  borderRadius: '12px',
+                  display: 'flex'
+                }}>
+                  {bulkActionConfirm.type === 'present' && <CheckCircle2 size={24} />}
+                  {bulkActionConfirm.type === 'absent' && <XCircle size={24} />}
+                  {bulkActionConfirm.type === 'reset' && <RotateCcw size={24} />}
+                </div>
+                <h3 style={{margin:0, fontSize:'1.2rem', fontWeight:800}}>
+                  {bulkActionConfirm.title}
+                </h3>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setBulkActionConfirm(null)}
+                style={{background:'none', border:'none', color:'var(--text-muted, #94a3b8)', cursor:'pointer', padding:'4px'}}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <p style={{fontSize:'1rem', lineHeight:1.6, margin:'0 0 12px 0', fontWeight:600}}>
+              {bulkActionConfirm.message}
+            </p>
+
+            <div style={{
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid var(--border, #334155)',
+              borderRadius: '8px',
+              padding: '12px 14px',
+              fontSize: '0.85rem',
+              color: 'var(--text-muted, #94a3b8)',
+              marginBottom: '20px',
+              lineHeight: 1.5
+            }}>
+              💡 {bulkActionConfirm.details}
+            </div>
+
+            <div style={{display:'flex', gap:'10px', justifyContent:'flex-end'}}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setBulkActionConfirm(null)}
+                style={{padding:'10px 18px', fontWeight:700}}
+              >
+                إلغاء الأمر
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={executeBulkAction}
+                style={{
+                  background: bulkActionConfirm.btnColor,
+                  borderColor: bulkActionConfirm.btnColor,
+                  color: '#fff',
+                  padding: '10px 22px',
+                  fontWeight: 800,
+                  fontSize: '0.95rem'
+                }}
+              >
+                {bulkActionConfirm.btnText}
+              </button>
             </div>
           </div>
         </div>

@@ -28,7 +28,8 @@ export async function getBackupSettings() {
     schedule: localStorage.getItem('gradely_backup_schedule') || 'daily',
     webhookUrl: localStorage.getItem('gradely_webhook_url') || '',
     lastBackup: localStorage.getItem('gradely_last_backup') || '',
-    nextBackup: localStorage.getItem('gradely_next_backup') || ''
+    nextBackup: localStorage.getItem('gradely_next_backup') || '',
+    lastBackupTimestamp: parseInt(localStorage.getItem('gradely_last_backup_timestamp') || '0', 10)
   };
 }
 
@@ -41,12 +42,14 @@ export async function saveBackupSettings(settings) {
   const webhookUrl = (settings.webhookUrl || '').trim();
   const lastBackup = settings.lastBackup || localStorage.getItem('gradely_last_backup') || '';
   const nextBackup = settings.nextBackup || localStorage.getItem('gradely_next_backup') || '';
+  const timestamp = settings.lastBackupTimestamp || parseInt(localStorage.getItem('gradely_last_backup_timestamp') || '0', 10);
 
   if (email) localStorage.setItem('gradely_backup_email', email);
   if (schedule) localStorage.setItem('gradely_backup_schedule', schedule);
   if (webhookUrl) localStorage.setItem('gradely_webhook_url', webhookUrl);
   if (lastBackup) localStorage.setItem('gradely_last_backup', lastBackup);
   if (nextBackup) localStorage.setItem('gradely_next_backup', nextBackup);
+  if (timestamp) localStorage.setItem('gradely_last_backup_timestamp', timestamp.toString());
 }
 
 /**
@@ -226,8 +229,9 @@ export async function sendFullSystemBackupEmail({ isAuto = false, user, customEm
       body: payload
     });
 
+    const nowMs = Date.now();
     const nowIso = new Date().toLocaleString('ar-EG');
-    const nextMs = Date.now() + scheduleToMs(settings.schedule);
+    const nextMs = nowMs + scheduleToMs(settings.schedule);
     const nextIso = new Date(nextMs).toISOString();
 
     await saveBackupSettings({
@@ -235,7 +239,8 @@ export async function sendFullSystemBackupEmail({ isAuto = false, user, customEm
       email: emailToUse,
       webhookUrl: targetWebhook,
       lastBackup: nowIso,
-      nextBackup: nextIso
+      nextBackup: nextIso,
+      lastBackupTimestamp: nowMs
     });
 
     isBackupRunning = false;
@@ -265,38 +270,20 @@ export async function checkAndRunScheduledBackup(user, onBackupSent = null) {
     if (!settings.webhookUrl || settings.webhookUrl.includes('AKfycbzBUNCHESyAtmUK_V8Wm7KV')) return;
 
     const sched = settings.schedule || 'daily';
-    const lastBackupStr = settings.lastBackup || '';
-    const nextBackupIso = settings.nextBackup || '';
+    const lastTimestamp = settings.lastBackupTimestamp || 0;
+    const requiredInterval = scheduleToMs(sched);
 
     let isDue = false;
 
-    // Check 1: Has a backup already been sent today (for daily schedule)?
-    if (sched === 'daily') {
-      const todayDateStr = new Date().toLocaleDateString('ar-EG');
-      const lastBackupDatePart = lastBackupStr ? lastBackupStr.split(',')[0].trim() : '';
-      
-      // If no last backup exists, or last backup was NOT recorded today:
-      if (!lastBackupStr || todayDateStr !== lastBackupDatePart) {
-        if (nextBackupIso) {
-          const nextTime = new Date(nextBackupIso).getTime();
-          // If nextTime has arrived, or if more than 20 hours have passed since last backup
-          if (!isNaN(nextTime) && Date.now() >= nextTime) {
-            isDue = true;
-          } else if (isNaN(nextTime)) {
-            isDue = true;
-          }
-        } else {
-          isDue = true;
-        }
-      }
+    // Check if backup is due
+    if (!lastTimestamp) {
+      // If no timestamp recorded yet, it is due
+      isDue = true;
     } else {
-      // 3days, weekly, monthly
-      if (nextBackupIso) {
-        const nextTime = new Date(nextBackupIso).getTime();
-        if (!isNaN(nextTime) && Date.now() >= nextTime) {
-          isDue = true;
-        }
-      } else if (!lastBackupStr) {
+      const elapsedMs = Date.now() - lastTimestamp;
+      // For daily schedule, if 20 hours or more have passed since last backup, trigger it
+      const thresholdMs = sched === 'daily' ? 20 * 60 * 60 * 1000 : requiredInterval;
+      if (elapsedMs >= thresholdMs) {
         isDue = true;
       }
     }
