@@ -141,6 +141,7 @@ export default function App() {
     setUser(null);
     localStorage.removeItem('gradely_user_display');
     localStorage.removeItem('gradely_student_session');
+    localStorage.removeItem('gradely_session_token');
     // Remove legacy key too if it still exists
     localStorage.removeItem('gradely_user');
   };

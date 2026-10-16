@@ -307,20 +307,56 @@ export default function StudentDashboard({ user, onLogout }) {
 
   const fetchData = async () => {
     try {
-      const [subRes, attRes, grdRes, adminRes] = await Promise.all([
-        // SECURITY: enrolled_students intentionally excluded — exposes all student IDs.
-        // Enrollment filtering falls through to inAssigned and inYearLevel below.
+      const sessionToken = user?.session_token || localStorage.getItem('gradely_session_token') || '';
+
+      const [subRes, adminRes] = await Promise.all([
         supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, excluded_students'),
-        supabase.from('attendance').select('subject_id, week_number, status, created_at').eq('student_id', user.user_id).order('week_number', { ascending: true }),
-        supabase.from('grades').select('subject_id, quiz_1, quiz_2, project, attendance_score, final_grade').eq('student_id', user.user_id),
         supabase.from('users').select('id, user_id, name, role, assigned_subjects').eq('role', 'admin')
       ]);
 
       setAllAdmins(adminRes.data || []);
-
       const subData = subRes.data || [];
-      const attData = attRes.data || [];
-      const grdData = grdRes.data || [];
+
+      // Fetch attendance: try secure RPC first, with fallback to direct query
+      let attData = [];
+      try {
+        const { data: attRpc, error: attErr } = await supabase.rpc('get_my_attendance', { p_session_token: sessionToken });
+        if (!attErr && Array.isArray(attRpc)) {
+          attData = attRpc;
+        }
+      } catch (e) {
+        console.warn('RPC attendance fallback notice:', e);
+      }
+      if (!attData || attData.length === 0) {
+        const { data: attDirect } = await supabase
+          .from('attendance')
+          .select('subject_id, week_number, status, created_at')
+          .eq('student_id', user.user_id)
+          .order('week_number', { ascending: true });
+        if (Array.isArray(attDirect) && attDirect.length > 0) {
+          attData = attDirect;
+        }
+      }
+
+      // Fetch grades: try secure RPC first, with fallback to direct query
+      let grdData = [];
+      try {
+        const { data: grdRpc, error: grdErr } = await supabase.rpc('get_my_grades', { p_session_token: sessionToken });
+        if (!grdErr && Array.isArray(grdRpc)) {
+          grdData = grdRpc;
+        }
+      } catch (e) {
+        console.warn('RPC grades fallback notice:', e);
+      }
+      if (!grdData || grdData.length === 0) {
+        const { data: grdDirect } = await supabase
+          .from('grades')
+          .select('subject_id, quiz_1, quiz_2, project, attendance_score, final_grade')
+          .eq('student_id', user.user_id);
+        if (Array.isArray(grdDirect) && grdDirect.length > 0) {
+          grdData = grdDirect;
+        }
+      }
 
       let currentVisibility = {
         showQuiz1: true,

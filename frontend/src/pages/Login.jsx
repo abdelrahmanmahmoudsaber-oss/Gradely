@@ -120,13 +120,17 @@ export default function Login({ onLogin }) {
         }
 
         if (rpcResult && rpcResult.success) {
+          if (rpcResult.session_token) {
+            localStorage.setItem('gradely_session_token', rpcResult.session_token);
+          }
           const finalUser = {
             user_id: rpcResult.user_id || candUserId,
             name: rpcResult.name,
             role: rpcResult.role || 'student',
             year_level: rpcResult.year_level,
             section: rpcResult.section,
-            assigned_subjects: rpcResult.assigned_subjects || []
+            assigned_subjects: rpcResult.assigned_subjects || [],
+            session_token: rpcResult.session_token || null
           };
 
           if (finalUser && finalUser.user_id) {
