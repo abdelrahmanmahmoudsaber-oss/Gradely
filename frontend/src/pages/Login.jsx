@@ -89,11 +89,6 @@ export default function Login({ onLogin }) {
 
             if (fallbackProfile) {
               profile = fallbackProfile;
-              try {
-                await supabase.rpc('link_my_auth_id', { p_user_id: candUserId });
-              } catch (linkErr) {
-                console.warn('Auto-link auth_id notice:', linkErr);
-              }
             }
           }
 
