@@ -72,6 +72,48 @@ export async function cleanupBackupSettingsFromSubjects() {
 }
 
 /**
+ * Fetches all rows from a Supabase table with pagination to bypass the 1000-row limit
+ */
+export async function fetchAllSupabaseRows(table, selectCols = '*') {
+  let allRows = [];
+  let from = 0;
+  const PAGE_SIZE = 1000;
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(selectCols)
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) {
+      console.error(`Error fetching from ${table}:`, error);
+      break;
+    }
+    if (!data || data.length === 0) break;
+    allRows.push(...data);
+    if (data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return allRows;
+}
+
+export const normalizeStatus = (status) => {
+  if (!status) return 'unrecorded';
+  const s = String(status).toLowerCase().trim();
+  if (s === 'present' || s === 'حاضر' || s === 'حضور' || s === '1') return 'present';
+  if (s === 'absent' || s === 'غائب' || s === 'غياب' || s === '0') return 'absent';
+  if (s === 'late' || s === 'تأخير' || s === '2') return 'late';
+  if (s === 'excused' || s === 'عذر' || s === 'e') return 'excused';
+  return s;
+};
+
+export const getStatusLabel = (norm) => {
+  if (norm === 'present') return 'حاضر';
+  if (norm === 'absent') return 'غائب';
+  if (norm === 'late') return 'تأخير';
+  if (norm === 'excused') return 'عذر';
+  return 'لم يرصد';
+};
+
+/**
  * Sends full system backup (Excel sheet) via Google Apps Script Webhook
  */
 export async function sendFullSystemBackupEmail({ isAuto = false, user, customEmail = null, customWebhook = null } = {}) {
@@ -98,22 +140,35 @@ export async function sendFullSystemBackupEmail({ isAuto = false, user, customEm
   isBackupRunning = true;
 
   try {
-    const [usersRes, subRes, attRes, grdRes] = await Promise.all([
-      supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects'),
-      supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students'),
-      supabase.from('attendance').select('student_id, subject_id, week_number, status'),
-      supabase.from('grades').select('student_id, subject_id, quiz_1, quiz_2, project, attendance_score, final_grade')
+    // 0. Flush any pending offline attendance to Supabase before export
+    try {
+      const pending = JSON.parse(localStorage.getItem('gradely_pending_attendance_sync') || '[]');
+      if (Array.isArray(pending) && pending.length > 0 && navigator.onLine) {
+        const upsertRows = pending.map(q => ({
+          student_id: String(q.student_id).trim(),
+          subject_id: String(q.subject_id).trim(),
+          week_number: parseInt(q.week_number, 10),
+          status: q.status || 'unrecorded'
+        }));
+        await supabase.from('attendance').upsert(upsertRows, { onConflict: 'student_id,subject_id,week_number' });
+        localStorage.removeItem('gradely_pending_attendance_sync');
+      }
+    } catch (syncErr) {
+      console.warn('Sync pending queue before backup error:', syncErr);
+    }
+
+    // 1. Fetch 100% of all rows across all tables using pagination (no 1000-row cutoff)
+    const [allUsers, allSubs, allAtt, allGrades] = await Promise.all([
+      fetchAllSupabaseRows('users', 'id, user_id, name, role, year_level, section, assigned_subjects'),
+      fetchAllSupabaseRows('subjects', 'id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students'),
+      fetchAllSupabaseRows('attendance', 'student_id, subject_id, week_number, status'),
+      fetchAllSupabaseRows('grades', 'student_id, subject_id, quiz_1, quiz_2, project, attendance_score, final_grade')
     ]);
 
-    const allUsers = usersRes.data || [];
-    const allSubs = subRes.data || [];
-    const allAtt = attRes.data || [];
-    const allGrades = grdRes.data || [];
-
     const isSuper = isSuperUser(user);
-    const freshCurrentUser = allUsers.find(u => u.user_id === user?.user_id) || user;
+    const freshCurrentUser = allUsers.find(u => String(u.user_id).trim() === String(user?.user_id).trim()) || user;
     const rawAssigned = Array.isArray(freshCurrentUser?.assigned_subjects) ? freshCurrentUser.assigned_subjects : [];
-    const assignedSubIds = rawAssigned.map(e => e.split(':')[0]);
+    const assignedSubIds = rawAssigned.map(e => e.split(':')[0].trim());
 
     let mySubs = [];
     if (isSuper) {
@@ -122,7 +177,7 @@ export async function sendFullSystemBackupEmail({ isAuto = false, user, customEm
       mySubs = allSubs.filter(s =>
         s.instructor_id === user?.user_id ||
         s.instructor_name === user?.name ||
-        assignedSubIds.includes(s.id)
+        assignedSubIds.includes(String(s.id).trim())
       );
     }
 
@@ -131,43 +186,108 @@ export async function sendFullSystemBackupEmail({ isAuto = false, user, customEm
       return { success: false, message: 'لا توجد مواد مسندة لتصدير كشوفها' };
     }
 
+    // 2. Build attendance matrix with trimmed student and subject keys
     const attMatrix = {};
     allAtt.forEach(r => {
-      if (!attMatrix[r.subject_id]) attMatrix[r.subject_id] = {};
-      if (!attMatrix[r.subject_id][r.student_id]) attMatrix[r.subject_id][r.student_id] = {};
-      attMatrix[r.subject_id][r.student_id][r.week_number] = r.status;
+      const subId = String(r.subject_id || '').trim();
+      const sId = String(r.student_id || '').trim();
+      const wNum = parseInt(r.week_number, 10);
+      if (!attMatrix[subId]) attMatrix[subId] = {};
+      if (!attMatrix[subId][sId]) attMatrix[subId][sId] = {};
+      attMatrix[subId][sId][wNum] = r.status;
     });
 
+    // Merge any live localStorage records from the admin browser session
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('gradely_local_att_')) {
+          const match = key.match(/gradely_local_att_(sec|lec)_(.+)_w(\d+)/);
+          if (match) {
+            const [, type, subId, wStr] = match;
+            const cleanSubId = String(subId).trim();
+            const wNum = parseInt(wStr, 10);
+            const effW = type === 'lec' ? 100 + wNum : wNum;
+            const parsed = JSON.parse(localStorage.getItem(key) || '{}');
+            if (parsed.records && typeof parsed.records === 'object') {
+              if (!attMatrix[cleanSubId]) attMatrix[cleanSubId] = {};
+              Object.keys(parsed.records).forEach(stuId => {
+                const cleanStuId = String(stuId).trim();
+                if (!attMatrix[cleanSubId][cleanStuId]) attMatrix[cleanSubId][cleanStuId] = {};
+                if (!attMatrix[cleanSubId][cleanStuId][effW] || attMatrix[cleanSubId][cleanStuId][effW] === 'unrecorded') {
+                  attMatrix[cleanSubId][cleanStuId][effW] = parsed.records[stuId];
+                }
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    // 3. Build grades matrix with trimmed keys
     const gradesMatrix = {};
     allGrades.forEach(g => {
-      if (!gradesMatrix[g.subject_id]) gradesMatrix[g.subject_id] = {};
-      gradesMatrix[g.subject_id][g.student_id] = g;
+      const subId = String(g.subject_id || '').trim();
+      const sId = String(g.student_id || '').trim();
+      if (!gradesMatrix[subId]) gradesMatrix[subId] = {};
+      gradesMatrix[subId][sId] = g;
     });
 
     const sheets = [];
 
     mySubs.forEach(sub => {
+      const subId = String(sub.id).trim();
       const totalWeeks = sub.total_weeks || 12;
-      const subAtt = attMatrix[sub.id] || {};
-      const subGrades = gradesMatrix[sub.id] || {};
+      const subAtt = attMatrix[subId] || {};
+      const subGrades = gradesMatrix[subId] || {};
 
+      // Determine attendance modes present in this subject
+      let hasSections = false;
+      let hasLectures = false;
+
+      Object.values(subAtt).forEach(weeks => {
+        Object.keys(weeks).forEach(wKey => {
+          const wn = parseInt(wKey, 10);
+          const st = normalizeStatus(weeks[wKey]);
+          if (st !== 'unrecorded') {
+            if (wn <= 50) hasSections = true;
+            if (wn > 100) hasLectures = true;
+          }
+        });
+      });
+
+      // Default to standard section weeks if nothing recorded yet
+      if (!hasSections && !hasLectures) {
+        hasSections = true;
+      }
+
+      // Filter enrolled students for this subject
       const enrolled = allUsers.filter(u => {
         if (u.role !== 'student') return false;
-        const inSub = Array.isArray(sub.enrolled_students) && sub.enrolled_students.includes(u.user_id);
-        const hasAssigned = Array.isArray(u.assigned_subjects) && u.assigned_subjects.some(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+        const uId = String(u.user_id).trim();
+        const inSub = Array.isArray(sub.enrolled_students) && sub.enrolled_students.map(e => String(e).trim()).includes(uId);
+        const hasAssigned = Array.isArray(u.assigned_subjects) && u.assigned_subjects.some(e => typeof e === 'string' && e.startsWith(subId + ':'));
         return inSub || hasAssigned;
       });
 
+      // Sort deterministically: section, then academic ID
+      enrolled.sort((a, b) => {
+        const secA = (a.section || '').localeCompare(b.section || '');
+        if (secA !== 0) return secA;
+        return String(a.user_id).localeCompare(String(b.user_id));
+      });
+
       const rows = enrolled.map(stu => {
+        const stuId = String(stu.user_id || '').trim();
         const stuSubSec = (() => {
           if (Array.isArray(stu.assigned_subjects)) {
-            const m = stu.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+            const m = stu.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(subId + ':'));
             if (m) return m.split(':')[1];
           }
           return stu.section || 'S1';
         })();
 
-        const stuGrade = subGrades[stu.user_id] || {};
+        const stuGrade = subGrades[stuId] || {};
 
         const row = {
           'الرقم الأكاديمي': stu.user_id,
@@ -186,14 +306,48 @@ export async function sendFullSystemBackupEmail({ isAuto = false, user, customEm
         let lateCount = 0;
         let excusedCount = 0;
 
-        for (let w = 1; w <= totalWeeks; w++) {
-          const st = subAtt[stu.user_id]?.[w];
-          let label = 'لم يرصد';
-          if (st === 'present') { label = 'حاضر'; presentCount++; }
-          else if (st === 'absent') { label = 'غائب'; absentCount++; }
-          else if (st === 'late') { label = 'تأخير'; lateCount++; presentCount += 0.5; }
-          else if (st === 'excused') { label = 'عذر'; excusedCount++; }
-          row['أسبوع ' + w] = label;
+        // Case A: Both section and lecture attendance exist for this subject
+        if (hasSections && hasLectures) {
+          for (let w = 1; w <= totalWeeks; w++) {
+            const secSt = normalizeStatus(subAtt[stuId]?.[w]);
+            const secLabel = getStatusLabel(secSt);
+            if (secSt === 'present') { presentCount++; }
+            else if (secSt === 'absent') { absentCount++; }
+            else if (secSt === 'late') { lateCount++; presentCount += 0.5; }
+            else if (secSt === 'excused') { excusedCount++; }
+            row['سكشن أسبوع ' + w] = secLabel;
+          }
+          for (let w = 1; w <= totalWeeks; w++) {
+            const lecSt = normalizeStatus(subAtt[stuId]?.[100 + w]);
+            const lecLabel = getStatusLabel(lecSt);
+            if (lecSt === 'present') { presentCount++; }
+            else if (lecSt === 'absent') { absentCount++; }
+            else if (lecSt === 'late') { lateCount++; presentCount += 0.5; }
+            else if (lecSt === 'excused') { excusedCount++; }
+            row['محاضرة أسبوع ' + w] = lecLabel;
+          }
+        } else if (hasLectures && !hasSections) {
+          // Case B: Only lecture attendance recorded for this subject
+          for (let w = 1; w <= totalWeeks; w++) {
+            const lecSt = normalizeStatus(subAtt[stuId]?.[100 + w]);
+            const lecLabel = getStatusLabel(lecSt);
+            if (lecSt === 'present') { presentCount++; }
+            else if (lecSt === 'absent') { absentCount++; }
+            else if (lecSt === 'late') { lateCount++; presentCount += 0.5; }
+            else if (lecSt === 'excused') { excusedCount++; }
+            row['أسبوع ' + w] = lecLabel;
+          }
+        } else {
+          // Case C: Section attendance (default)
+          for (let w = 1; w <= totalWeeks; w++) {
+            const st = normalizeStatus(subAtt[stuId]?.[w]);
+            const label = getStatusLabel(st);
+            if (st === 'present') { presentCount++; }
+            else if (st === 'absent') { absentCount++; }
+            else if (st === 'late') { lateCount++; presentCount += 0.5; }
+            else if (st === 'excused') { excusedCount++; }
+            row['أسبوع ' + w] = label;
+          }
         }
 
         const totalRecorded = presentCount + absentCount + (lateCount * 0.5);

@@ -122,9 +122,22 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
 
   filteredSubjects.forEach((sub, idx) => {
     const g = grades.find(grd => grd.subject_id === sub.id) || {};
+    const normalizeStatus = (status) => {
+      if (!status) return 'unrecorded';
+      const s = String(status).toLowerCase().trim();
+      if (s === 'present' || s === 'حاضر' || s === 'حضور') return 'present';
+      if (s === 'absent' || s === 'غائب' || s === 'غياب') return 'absent';
+      if (s === 'late' || s === 'تأخير') return 'late';
+      if (s === 'excused' || s === 'عذر') return 'excused';
+      return s;
+    };
+
     const subAtt = attendance.filter(a => a.subject_id === sub.id);
-    const totalAttended = subAtt.filter(a => a.status === 'present' || a.status === 'late').length;
-    const totalAbsent = subAtt.filter(a => a.status === 'absent').length;
+    const totalAttended = subAtt.filter(a => {
+      const s = normalizeStatus(a.status);
+      return s === 'present' || s === 'late';
+    }).length;
+    const totalAbsent = subAtt.filter(a => normalizeStatus(a.status) === 'absent').length;
     const totalWeeks = sub.total_weeks || 12;
 
     let gradesCardsHtml = '';
@@ -153,7 +166,7 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
 
     let weeksGridHtml = '';
     if (includeAttendanceDetails) {
-      let weeksCells = '';
+      let sectionCells = '';
       for (let w = 1; w <= totalWeeks; w++) {
         const record = subAtt.find(a => a.week_number === w);
         let statusText = '—';
@@ -163,16 +176,16 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
         let dateHint = wDate ? `<div class="w-date" style="color:#2563eb;font-weight:bold;font-size:0.65rem;">${formatDisplayDate(wDate)}</div>` : '';
         
         if (record) {
-          if (record.status === 'present') { statusText = 'حاضر ✓'; statusClass = 'present'; }
-          else if (record.status === 'absent') { statusText = 'غائب ✗'; statusClass = 'absent'; }
-          else if (record.status === 'late') { statusText = 'تأخير'; statusClass = 'late'; }
-          else if (record.status === 'excused') { 
-            const reasonStr = record.excuse_reason ? ` title="${record.excuse_reason}"` : '';
+          const norm = normalizeStatus(record.status);
+          if (norm === 'present') { statusText = 'حاضر ✓'; statusClass = 'present'; }
+          else if (norm === 'absent') { statusText = 'غائب ✗'; statusClass = 'absent'; }
+          else if (norm === 'late') { statusText = 'تأخير'; statusClass = 'late'; }
+          else if (norm === 'excused') { 
             statusText = `عذر${record.excuse_reason ? '*' : ''}`; 
             statusClass = 'excused'; 
           }
         }
-        weeksCells += `
+        sectionCells += `
           <div class="week-cell ${statusClass}">
             <div class="w-num">أسبوع ${w}</div>
             <div class="w-status">${statusText}</div>
@@ -181,12 +194,50 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
         `;
       }
 
+      let lectureSectionHtml = '';
+      const hasLectureRecords = subAtt.some(a => a.week_number > 100);
+      if (hasLectureRecords) {
+        let lectureCells = '';
+        for (let w = 1; w <= totalWeeks; w++) {
+          const record = subAtt.find(a => a.week_number === (100 + w));
+          let statusText = '—';
+          let statusClass = 'unrecorded';
+          const wDate = getSubjectLectureDate(sub, w) || (record?.created_at ? record.created_at.split('T')[0] : '');
+          let dateHint = wDate ? `<div class="w-date" style="color:#0d9488;font-weight:bold;font-size:0.65rem;">${formatDisplayDate(wDate)}</div>` : '';
+          
+          if (record) {
+            const norm = normalizeStatus(record.status);
+            if (norm === 'present') { statusText = 'حاضر ✓'; statusClass = 'present'; }
+            else if (norm === 'absent') { statusText = 'غائب ✗'; statusClass = 'absent'; }
+            else if (norm === 'late') { statusText = 'تأخير'; statusClass = 'late'; }
+            else if (norm === 'excused') { 
+              statusText = `عذر${record.excuse_reason ? '*' : ''}`; 
+              statusClass = 'excused'; 
+            }
+          }
+          lectureCells += `
+            <div class="week-cell ${statusClass}">
+              <div class="w-num">محاضرة ${w}</div>
+              <div class="w-status">${statusText}</div>
+              ${dateHint}
+            </div>
+          `;
+        }
+        lectureSectionHtml = `
+          <div class="weeks-title" style="margin-top:8px;">🏛️ تفاصيل حضور وغياب المحاضرات:</div>
+          <div class="weeks-grid">
+            ${lectureCells}
+          </div>
+        `;
+      }
+
       weeksGridHtml = `
         <div class="weeks-container">
-          <div class="weeks-title">📅 تفاصيل سجل الحضور والغياب الأسبوعي:</div>
+          <div class="weeks-title">🏢 تفاصيل حضور وغياب السكاشن:</div>
           <div class="weeks-grid">
-            ${weeksCells}
+            ${sectionCells}
           </div>
+          ${lectureSectionHtml}
         </div>
       `;
     }

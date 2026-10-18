@@ -44,6 +44,18 @@ export default function StudentDashboard({ user, onLogout }) {
   const [selectedSubjectId, setSelectedSubjectId] = useState('');
   const [viewMode, setViewMode] = useState('attendance');
   const [attSubMode, setAttSubMode] = useState('section'); // 'section' or 'lecture' // 'attendance', 'grades', 'analytics'
+  const [attError, setAttError] = useState(null);
+
+  // Status normalization for attendance to handle legacy/Arabic aliases robustly
+  const normalizeStatus = (status) => {
+    if (!status) return 'unrecorded';
+    const s = String(status).toLowerCase().trim();
+    if (s === 'present' || s === 'حاضر' || s === 'حضور') return 'present';
+    if (s === 'absent' || s === 'غائب' || s === 'غياب') return 'absent';
+    if (s === 'late' || s === 'تأخير') return 'late';
+    if (s === 'excused' || s === 'عذر') return 'excused';
+    return s;
+  };
 
   // Dynamic Visibility Settings controlled by Super Admin
   const [visibility, setVisibility] = useState({
@@ -319,24 +331,34 @@ export default function StudentDashboard({ user, onLogout }) {
 
       // Fetch attendance: try secure RPC first, with fallback to direct query
       let attData = [];
+      let attFetchError = null;
       try {
         const { data: attRpc, error: attErr } = await supabase.rpc('get_my_attendance', { p_session_token: sessionToken });
         if (!attErr && Array.isArray(attRpc)) {
           attData = attRpc;
+        } else if (attErr) {
+          attFetchError = attErr.message || 'RPC attendance error';
         }
       } catch (e) {
         console.warn('RPC attendance fallback notice:', e);
+        attFetchError = e.message;
       }
       if (!attData || attData.length === 0) {
-        const { data: attDirect } = await supabase
-          .from('attendance')
-          .select('subject_id, week_number, status, created_at')
-          .eq('student_id', user.user_id)
-          .order('week_number', { ascending: true });
-        if (Array.isArray(attDirect) && attDirect.length > 0) {
-          attData = attDirect;
+        try {
+          const { data: attDirect, error: directErr } = await supabase
+            .from('attendance')
+            .select('subject_id, week_number, status, created_at')
+            .eq('student_id', user.user_id)
+            .order('week_number', { ascending: true });
+          if (!directErr && Array.isArray(attDirect) && attDirect.length > 0) {
+            attData = attDirect;
+            attFetchError = null;
+          }
+        } catch (err) {
+          // direct query failed / blocked by RLS
         }
       }
+      setAttError(attFetchError);
 
       // Fetch grades: try secure RPC first, with fallback to direct query
       let grdData = [];
@@ -444,8 +466,11 @@ export default function StudentDashboard({ user, onLogout }) {
 
   // Calculate Overall Analytics
   const totalRecordedSessions = attendance.length;
-  const totalAttendedSessions = attendance.filter(a => a.status === 'present' || a.status === 'late').length;
-  const totalAbsences = attendance.filter(a => a.status === 'absent').length;
+  const totalAttendedSessions = attendance.filter(a => {
+    const s = normalizeStatus(a.status);
+    return s === 'present' || s === 'late';
+  }).length;
+  const totalAbsences = attendance.filter(a => normalizeStatus(a.status) === 'absent').length;
   const attendanceRate = totalRecordedSessions > 0 ? Math.round((totalAttendedSessions / totalRecordedSessions) * 100) : 100;
 
   // Compute Subject Analytics Breakdown
@@ -458,8 +483,11 @@ export default function StudentDashboard({ user, onLogout }) {
 
   const subjectStats = subjects.map(sub => {
     const subAtt = attendance.filter(a => a.subject_id === sub.id);
-    const attendedCount = subAtt.filter(a => a.status === 'present' || a.status === 'late').length;
-    const absSubCount = subAtt.filter(a => a.status === 'absent').length;
+    const attendedCount = subAtt.filter(a => {
+      const s = normalizeStatus(a.status);
+      return s === 'present' || s === 'late';
+    }).length;
+    const absSubCount = subAtt.filter(a => normalizeStatus(a.status) === 'absent').length;
     const subRate = subAtt.length > 0 ? Math.round((attendedCount / subAtt.length) * 100) : 100;
 
     const g = grades.find(grd => grd.subject_id === sub.id) || {};
@@ -501,7 +529,7 @@ export default function StudentDashboard({ user, onLogout }) {
   const currentSubject = subjects.find(s => s.id === selectedSubjectId);
   const currentGrades = grades.find(g => g.subject_id === selectedSubjectId) || {};
   const currentAttendance = attendance.filter(a => a.subject_id === selectedSubjectId);
-  const absCount = currentAttendance.filter(a => a.status === 'absent').length;
+  const absCount = currentAttendance.filter(a => normalizeStatus(a.status) === 'absent').length;
 
   // Calculate dynamic visible total score for current subject
   const currentSubVis = getSubVisibility(selectedSubjectId);
@@ -787,7 +815,7 @@ export default function StudentDashboard({ user, onLogout }) {
                       borderRadius: '12px',
                       fontSize: '0.78rem'
                     }}>
-                      {currentAttendance.filter(a => a.week_number <= 50 && a.status === 'absent').length} غياب
+                      {currentAttendance.filter(a => a.week_number <= 50 && normalizeStatus(a.status) === 'absent').length} غياب
                     </span>
                   </button>
                   <button 
@@ -817,16 +845,134 @@ export default function StudentDashboard({ user, onLogout }) {
                       borderRadius: '12px',
                       fontSize: '0.78rem'
                     }}>
-                      {currentAttendance.filter(a => a.week_number > 100 && a.status === 'absent').length} غياب
+                      {currentAttendance.filter(a => a.week_number > 100 && normalizeStatus(a.status) === 'absent').length} غياب
                     </span>
                   </button>
                 </div>
 
+                {/* Cross-tab absence discovery alert */}
+                {attSubMode === 'section' && currentAttendance.some(a => a.week_number > 100 && normalizeStatus(a.status) === 'absent') && (
+                  <div 
+                    onClick={() => setAttSubMode('lecture')}
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.12)',
+                      border: '1px solid rgba(239, 68, 68, 0.35)',
+                      color: '#f87171',
+                      borderRadius: '10px',
+                      padding: '10px 14px',
+                      marginBottom: '1rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      fontSize: '0.88rem',
+                      fontWeight: 700
+                    }}
+                  >
+                    <span>
+                      ⚠️ تنبيه: لديك {currentAttendance.filter(a => a.week_number > 100 && normalizeStatus(a.status) === 'absent').length} غياب مسجل في <strong>المحاضرات</strong> لهذا المقرر.
+                    </span>
+                    <span style={{ textDecoration: 'underline', color: '#60a5fa' }}>عرض غياب المحاضرات ←</span>
+                  </div>
+                )}
+
+                {attSubMode === 'lecture' && currentAttendance.some(a => a.week_number <= 50 && normalizeStatus(a.status) === 'absent') && (
+                  <div 
+                    onClick={() => setAttSubMode('section')}
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.12)',
+                      border: '1px solid rgba(239, 68, 68, 0.35)',
+                      color: '#f87171',
+                      borderRadius: '10px',
+                      padding: '10px 14px',
+                      marginBottom: '1rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      fontSize: '0.88rem',
+                      fontWeight: 700
+                    }}
+                  >
+                    <span>
+                      ⚠️ تنبيه: لديك {currentAttendance.filter(a => a.week_number <= 50 && normalizeStatus(a.status) === 'absent').length} غياب مسجل في <strong>السكاشن</strong> لهذا المقرر.
+                    </span>
+                    <span style={{ textDecoration: 'underline', color: '#60a5fa' }}>عرض غياب السكاشن ←</span>
+                  </div>
+                )}
+
+                {attError && (
+                  <div style={{
+                    background: 'rgba(245, 158, 11, 0.12)',
+                    border: '1px solid rgba(245, 158, 11, 0.35)',
+                    color: '#fbbf24',
+                    borderRadius: '10px',
+                    padding: '10px 14px',
+                    marginBottom: '1rem',
+                    fontSize: '0.88rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
+                  }}>
+                    <span>⚠️ تعذر تحديث بيانات الحضور بشكل كامل: قد تكون الجلسة منتهية أو هناك انقطاع مؤقت في الاتصال.</span>
+                    <button 
+                      type="button"
+                      onClick={() => fetchData()}
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid #fbbf24',
+                        color: '#fbbf24',
+                        borderRadius: '6px',
+                        padding: '4px 10px',
+                        cursor: 'pointer',
+                        fontWeight: 700
+                      }}
+                    >
+                      إعادة المحاولة 🔄
+                    </button>
+                  </div>
+                )}
+
+                {attendance.length === 0 && !attError && (
+                  <div style={{
+                    background: 'rgba(59, 130, 246, 0.08)',
+                    border: '1px solid rgba(59, 130, 246, 0.25)',
+                    color: '#93c5fd',
+                    borderRadius: '10px',
+                    padding: '10px 14px',
+                    marginBottom: '1rem',
+                    fontSize: '0.88rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '8px'
+                  }}>
+                    <span>ℹ️ لم يتم رصد حضور مسجل لك حتى الآن في النظام. في حال أخبرك المعيد برصد غيابك/حضورك ولم يظهر، يرجى تسجيل الخروج وإعادة الدخول لتحديث الجلسة.</span>
+                    <button 
+                      type="button"
+                      onClick={onLogout}
+                      style={{
+                        background: 'transparent',
+                        border: '1px solid #93c5fd',
+                        color: '#93c5fd',
+                        borderRadius: '6px',
+                        padding: '4px 10px',
+                        cursor: 'pointer',
+                        fontWeight: 700,
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      تسجيل الخروج والعودة 🔄
+                    </button>
+                  </div>
+                )}
+
                 {/* Sub-header with counters */}
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',flexWrap:'wrap',gap:'0.8rem'}}>
                   <h4 style={{margin: 0, color: 'var(--text-muted)', fontSize:'0.95rem'}}>
-                    {attSubMode === 'lecture' ? '🏛️ سجل حضور وغياب المحاضرات' : '🏢 سجل حضور وغياب السكاشن'} — إجمالي الغياب: <span style={{color: (attSubMode === 'lecture' ? currentAttendance.filter(a => a.week_number > 100 && a.status === 'absent').length : currentAttendance.filter(a => a.week_number <= 50 && a.status === 'absent').length) > 3 ? 'var(--danger)' : 'var(--success)', fontWeight:'bold'}}>
-                      {attSubMode === 'lecture' ? currentAttendance.filter(a => a.week_number > 100 && a.status === 'absent').length : currentAttendance.filter(a => a.week_number <= 50 && a.status === 'absent').length} مرات
+                    {attSubMode === 'lecture' ? '🏛️ سجل حضور وغياب المحاضرات' : '🏢 سجل حضور وغياب السكاشن'} — إجمالي الغياب: <span style={{color: (attSubMode === 'lecture' ? currentAttendance.filter(a => a.week_number > 100 && normalizeStatus(a.status) === 'absent').length : currentAttendance.filter(a => a.week_number <= 50 && normalizeStatus(a.status) === 'absent').length) > 3 ? 'var(--danger)' : 'var(--success)', fontWeight:'bold'}}>
+                      {attSubMode === 'lecture' ? currentAttendance.filter(a => a.week_number > 100 && normalizeStatus(a.status) === 'absent').length : currentAttendance.filter(a => a.week_number <= 50 && normalizeStatus(a.status) === 'absent').length} مرات
                     </span>
                   </h4>
                   <div style={{display:'flex',gap:'10px',fontSize:'0.8rem',flexWrap:'wrap'}}>
@@ -846,23 +992,24 @@ export default function StudentDashboard({ user, onLogout }) {
                     let bg = 'var(--bg)';
                     let border = 'var(--border)';
 
-                    if (record) {
-                      if (record.status === 'present') {
+                    const normStatus = record ? normalizeStatus(record.status) : 'unrecorded';
+                    if (record && normStatus !== 'unrecorded') {
+                      if (normStatus === 'present') {
                         statusLabel = 'حاضر ✓';
                         statusColor = 'var(--success)';
                         bg = 'rgba(16, 185, 129, 0.1)';
                         border = 'var(--success)';
-                      } else if (record.status === 'absent') {
+                      } else if (normStatus === 'absent') {
                         statusLabel = 'غائب ✗';
                         statusColor = 'var(--danger)';
                         bg = 'rgba(239, 68, 68, 0.1)';
                         border = 'var(--danger)';
-                      } else if (record.status === 'late') {
+                      } else if (normStatus === 'late') {
                         statusLabel = 'تأخير';
                         statusColor = 'var(--warning)';
                         bg = 'rgba(245, 158, 11, 0.1)';
                         border = 'var(--warning)';
-                      } else if (record.status === 'excused') {
+                      } else if (normStatus === 'excused') {
                         statusLabel = 'عذر';
                         statusColor = '#3b82f6';
                         bg = 'rgba(59, 130, 246, 0.1)';
@@ -870,7 +1017,7 @@ export default function StudentDashboard({ user, onLogout }) {
                       }
                     }
 
-                    const hasRecordedAttendance = record && record.status && record.status !== 'unrecorded';
+                    const hasRecordedAttendance = record && normStatus !== 'unrecorded';
                     const userPrimarySection = getStudentSubSection(user, currentSubject.id);
                     const explicitDate = attSubMode === 'lecture'
                       ? getSubjectLectureDate(currentSubject, w)

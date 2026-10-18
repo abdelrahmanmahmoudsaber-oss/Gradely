@@ -2,7 +2,10 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { exportExcelFile, exportMultiSheetExcelFile, generateMultiSheetExcelBase64 } from '../../utils/excelHelper';
-import { getBackupSettings, saveBackupSettings, sendFullSystemBackupEmail, cleanupBackupSettingsFromSubjects } from '../../utils/backupService';
+import { 
+  getBackupSettings, saveBackupSettings, sendFullSystemBackupEmail, 
+  cleanupBackupSettingsFromSubjects, fetchAllSupabaseRows, normalizeStatus, getStatusLabel 
+} from '../../utils/backupService';
 import { 
   Users, BookOpen, Clock, Shield, Sliders, Eye, EyeOff, 
   Download, Upload, Database, RefreshCw, CheckCircle2, AlertTriangle, FileSpreadsheet, Calendar,
@@ -356,20 +359,32 @@ export default function OverviewTab({ user }) {
       setBackingUp(true);
       setBackupMessage('جاري استخراج كشوف الغياب التفصيلية لكافة الأسابيع...');
 
-      const [usersRes, subRes, attRes] = await Promise.all([
-        supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects'),
-        supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students'),
-        supabase.from('attendance').select('student_id, subject_id, week_number, status')
+      // 0. Flush any pending offline changes
+      try {
+        const pending = JSON.parse(localStorage.getItem('gradely_pending_attendance_sync') || '[]');
+        if (Array.isArray(pending) && pending.length > 0 && navigator.onLine) {
+          const upsertRows = pending.map(q => ({
+            student_id: String(q.student_id).trim(),
+            subject_id: String(q.subject_id).trim(),
+            week_number: parseInt(q.week_number, 10),
+            status: q.status || 'unrecorded'
+          }));
+          await supabase.from('attendance').upsert(upsertRows, { onConflict: 'student_id,subject_id,week_number' });
+          localStorage.removeItem('gradely_pending_attendance_sync');
+        }
+      } catch (e) {}
+
+      // 1. Fetch 100% of all rows across all tables using pagination
+      const [allUsers, allSubs, allAtt] = await Promise.all([
+        fetchAllSupabaseRows('users', 'id, user_id, name, role, year_level, section, assigned_subjects'),
+        fetchAllSupabaseRows('subjects', 'id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students'),
+        fetchAllSupabaseRows('attendance', 'student_id, subject_id, week_number, status')
       ]);
 
-      const allUsers = usersRes.data || [];
-      const allSubs = subRes.data || [];
-      const allAtt = attRes.data || [];
-
       // Filter subjects accessible to current user (all for super, assigned for TA)
-      const freshCurrentUser = allUsers.find(u => u.user_id === user.user_id) || user;
+      const freshCurrentUser = allUsers.find(u => String(u.user_id).trim() === String(user.user_id).trim()) || user;
       const rawAssigned = Array.isArray(freshCurrentUser?.assigned_subjects) ? freshCurrentUser.assigned_subjects : [];
-      const assignedSubIds = rawAssigned.map(e => e.split(':')[0]);
+      const assignedSubIds = rawAssigned.map(e => e.split(':')[0].trim());
 
       let mySubs = [];
       if (isSuper) {
@@ -378,7 +393,7 @@ export default function OverviewTab({ user }) {
         mySubs = allSubs.filter(s => 
           s.instructor_id === user.user_id || 
           s.instructor_name === user.name || 
-          assignedSubIds.includes(s.id)
+          assignedSubIds.includes(String(s.id).trim())
         );
       }
 
@@ -391,29 +406,88 @@ export default function OverviewTab({ user }) {
       // Group attendance records by: subId -> studentId -> weekNum -> status
       const attMatrix = {};
       allAtt.forEach(r => {
-        if (!attMatrix[r.subject_id]) attMatrix[r.subject_id] = {};
-        if (!attMatrix[r.subject_id][r.student_id]) attMatrix[r.subject_id][r.student_id] = {};
-        attMatrix[r.subject_id][r.student_id][r.week_number] = r.status;
+        const subId = String(r.subject_id || '').trim();
+        const sId = String(r.student_id || '').trim();
+        const wNum = parseInt(r.week_number, 10);
+        if (!attMatrix[subId]) attMatrix[subId] = {};
+        if (!attMatrix[subId][sId]) attMatrix[subId][sId] = {};
+        attMatrix[subId][sId][wNum] = r.status;
       });
+
+      // Merge any live localStorage records from the admin browser session
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith('gradely_local_att_')) {
+            const match = key.match(/gradely_local_att_(sec|lec)_(.+)_w(\d+)/);
+            if (match) {
+              const [, type, subId, wStr] = match;
+              const cleanSubId = String(subId).trim();
+              const wNum = parseInt(wStr, 10);
+              const effW = type === 'lec' ? 100 + wNum : wNum;
+              const parsed = JSON.parse(localStorage.getItem(key) || '{}');
+              if (parsed.records && typeof parsed.records === 'object') {
+                if (!attMatrix[cleanSubId]) attMatrix[cleanSubId] = {};
+                Object.keys(parsed.records).forEach(stuId => {
+                  const cleanStuId = String(stuId).trim();
+                  if (!attMatrix[cleanSubId][cleanStuId]) attMatrix[cleanSubId][cleanStuId] = {};
+                  if (!attMatrix[cleanSubId][cleanStuId][effW] || attMatrix[cleanSubId][cleanStuId][effW] === 'unrecorded') {
+                    attMatrix[cleanSubId][cleanStuId][effW] = parsed.records[stuId];
+                  }
+                });
+              }
+            }
+          }
+        }
+      } catch (e) {}
 
       const sheets = [];
 
       mySubs.forEach(sub => {
+        const subId = String(sub.id).trim();
         const totalWeeks = sub.total_weeks || 12;
-        const subAtt = attMatrix[sub.id] || {};
+        const subAtt = attMatrix[subId] || {};
+
+        // Determine attendance modes present in this subject
+        let hasSections = false;
+        let hasLectures = false;
+
+        Object.values(subAtt).forEach(weeks => {
+          Object.keys(weeks).forEach(wKey => {
+            const wn = parseInt(wKey, 10);
+            const st = normalizeStatus(weeks[wKey]);
+            if (st !== 'unrecorded') {
+              if (wn <= 50) hasSections = true;
+              if (wn > 100) hasLectures = true;
+            }
+          });
+        });
+
+        if (!hasSections && !hasLectures) {
+          hasSections = true;
+        }
 
         // Find enrolled students for this subject
         const enrolled = allUsers.filter(u => {
           if (u.role !== 'student') return false;
-          const inSub = Array.isArray(sub.enrolled_students) && sub.enrolled_students.includes(u.user_id);
-          const hasAssigned = Array.isArray(u.assigned_subjects) && u.assigned_subjects.some(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+          const uId = String(u.user_id).trim();
+          const inSub = Array.isArray(sub.enrolled_students) && sub.enrolled_students.map(e => String(e).trim()).includes(uId);
+          const hasAssigned = Array.isArray(u.assigned_subjects) && u.assigned_subjects.some(e => typeof e === 'string' && e.startsWith(subId + ':'));
           return inSub || hasAssigned;
         });
 
+        // Sort deterministically: section, then academic ID
+        enrolled.sort((a, b) => {
+          const secA = (a.section || '').localeCompare(b.section || '');
+          if (secA !== 0) return secA;
+          return String(a.user_id).localeCompare(String(b.user_id));
+        });
+
         const rows = enrolled.map(stu => {
+          const stuId = String(stu.user_id || '').trim();
           const stuSubSec = (() => {
             if (Array.isArray(stu.assigned_subjects)) {
-              const m = stu.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(sub.id + ':'));
+              const m = stu.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(subId + ':'));
               if (m) return m.split(':')[1];
             }
             return stu.section || 'S1';
@@ -431,14 +505,45 @@ export default function OverviewTab({ user }) {
           let lateCount = 0;
           let excusedCount = 0;
 
-          for (let w = 1; w <= totalWeeks; w++) {
-            const st = subAtt[stu.user_id]?.[w];
-            let label = 'لم يرصد';
-            if (st === 'present') { label = 'حاضر'; presentCount++; }
-            else if (st === 'absent') { label = 'غائب'; absentCount++; }
-            else if (st === 'late') { label = 'تأخير'; lateCount++; presentCount += 0.5; }
-            else if (st === 'excused') { label = 'عذر'; excusedCount++; }
-            row['أسبوع ' + w] = label;
+          if (hasSections && hasLectures) {
+            for (let w = 1; w <= totalWeeks; w++) {
+              const secSt = normalizeStatus(subAtt[stuId]?.[w]);
+              const secLabel = getStatusLabel(secSt);
+              if (secSt === 'present') { presentCount++; }
+              else if (secSt === 'absent') { absentCount++; }
+              else if (secSt === 'late') { lateCount++; presentCount += 0.5; }
+              else if (secSt === 'excused') { excusedCount++; }
+              row['سكشن أسبوع ' + w] = secLabel;
+            }
+            for (let w = 1; w <= totalWeeks; w++) {
+              const lecSt = normalizeStatus(subAtt[stuId]?.[100 + w]);
+              const lecLabel = getStatusLabel(lecSt);
+              if (lecSt === 'present') { presentCount++; }
+              else if (lecSt === 'absent') { absentCount++; }
+              else if (lecSt === 'late') { lateCount++; presentCount += 0.5; }
+              else if (lecSt === 'excused') { excusedCount++; }
+              row['محاضرة أسبوع ' + w] = lecLabel;
+            }
+          } else if (hasLectures && !hasSections) {
+            for (let w = 1; w <= totalWeeks; w++) {
+              const lecSt = normalizeStatus(subAtt[stuId]?.[100 + w]);
+              const lecLabel = getStatusLabel(lecSt);
+              if (lecSt === 'present') { presentCount++; }
+              else if (lecSt === 'absent') { absentCount++; }
+              else if (lecSt === 'late') { lateCount++; presentCount += 0.5; }
+              else if (lecSt === 'excused') { excusedCount++; }
+              row['أسبوع ' + w] = lecLabel;
+            }
+          } else {
+            for (let w = 1; w <= totalWeeks; w++) {
+              const st = normalizeStatus(subAtt[stuId]?.[w]);
+              const label = getStatusLabel(st);
+              if (st === 'present') { presentCount++; }
+              else if (st === 'absent') { absentCount++; }
+              else if (st === 'late') { lateCount++; presentCount += 0.5; }
+              else if (st === 'excused') { excusedCount++; }
+              row['أسبوع ' + w] = label;
+            }
           }
 
           const totalRecorded = presentCount + absentCount + (lateCount * 0.5);
@@ -483,21 +588,37 @@ export default function OverviewTab({ user }) {
     setBackupMessage('');
 
     try {
-      const [usersRes, subRes, attRes, grdRes] = await Promise.all([
-        supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at'),
-        supabase.from('subjects').select('*'),
-        supabase.from('attendance').select('*'),
-        supabase.from('grades').select('*')
+      // 0. Flush any pending offline changes
+      try {
+        const pending = JSON.parse(localStorage.getItem('gradely_pending_attendance_sync') || '[]');
+        if (Array.isArray(pending) && pending.length > 0 && navigator.onLine) {
+          const upsertRows = pending.map(q => ({
+            student_id: String(q.student_id).trim(),
+            subject_id: String(q.subject_id).trim(),
+            week_number: parseInt(q.week_number, 10),
+            status: q.status || 'unrecorded'
+          }));
+          await supabase.from('attendance').upsert(upsertRows, { onConflict: 'student_id,subject_id,week_number' });
+          localStorage.removeItem('gradely_pending_attendance_sync');
+        }
+      } catch (e) {}
+
+      // 1. Fetch 100% of all rows across all tables without the 1000-row limit
+      const [allUsers, allSubs, allAtt, allGrades] = await Promise.all([
+        fetchAllSupabaseRows('users', 'id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at'),
+        fetchAllSupabaseRows('subjects', '*'),
+        fetchAllSupabaseRows('attendance', '*'),
+        fetchAllSupabaseRows('grades', '*')
       ]);
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const backupData = {
         version: 'Gradely-v2-FullBackup',
         exportedAt: new Date().toISOString(),
-        users: usersRes.data || [],
-        subjects: subRes.data || [],
-        attendance: attRes.data || [],
-        grades: grdRes.data || []
+        users: allUsers,
+        subjects: allSubs,
+        attendance: allAtt,
+        grades: allGrades
       };
 
       if (format === 'json') {
@@ -514,9 +635,9 @@ export default function OverviewTab({ user }) {
       } else {
         // Multi-Sheet Comprehensive Excel Workbook
         const subMap = {};
-        (subRes.data || []).forEach(s => { subMap[s.id] = s.name; });
+        allSubs.forEach(s => { subMap[s.id] = s.name; });
 
-        const usersSheet = (usersRes.data || []).map(u => ({
+        const usersSheet = allUsers.map(u => ({
           'الرقم الأكاديمي / كود المستخدم': u.user_id,
           'الاسم': u.name,
           'الدور': u.role === 'admin' ? 'معيد/مشرف' : 'طالب',
@@ -526,7 +647,7 @@ export default function OverviewTab({ user }) {
           'تاريخ التسجيل': u.created_at || ''
         }));
 
-        const subjectsSheet = (subRes.data || []).map(s => ({
+        const subjectsSheet = allSubs.map(s => ({
           'كود المادة': s.id,
           'اسم المادة': s.name,
           'الفرقة': s.year_level,
@@ -535,23 +656,28 @@ export default function OverviewTab({ user }) {
           'عدد الطلاب المسجلين': Array.isArray(s.enrolled_students) ? s.enrolled_students.length : 0
         }));
 
-        const attendanceSheet = (attRes.data || []).map(a => ({
-          'رقم الطالب': a.student_id,
-          'المادة': subMap[a.subject_id] || a.subject_id,
-          'رقم الأسبوع': `الأسبوع ${a.week_number}`,
-          'تاريخ المحاضرة': a.session_date || '',
-          'الحالة': a.status === 'present' ? 'حاضر' : a.status === 'absent' ? 'غائب' : a.status === 'late' ? 'تأخير' : a.status === 'excused' ? 'عذر' : a.status,
-          'سبب العذر': a.excuse_reason || ''
-        }));
+        const attendanceSheet = allAtt.map(a => {
+          const norm = normalizeStatus(a.status);
+          const isLec = parseInt(a.week_number, 10) > 100;
+          const displayWeek = isLec ? `محاضرة ${parseInt(a.week_number, 10) - 100}` : `سكشن ${a.week_number}`;
+          return {
+            'رقم الطالب': a.student_id,
+            'المادة': subMap[a.subject_id] || a.subject_id,
+            'نوع الجلسة / الأسبوع': displayWeek,
+            'تاريخ المحاضرة': a.session_date || '',
+            'الحالة': getStatusLabel(norm),
+            'سبب العذر': a.excuse_reason || ''
+          };
+        });
 
-        const gradesSheet = (grdRes.data || []).map(g => ({
+        const gradesSheet = allGrades.map(g => ({
           'رقم الطالب': g.student_id,
           'المادة': subMap[g.subject_id] || g.subject_id,
-          'كويز 1': g.quiz_1 || 0,
-          'كويز 2': g.quiz_2 || 0,
-          'المشروع/العملي': g.project || 0,
-          'درجة الحضور': g.attendance_score || 0,
-          'المجموع النهائي': g.final_grade || 0
+          'كويز 1': g.quiz_1 != null ? g.quiz_1 : 0,
+          'كويز 2': g.quiz_2 != null ? g.quiz_2 : 0,
+          'المشروع/العملي': g.project != null ? g.project : 0,
+          'درجة الحضور': g.attendance_score != null ? g.attendance_score : 0,
+          'المجموع النهائي': g.final_grade != null ? g.final_grade : 0
         }));
 
         await exportMultiSheetExcelFile([

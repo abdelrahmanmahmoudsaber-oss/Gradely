@@ -80,19 +80,42 @@ export default function App() {
       } else {
         // Fallback for students who authenticated via secure verify_legacy_login
         const studentSession = localStorage.getItem('gradely_student_session');
-        if (studentSession) {
+        const storedToken = localStorage.getItem('gradely_session_token');
+        if (studentSession && storedToken) {
           try {
             const parsed = JSON.parse(studentSession);
             if (parsed && parsed.role === 'student' && parsed.user_id) {
-              setUser(parsed);
-              setAuthLoading(false);
-              return;
+              // ISSUE-27 & Attendance fix: validate the stored token server-side for THIS specific user.
+              // A forged, expired, or mismatched localStorage entry cannot pass a live server check.
+              const { data: isValid, error: rpcErr } = await supabase.rpc('verify_student_token_for_user', {
+                p_session_token: storedToken,
+                p_user_id: parsed.user_id
+              });
+              if (isValid === true) {
+                // Token is valid and belongs to this student — restore session
+                setUser({ ...parsed, session_token: storedToken });
+                setAuthLoading(false);
+                return;
+              }
+              // Transitional fallback if verify_student_token_for_user RPC is not yet deployed
+              if (rpcErr && (rpcErr.code === 'PGRST202' || rpcErr.message?.includes('not find'))) {
+                const { error: validationErr } = await supabase.rpc('get_my_attendance', {
+                  p_session_token: storedToken
+                });
+                if (!validationErr) {
+                  setUser({ ...parsed, session_token: storedToken });
+                  setAuthLoading(false);
+                  return;
+                }
+              }
+              // Token invalid, expired, or belongs to another user — clear session
             }
           } catch (e) {}
         }
         setUser(null);
         localStorage.removeItem('gradely_user_display');
         localStorage.removeItem('gradely_student_session');
+        localStorage.removeItem('gradely_session_token');
         cacheManager.clear();
       }
       setAuthLoading(false);
@@ -136,9 +159,36 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    cacheManager.clear();
-    await supabase.auth.signOut();
+    // 1. Revoke the server-side student session token BEFORE clearing local state.
+    //    This ensures the token is invalidated on the server so it cannot be reused
+    //    even if an attacker captures it from memory or network traffic.
+    //    We attempt revocation even if the user is not technically a 'student' role,
+    //    because any legacy-login user may have a session token stored.
+    try {
+      const storedToken = localStorage.getItem('gradely_session_token');
+      if (storedToken) {
+        // Fire-and-forget with a short timeout — never block logout on RPC failure.
+        const rpcPromise = supabase.rpc('revoke_student_session', {
+          p_session_token: storedToken
+        });
+        // Wait max 3 seconds; proceed regardless of outcome
+        await Promise.race([
+          rpcPromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+        ]).catch(() => {
+          // Silently absorb: network error or timeout should not prevent logout
+        });
+      }
+    } catch {
+      // Never block logout on revocation failure
+    }
+
+    // 2. Sign out of Supabase Auth (invalidates Supabase JWT session for admins/TAs)
+    await supabase.auth.signOut().catch(() => {});
+
+    // 3. Clear all local state and storage
     setUser(null);
+    cacheManager.clear();
     localStorage.removeItem('gradely_user_display');
     localStorage.removeItem('gradely_student_session');
     localStorage.removeItem('gradely_session_token');

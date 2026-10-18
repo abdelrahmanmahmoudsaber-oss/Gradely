@@ -111,13 +111,18 @@ export default function Login({ onLogin }) {
         }
 
         if (rpcResult && rpcResult.error === 'rate_limited') {
-          throw new Error(rpcResult.message || 'تم تجاوز عدد محاولات الدخول الخاطئة المسموحة. يرجى الانتظار 15 دقيقة ثم المحاولة مجدداً.');
+          throw new Error(rpcResult.message || 'تم تجاوز عدد محاولات الدخول الخاطئة المسموحة. يرجى الانتظار ثم المحاولة مجدداً.');
+        }
+
+        if (rpcResult && rpcResult.error === 'session_creation_failed') {
+          throw new Error(rpcResult.message || 'تعذر حفظ جلسة الدخول. يرجى المحاولة مرة أخرى لاحقاً.');
         }
 
         if (rpcResult && rpcResult.success) {
-          if (rpcResult.session_token) {
-            localStorage.setItem('gradely_session_token', rpcResult.session_token);
+          if (!rpcResult.session_token) {
+            throw new Error('فشل استلام رمز الجلسة الآمنة من الخادم. يرجى المحاولة مرة أخرى.');
           }
+          localStorage.setItem('gradely_session_token', rpcResult.session_token);
           const finalUser = {
             user_id: rpcResult.user_id || candUserId,
             name: rpcResult.name,
@@ -125,7 +130,7 @@ export default function Login({ onLogin }) {
             year_level: rpcResult.year_level,
             section: rpcResult.section,
             assigned_subjects: rpcResult.assigned_subjects || [],
-            session_token: rpcResult.session_token || null
+            session_token: rpcResult.session_token
           };
 
           if (finalUser && finalUser.user_id) {

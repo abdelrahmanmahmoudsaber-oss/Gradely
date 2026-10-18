@@ -37,19 +37,13 @@ export const cacheManager = {
 
 /**
  * Checks if a user is the Super Admin (مدير النظام العام).
- * Strictly recognizes Super Admin user IDs and 'super_admin' role.
- * Regular teaching assistants (role: 'admin') return false.
+ * Relies ONLY on the server-authoritative `role` field returned from the DB.
+ * Never hardcodes user identifiers in client-side code (ISSUE-26 fix).
  */
 export const isSuperUser = (user) => {
   if (!user) return false;
   const role = (user.role || '').toLowerCase();
-  const uid = (user.user_id || '').toString().trim().toLowerCase();
 
-  // 1. Explicit super_admin role in DB
-  if (role === 'super_admin') return true;
-
-  // 2. The Main Administrator account ONLY (Never regular TAs like amahmoudsaber2026)
-  if (uid === 'admin' || uid === 'amahmoudsaber20262027217@@') return true;
-
-  return false;
+  // Sole authoritative check: super_admin role assigned by the database
+  return role === 'super_admin';
 };
