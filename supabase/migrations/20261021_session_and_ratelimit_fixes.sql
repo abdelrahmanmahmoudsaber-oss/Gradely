@@ -340,7 +340,7 @@ BEGIN
       WHERE user_id = v_clean_id;
     EXCEPTION WHEN OTHERS THEN
       NULL;
-    END IF;
+    END;
   END IF;
 
   DELETE FROM public.student_sessions WHERE user_id = v_user.user_id;
