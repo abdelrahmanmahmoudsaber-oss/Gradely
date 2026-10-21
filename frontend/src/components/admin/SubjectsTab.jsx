@@ -336,8 +336,8 @@ export default function SubjectsTab({ user }) {
     const sampleData = [
       {
         'Subject': 'Introduction to Operation Research',
-        'ID': '2200304',
-        'Name': 'roshdy ahmed roshdy',
+        'ID': '20240001',
+        'Name': 'طالب تجريبي',
         'Section': '1',
         'Group': 'A',
         'CourseLevel': '2',
@@ -347,8 +347,8 @@ export default function SubjectsTab({ user }) {
       },
       {
         'Subject': 'Microcontrollers',
-        'ID': '2200304',
-        'Name': 'roshdy ahmed roshdy',
+        'ID': '20240001',
+        'Name': 'طالب تجريبي',
         'Section': '2',
         'Group': 'A',
         'CourseLevel': '3',
@@ -358,8 +358,8 @@ export default function SubjectsTab({ user }) {
       },
       {
         'Subject': 'Advanced Software Engineering',
-        'ID': '2200304',
-        'Name': 'roshdy ahmed roshdy',
+        'ID': '20240001',
+        'Name': 'طالب تجريبي',
         'Section': '3',
         'Group': 'B',
         'CourseLevel': '3',
@@ -369,8 +369,8 @@ export default function SubjectsTab({ user }) {
       },
       {
         'Subject': 'Logic Design',
-        'ID': '2200304',
-        'Name': 'roshdy ahmed roshdy',
+        'ID': '20240001',
+        'Name': 'طالب تجريبي',
         'Section': '4',
         'Group': 'B',
         'CourseLevel': '1',

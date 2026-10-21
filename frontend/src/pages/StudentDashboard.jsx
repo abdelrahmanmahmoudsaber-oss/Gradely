@@ -342,13 +342,28 @@ export default function StudentDashboard({ user, onLogout }) {
     try {
       const sessionToken = user?.session_token || localStorage.getItem('gradely_session_token') || '';
 
+      // Fetch subjects via secure student RPC first, with graceful fallback
+      let subData = [];
+      try {
+        const { data: rpcSubs, error: rpcErr } = await supabase.rpc('get_my_subjects', { p_session_token: sessionToken });
+        if (!rpcErr && Array.isArray(rpcSubs) && rpcSubs.length > 0) {
+          subData = rpcSubs;
+        }
+      } catch (e) {
+        console.warn('RPC subjects fallback notice:', e);
+      }
+
       const [subRes, adminRes] = await Promise.all([
-        supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, excluded_students'),
+        subData.length > 0 
+          ? Promise.resolve({ data: subData }) 
+          : supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, excluded_students'),
         supabase.from('users').select('id, user_id, name, role, assigned_subjects').in('role', ['admin', 'super_admin'])
       ]);
 
       setAllAdmins(adminRes.data || []);
-      const subData = subRes.data || [];
+      if (subData.length === 0) {
+        subData = subRes.data || [];
+      }
 
       // Fetch attendance: try secure RPC first, with fallback to direct query
       let attData = [];
