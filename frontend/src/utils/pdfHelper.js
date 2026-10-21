@@ -6,6 +6,16 @@
 
 import { getSectionInstructorName as resolveSectionTA } from './sectionHelper';
 
+const escapeHtml = (str) => {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+};
+
 export function printStudentReportPDF({ student, subjects, grades, attendance, options }) {
   const {
     includeAttendanceDetails = true,
@@ -250,8 +260,8 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
     subjectsHtml += `
       <div class="subject-block">
         <div class="subject-head">
-          <span class="sub-name">${idx + 1}. ${sub.name} (فرقة المقرر: ${normalizeYear(sub.year_level)}) — <strong style="color: #059669;">السكشن: ${studentSec}</strong></span>
-          <span class="sub-instructor">المشرف / المعيد: <strong>${taName}</strong></span>
+          <span class="sub-name">${idx + 1}. ${escapeHtml(sub.name)} (فرقة المقرر: ${escapeHtml(normalizeYear(sub.year_level))}) — <strong style="color: #059669;">السكشن: ${escapeHtml(studentSec)}</strong></span>
+          <span class="sub-instructor">المشرف / المعيد: <strong>${escapeHtml(taName)}</strong></span>
         </div>
         ${gradesCardsHtml}
         ${weeksGridHtml}
@@ -268,7 +278,7 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
     <html lang="ar" dir="rtl">
     <head>
       <meta charset="UTF-8">
-      <title>التقرير الأكاديمي - ${student.name}</title>
+      <title>التقرير الأكاديمي - ${escapeHtml(student.name)}</title>
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
       <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -435,11 +445,11 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
 
       <div class="student-info-box">
         <div>
-          <h2 class="student-name">${student.name}</h2>
+          <h2 class="student-name">${escapeHtml(student.name)}</h2>
           <div class="meta-tags">
-            <span class="tag tag-id">الرقم الأكاديمي: ${student.user_id}</span>
-            <span class="tag tag-year">الفرقة ${inferStudentYear(student.user_id, student.year_level)}</span>
-            <span class="tag tag-sec">السكشن: ${normalizeSection(student.section || 'S1')}</span>
+            <span class="tag tag-id">الرقم الأكاديمي: ${escapeHtml(student.user_id)}</span>
+            <span class="tag tag-year">الفرقة ${escapeHtml(inferStudentYear(student.user_id, student.year_level))}</span>
+            <span class="tag tag-sec">السكشن: ${escapeHtml(normalizeSection(student.section || 'S1'))}</span>
           </div>
         </div>
       </div>
@@ -514,8 +524,8 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
   const cardsHtml = credentialsList.map((item) => `
     <div class="card-item">
       <div class="card-header-bar">
-        <span class="st-name">${item.name || 'طالب'}</span>
-        <span class="st-meta">الفرقة ${inferStudentYear(item.user_id, item.year_level)} - ${normalizeSection(item.section)}</span>
+        <span class="st-name">${escapeHtml(item.name || 'طالب')}</span>
+        <span class="st-meta">الفرقة ${escapeHtml(inferStudentYear(item.user_id, item.year_level))} - ${escapeHtml(normalizeSection(item.section))}</span>
       </div>
 
       <div class="field-row">
@@ -525,7 +535,7 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
           </svg>
           <span class="field-label">USER</span>
         </div>
-        <div class="field-input-box user-box">${item.user_id}</div>
+        <div class="field-input-box user-box">${escapeHtml(item.user_id)}</div>
       </div>
 
       <div class="field-row">
@@ -535,7 +545,7 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
           </svg>
           <span class="field-label">PASSWORD</span>
         </div>
-        <div class="field-input-box pass-box">${item.password}</div>
+        <div class="field-input-box pass-box">${escapeHtml(item.password)}</div>
       </div>
 
       <div class="card-bottom-bar">
@@ -552,7 +562,7 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
     <html dir="rtl" lang="ar">
     <head>
       <meta charset="UTF-8" />
-      <title>${title}</title>
+      <title>${escapeHtml(title)}</title>
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
       <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;700;800;900&family=Inter:wght@600;700;800&family=JetBrains+Mono:wght@700;800&display=swap" rel="stylesheet">

@@ -70,6 +70,7 @@ export default function StudentDashboard({ user, onLogout }) {
   // Password Change State
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [isForcePasswordChange, setIsForcePasswordChange] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [passwordMsg, setPasswordMsg] = useState({ type: '', text: '' });
@@ -83,6 +84,11 @@ export default function StudentDashboard({ user, onLogout }) {
     e.preventDefault();
     setPasswordMsg({ type: '', text: '' });
 
+    if (!isForcePasswordChange && !currentPassword) {
+      setPasswordMsg({ type: 'error', text: 'يرجى إدخال كلمة المرور الحالية أولاً' });
+      return;
+    }
+
     if (newPassword.length < 6) {
       setPasswordMsg({ type: 'error', text: 'يجب أن تتكون كلمة المرور الجديدة من 6 أحرف أو أرقام على الأقل' });
       return;
@@ -94,8 +100,22 @@ export default function StudentDashboard({ user, onLogout }) {
 
     try {
       setPasswordUpdating(true);
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
-      if (error) throw error;
+      const sessionToken = user?.session_token || localStorage.getItem('gradely_session_token') || '';
+
+      // 1. Try secure student_change_password RPC
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('student_change_password', {
+        p_session_token: sessionToken,
+        p_current_password: currentPassword || '',
+        p_new_password: newPassword
+      });
+
+      if (rpcErr) {
+        // Fallback to Supabase Auth if GoTrue session exists
+        const { error: authErr } = await supabase.auth.updateUser({ password: newPassword });
+        if (authErr) throw new Error(rpcErr.message || authErr.message || 'حدث خطأ أثناء تحديث كلمة المرور');
+      } else if (rpcRes && !rpcRes.success) {
+        throw new Error(rpcRes.message || 'كلمة المرور الحالية غير صحيحة');
+      }
 
       sessionStorage.removeItem('gradely_must_change_pwd_' + user.user_id);
       localStorage.setItem('gradely_pwd_updated_' + user.user_id, 'true');
@@ -103,6 +123,7 @@ export default function StudentDashboard({ user, onLogout }) {
       setTimeout(() => {
         setShowPasswordModal(false);
         setIsForcePasswordChange(false);
+        setCurrentPassword('');
         setNewPassword('');
         setConfirmNewPassword('');
         setPasswordMsg({ type: '', text: '' });
@@ -322,7 +343,7 @@ export default function StudentDashboard({ user, onLogout }) {
       const sessionToken = user?.session_token || localStorage.getItem('gradely_session_token') || '';
 
       const [subRes, adminRes] = await Promise.all([
-        supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, excluded_students'),
+        supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name'),
         supabase.from('users').select('id, user_id, name, role, assigned_subjects').eq('role', 'admin')
       ]);
 
@@ -391,6 +412,15 @@ export default function StudentDashboard({ user, onLogout }) {
 
       const parsed = parseVisibilityFromSubjects(subData);
       if (parsed) currentVisibility = parsed;
+
+      // Also fetch system visibility safely from RPC (does not expose internal admin config)
+      try {
+        const { data: visRpc } = await supabase.rpc('get_system_visibility');
+        if (visRpc && typeof visRpc === 'object' && Object.keys(visRpc).length > 0) {
+          if (visRpc.global) currentVisibility.global = visRpc.global;
+          Object.assign(currentVisibility, visRpc);
+        }
+      } catch (_) {}
 
       setVisibility(currentVisibility);
       const gVis = currentVisibility.global || currentVisibility;
@@ -1274,6 +1304,23 @@ export default function StudentDashboard({ user, onLogout }) {
             )}
 
             <form onSubmit={handleChangePassword}>
+              {!isForcePasswordChange && (
+                <div style={{ marginBottom: '1rem' }}>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                    كلمة المرور الحالية:
+                  </label>
+                  <input 
+                    type="password"
+                    required
+                    placeholder="أدخل كلمة المرور الحالية"
+                    className="input-field"
+                    value={currentPassword}
+                    onChange={e => setCurrentPassword(e.target.value)}
+                    style={{ width: '100%', boxSizing: 'border-box' }}
+                  />
+                </div>
+              )}
+
               <div style={{ marginBottom: '1rem' }}>
                 <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>
                   كلمة المرور الجديدة:
