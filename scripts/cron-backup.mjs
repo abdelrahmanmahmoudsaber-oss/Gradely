@@ -30,11 +30,14 @@ try {
 }
 
 // Environment Configuration (with safe defaults from frontend/.env if present)
+const DEFAULT_EMAIL = 'abdo2171999m@gmail.com';
+const DEFAULT_WEBHOOK = 'https://script.google.com/macros/s/AKfycbykd7LVJ8p0dqrHqW9UUJ04i40qFwRTa0b98YPA1NgXzJ3U0EECa9i-EbiVa70pvHzbiQ/exec';
+
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://bbdyexsaqnlremprfmph.supabase.co';
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || 'sb_publishable_7lextLm1cEOuRlz4XMiV9w_F01aZaho';
 const BACKUP_SECRET = process.env.BACKUP_CRON_SECRET || 'gradely_backup_cron_sec_7f9a2b8e4c1d6e5a';
-const BACKUP_EMAIL = process.env.BACKUP_EMAIL || process.env.DEFAULT_BACKUP_EMAIL || '';
-const WEBHOOK_URL = process.env.BACKUP_WEBHOOK_URL || '';
+const BACKUP_EMAIL = process.env.BACKUP_EMAIL || DEFAULT_EMAIL;
+const WEBHOOK_URL = process.env.BACKUP_WEBHOOK_URL || DEFAULT_WEBHOOK;
 
 console.log('╔══════════════════════════════════════════════════════════════════╗');
 console.log('║  Gradely Automated Cloud Backup Generator (Zero-Browser)         ║');
