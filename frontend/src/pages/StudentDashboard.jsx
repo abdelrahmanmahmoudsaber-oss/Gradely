@@ -343,7 +343,7 @@ export default function StudentDashboard({ user, onLogout }) {
       const sessionToken = user?.session_token || localStorage.getItem('gradely_session_token') || '';
 
       const [subRes, adminRes] = await Promise.all([
-        supabase.from('subjects').select('id, name, year_level, total_weeks'),
+        supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, excluded_students'),
         supabase.from('users').select('id, user_id, name, role, assigned_subjects').in('role', ['admin', 'super_admin'])
       ]);
 

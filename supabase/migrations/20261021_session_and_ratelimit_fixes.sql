@@ -102,17 +102,16 @@ CREATE TRIGGER trg_protect_user_role
 
 
 -- ============================================================
--- FIX 4: REVOKE instructor_name FROM ANON ON subjects TABLE
+-- FIX 4: ENSURE SUBJECT METADATA (instructor_name & excluded_students) READABLE BY STUDENTS
 -- ============================================================
--- The anon role must not see who teaches a subject before login.
--- We rebuild the grant without instructor_name.
-
+-- Students use the anon client and need instructor_name and excluded_students
+-- to resolve the correct Doctor and Section TA names in StudentDashboard.
 REVOKE ALL ON TABLE public.subjects FROM anon;
 
-GRANT SELECT (id, name, year_level, total_weeks, created_at)
+GRANT SELECT (id, name, year_level, total_weeks, instructor_name, excluded_students, created_at)
   ON TABLE public.subjects TO anon;
 
--- authenticated users (logged-in admins/students) keep full read access
+-- authenticated users (logged-in admins) keep full read access
 GRANT SELECT ON TABLE public.subjects TO authenticated;
 
 
