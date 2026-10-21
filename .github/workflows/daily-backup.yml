@@ -33,7 +33,7 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://bbdyexsaqnlremprfmph.supabase.co' }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || 'sb_publishable_7lextLm1cEOuRlz4XMiV9w_F01aZaho' }}
           BACKUP_CRON_SECRET: ${{ secrets.BACKUP_CRON_SECRET || 'gradely_backup_cron_sec_7f9a2b8e4c1d6e5a' }}
-          BACKUP_EMAIL: ${{ secrets.BACKUP_EMAIL || vars.BACKUP_EMAIL }}
-          BACKUP_WEBHOOK_URL: ${{ secrets.BACKUP_WEBHOOK_URL || vars.BACKUP_WEBHOOK_URL }}
+          BACKUP_EMAIL: ${{ secrets.BACKUP_EMAIL || vars.BACKUP_EMAIL || 'abdo2171999m@gmail.com' }}
+          BACKUP_WEBHOOK_URL: ${{ secrets.BACKUP_WEBHOOK_URL || vars.BACKUP_WEBHOOK_URL || 'https://script.google.com/macros/s/AKfycbykd7LVJ8p0dqrHqW9UUJ04i40qFwRTa0b98YPA1NgXzJ3U0EECa9i-EbiVa70pvHzbiQ/exec' }}
         run: |
           NODE_PATH=frontend/node_modules node scripts/cron-backup.mjs
