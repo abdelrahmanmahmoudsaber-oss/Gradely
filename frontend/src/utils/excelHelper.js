@@ -353,7 +353,13 @@ export async function exportAttendanceTemplateExcel(students, subjectName, total
   // Populate Student Rows
   students.forEach((stu, idx) => {
     const grp = getStudentLectureGroup(stu);
-    const rowValues = [idx + 1, stu.section || 'S01', `Group ${grp}`, stu.user_id, stu.name];
+    const rowValues = [
+      idx + 1, 
+      sanitizeCell(stu.section || 'S01'), 
+      sanitizeCell(`Group ${grp}`), 
+      sanitizeCell(stu.user_id), 
+      sanitizeCell(stu.name)
+    ];
     for (let w = 1; w <= totalWeeks; w++) {
       rowValues.push('');
     }

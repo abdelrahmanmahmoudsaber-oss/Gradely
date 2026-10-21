@@ -43,7 +43,6 @@ export default function App() {
           .single();
         if (res.data) {
           data = res.data;
-          supabase.from('users').update({ auth_id: authUserId }).eq('id', res.data.id).then();
         }
       }
     }

@@ -227,7 +227,7 @@ export default function StudentsTab({ user }) {
         assigned_subjects: addingType === 'admin' ? assignedSubjects : null,
       };
 
-      const { data: existing } = await supabase.from('users').select('id, user_id').eq('user_id', trimId).maybeSingle();
+      const { data: existing } = await supabase.from('users').select('id, user_id, name').eq('user_id', trimId).maybeSingle();
       if (existing) {
         if (trimPass) {
           try {
@@ -251,6 +251,18 @@ export default function StudentsTab({ user }) {
           setModalError('❌ فشل في تعديل بيانات المستخدم: ' + updateErr.message);
           setSubmittingUser(false);
           return;
+        }
+
+        // Propagate TA / Instructor name updates immediately to subjects table
+        if (addingType === 'admin') {
+          try {
+            await supabase.from('subjects').update({ instructor_name: trimName }).eq('instructor_id', trimId);
+            if (existing.name && existing.name !== trimName) {
+              await supabase.from('subjects').update({ instructor_name: trimName }).eq('instructor_name', existing.name);
+            }
+          } catch (syncErr) {
+            console.warn('Sync instructor_name on subjects:', syncErr);
+          }
         }
         setMessage('✅ تم تعديل بيانات المستخدم' + (trimPass ? ' وتحديث كلمة المرور المشفرة' : '') + ' بنجاح');
       } else {

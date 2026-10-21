@@ -63,8 +63,7 @@ export const matchInstructor = (query, instructorsList = []) => {
 
     // Abdelrahman aliases (handles Abdelrahman Mahmoud / amahmoud... / admin)
     const isAbdelrahmanInst = /عبد\s*الرحمن|عبدالرحمن|abdelrahman|abdurrahman|abdulrahman/i.test(inst.name || '') ||
-                              iIdNorm === 'admin' ||
-                              inst.role === 'super_admin';
+                              iIdNorm === 'admin';
     if (isAbdelrahmanQuery && isAbdelrahmanInst) {
       return inst;
     }
@@ -141,7 +140,19 @@ export const getSectionInstructorName = (subOrId, sec, allAdmins = [], subjectsL
     }
   }
 
-  // 1. Check currentUser.assigned_subjects if available
+  // 1. Search in allAdmins list FIRST (Canonical live truth from database)
+  // If an admin or TA has their name updated in users, it immediately reflects here!
+  if (subId && Array.isArray(allAdmins) && allAdmins.length > 0) {
+    const liveAdmin = allAdmins.find(adm => 
+      Array.isArray(adm.assigned_subjects) &&
+      adm.assigned_subjects.includes(subId + ':' + secNorm)
+    );
+    if (liveAdmin && (liveAdmin.name || liveAdmin.user_id)) {
+      return liveAdmin.name || liveAdmin.user_id;
+    }
+  }
+
+  // 2. Check currentUser.assigned_subjects if available
   if (currentUser && Array.isArray(currentUser.assigned_subjects) && subId) {
     const directMatch = currentUser.assigned_subjects.find(
       (e) => typeof e === 'string' && (e.startsWith(subId + ':' + secNorm + ':') || e.startsWith(subId + ':'))
@@ -154,9 +165,9 @@ export const getSectionInstructorName = (subOrId, sec, allAdmins = [], subjectsL
     }
   }
 
-  // 2. Check subject.excluded_students metadata
+  // 3. Check subject.excluded_students metadata
   if (subObj && Array.isArray(subObj.excluded_students)) {
-    // 2a. Direct section tag
+    // 3a. Direct section tag
     const directTagPrefix = 'TA_' + secNorm + ':';
     const directEntry = subObj.excluded_students.find(
       (e) => typeof e === 'string' && e.startsWith(directTagPrefix)
@@ -166,7 +177,7 @@ export const getSectionInstructorName = (subOrId, sec, allAdmins = [], subjectsL
       if (val) return val;
     }
 
-    // 2b. CONFIG_SECTION_TAS JSON map
+    // 3b. CONFIG_SECTION_TAS JSON map
     const configEntry = subObj.excluded_students.find(
       (e) => typeof e === 'string' && e.startsWith('CONFIG_SECTION_TAS:')
     );
@@ -180,19 +191,19 @@ export const getSectionInstructorName = (subOrId, sec, allAdmins = [], subjectsL
     }
   }
 
-  // 3. Search in allAdmins list
+  // 4. Fallback to general admin assignment for the whole subject
   if (subId && Array.isArray(allAdmins) && allAdmins.length > 0) {
     for (const adm of allAdmins) {
       if (
         Array.isArray(adm.assigned_subjects) &&
-        adm.assigned_subjects.includes(subId + ':' + secNorm)
+        adm.assigned_subjects.includes(subId)
       ) {
         return adm.name || adm.user_id;
       }
     }
   }
 
-  // 4. Fallback to main instructor_name on subject
+  // 5. Fallback to main instructor_name on subject
   if (subObj?.instructor_name) {
     return subObj.instructor_name;
   }

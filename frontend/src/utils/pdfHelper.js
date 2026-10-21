@@ -183,7 +183,7 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
         let statusClass = 'unrecorded';
         const stuSec = getStudentSubSection(student, sub.id);
         const wDate = getSubjectWeekDate(sub, w, stuSec, record);
-        let dateHint = wDate ? `<div class="w-date" style="color:#2563eb;font-weight:bold;font-size:0.65rem;">${formatDisplayDate(wDate)}</div>` : '';
+        let dateHint = wDate ? `<div class="w-date" style="color:#2563eb;font-weight:bold;font-size:0.65rem;">${escapeHtml(formatDisplayDate(wDate))}</div>` : '';
         
         if (record) {
           const norm = normalizeStatus(record.status);
@@ -213,7 +213,7 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
           let statusText = '—';
           let statusClass = 'unrecorded';
           const wDate = getSubjectLectureDate(sub, w) || (record?.created_at ? record.created_at.split('T')[0] : '');
-          let dateHint = wDate ? `<div class="w-date" style="color:#0d9488;font-weight:bold;font-size:0.65rem;">${formatDisplayDate(wDate)}</div>` : '';
+          let dateHint = wDate ? `<div class="w-date" style="color:#0d9488;font-weight:bold;font-size:0.65rem;">${escapeHtml(formatDisplayDate(wDate))}</div>` : '';
           
           if (record) {
             const norm = normalizeStatus(record.status);
