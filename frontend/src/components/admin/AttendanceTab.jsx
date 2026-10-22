@@ -6,9 +6,10 @@ import {
   Download, Users, UserPlus, UserMinus, UserCheck, CheckSquare, 
   FileText, Filter, Calendar, Save, Search, CheckCircle2, XCircle, 
   Clock, AlertCircle, LayoutGrid, List, RotateCcw, Copy, Check, MessageSquare, X, FileSpreadsheet,
-  WifiOff, Wifi, RefreshCw
+  WifiOff, Wifi, RefreshCw, Printer
 } from 'lucide-react';
 import { getSectionInstructorName as resolveSectionTA } from '../../utils/sectionHelper';
+import { printWeekAttendancePDF } from '../../utils/pdfHelper';
 
 export const SEMESTER_START_DATE = '2026-10-03';
 
@@ -1034,6 +1035,25 @@ export default function AttendanceTab({ user }) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+    } else if (exportFormat === 'pdf') {
+      const activeInst = attendanceType === 'lecture'
+        ? (currentSub?.instructor_name || 'أستاذ المادة')
+        : (getSectionInstructorName(selectedSubject, selectedSection) || currentSub?.instructor_name || 'معيد المادة');
+
+      printWeekAttendancePDF({
+        subjectName: subName,
+        yearLevel: yr,
+        sectionName: secName !== 'All' ? `سكشن ${secName}` : 'كافة السكاشن',
+        weekNum: week,
+        sessionDate: sessionDate,
+        instructorName: activeInst,
+        attendanceType: attendanceType,
+        filterType: exportFilter,
+        students: targetStudents,
+        attendanceRecords: attendanceRecords,
+        excuseReasons: excuseReasons,
+        getStudentSubSection: (s) => getStudentSubSection(s, selectedSubject)
+      });
     } else {
       // Excel Export
       const excelRows = targetStudents.map((s, idx) => {
@@ -1268,7 +1288,7 @@ export default function AttendanceTab({ user }) {
             style={{background:'var(--primary)',display:'flex',alignItems:'center',gap:'8px',padding:'9px 16px',fontSize:'0.9rem'}}
             title="تصدير كشف الحضور أو الغياب كملف TXT أو Excel"
           >
-            <Download size={18} /> تصدير كشف الأسبوع (.txt / Excel)
+            <Download size={18} /> تصدير كشف الأسبوع (.txt / Excel / PDF)
           </button>
           {attendanceType === 'lecture' && (
             <button
@@ -2164,7 +2184,7 @@ export default function AttendanceTab({ user }) {
             <div style={{display:'flex',flexDirection:'column',gap:'1.2rem'}}>
               <div>
                 <label style={{display:'block',marginBottom:'6px',fontSize:'0.9rem',fontWeight:700}}>1. صيغة ونوع الملف:</label>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px'}}>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(130px, 1fr))',gap:'10px'}}>
                   <label style={{
                     display:'flex',alignItems:'center',gap:'8px',padding:'10px',borderRadius:'8px',cursor:'pointer',
                     background: exportFormat === 'txt' ? 'rgba(79, 70, 229, 0.15)' : 'var(--bg)',
@@ -2183,6 +2203,16 @@ export default function AttendanceTab({ user }) {
                     <input type="radio" name="exportFormat" value="xlsx" checked={exportFormat === 'xlsx'} onChange={() => setExportFormat('xlsx')} />
                     <FileSpreadsheet size={18} style={{color:'var(--success)'}} />
                     <span>شيت إكسيل (.xlsx)</span>
+                  </label>
+
+                  <label style={{
+                    display:'flex',alignItems:'center',gap:'8px',padding:'10px',borderRadius:'8px',cursor:'pointer',
+                    background: exportFormat === 'pdf' ? 'rgba(239, 68, 68, 0.15)' : 'var(--bg)',
+                    border: exportFormat === 'pdf' ? '1px solid #ef4444' : '1px solid var(--border)'
+                  }}>
+                    <input type="radio" name="exportFormat" value="pdf" checked={exportFormat === 'pdf'} onChange={() => setExportFormat('pdf')} />
+                    <Printer size={18} style={{color:'#ef4444'}} />
+                    <span>مستند طباعة (.pdf)</span>
                   </label>
                 </div>
               </div>

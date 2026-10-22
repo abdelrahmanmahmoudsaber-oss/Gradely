@@ -295,10 +295,22 @@ export default function StudentDashboard({ user, onLogout }) {
           if (typeof item === 'string') {
             if (item.startsWith('CONFIG:')) {
               try { settings.global = JSON.parse(item.replace('CONFIG:', '')); } catch (e) {}
+            } else if (item.startsWith('CONFIG_VIS_SUB:')) {
+              try {
+                const parsed = JSON.parse(item.replace('CONFIG_VIS_SUB:', ''));
+                if (parsed && typeof parsed === 'object') {
+                  settings[sub.id] = parsed[sub.id] || parsed;
+                }
+              } catch (e) {}
             } else if (item.startsWith('CONFIG_SUB:')) {
               try {
                 const parsed = JSON.parse(item.replace('CONFIG_SUB:', ''));
-                Object.assign(settings, parsed);
+                if (parsed[sub.id] && !settings[sub.id]) {
+                  settings[sub.id] = parsed[sub.id];
+                }
+                if (parsed.global && !settings.global) {
+                  settings.global = parsed.global;
+                }
               } catch (e) {}
             } else if (item.startsWith('CONFIG_CUSTOM_COLS:')) {
               try {
@@ -409,7 +421,7 @@ export default function StudentDashboard({ user, onLogout }) {
       if (!grdData || grdData.length === 0) {
         const { data: grdDirect } = await supabase
           .from('grades')
-          .select('subject_id, quiz_1, quiz_2, project, attendance_score, final_grade')
+          .select('subject_id, quiz_1, quiz_2, project, attendance_score, final_grade, custom_grades')
           .eq('student_id', user.user_id);
         if (Array.isArray(grdDirect) && grdDirect.length > 0) {
           grdData = grdDirect;
@@ -535,13 +547,19 @@ export default function StudentDashboard({ user, onLogout }) {
     const absSubCount = subAtt.filter(a => normalizeStatus(a.status) === 'absent').length;
     const subRate = subAtt.length > 0 ? Math.round((attendedCount / subAtt.length) * 100) : 100;
 
-    const g = grades.find(grd => grd.subject_id === sub.id) || {};
+    const rawG = grades.find(grd => grd.subject_id === sub.id) || {};
+    const g = { ...rawG, ...(rawG.custom_grades || {}) };
     const subVis = getSubVisibility(sub.id);
     let subTotal = 0;
     if (subVis.showQuiz1) subTotal += (g.quiz_1 || 0);
     if (subVis.showQuiz2) subTotal += (g.quiz_2 || 0);
     if (subVis.showProject) subTotal += (g.project || 0);
     if (subVis.showAttendanceScore) subTotal += (g.attendance_score || 0);
+    customColumnsList
+      .filter(col => (col.scope === 'global' || col.scope === sub.id) && subVis[col.id] !== false)
+      .forEach(col => {
+        subTotal += (parseFloat(g[col.id]) || 0);
+      });
 
     if (subAtt.length > 0 && subRate > highestRate) {
       highestRate = subRate;
@@ -572,7 +590,8 @@ export default function StudentDashboard({ user, onLogout }) {
   });
 
   const currentSubject = subjects.find(s => s.id === selectedSubjectId);
-  const currentGrades = grades.find(g => g.subject_id === selectedSubjectId) || {};
+  const rawCurrentGrades = grades.find(g => g.subject_id === selectedSubjectId) || {};
+  const currentGrades = { ...rawCurrentGrades, ...(rawCurrentGrades.custom_grades || {}) };
   const currentAttendance = attendance.filter(a => a.subject_id === selectedSubjectId);
   const absCount = currentAttendance.filter(a => normalizeStatus(a.status) === 'absent').length;
 
@@ -584,6 +603,12 @@ export default function StudentDashboard({ user, onLogout }) {
   if (currentSubVis.showQuiz2) { visibleTotal += (currentGrades.quiz_2 || 0); hasAnyGradeVisible = true; }
   if (currentSubVis.showProject) { visibleTotal += (currentGrades.project || 0); hasAnyGradeVisible = true; }
   if (currentSubVis.showAttendanceScore) { visibleTotal += (currentGrades.attendance_score || 0); hasAnyGradeVisible = true; }
+  customColumnsList
+    .filter(col => (col.scope === 'global' || col.scope === selectedSubjectId) && currentSubVis[col.id] !== false)
+    .forEach(col => {
+      visibleTotal += (parseFloat(currentGrades[col.id]) || 0);
+      hasAnyGradeVisible = true;
+    });
 
   return (
     <div style={{minHeight: '100vh', width: '100%', flex: 1, background: 'var(--bg)', display: 'flex', flexDirection: 'column', overflowX: 'hidden'}}>

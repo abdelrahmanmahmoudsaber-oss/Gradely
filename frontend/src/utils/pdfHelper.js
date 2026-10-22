@@ -801,5 +801,327 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
   }
 }
 
+/**
+ * Generates and prints an official A4 Week Attendance Sheet PDF.
+ * Supports Section and Lecture attendance, status filters, counts, signatures, and RTL typography.
+ */
+export function printWeekAttendancePDF({
+  subjectName = 'المقرر الدراسي',
+  yearLevel = '',
+  sectionName = 'الكل',
+  weekNum = 1,
+  sessionDate = '',
+  instructorName = 'مشرف المادة',
+  attendanceType = 'section',
+  filterType = 'all',
+  students = [],
+  attendanceRecords = {},
+  excuseReasons = {},
+  getStudentSubSection = (s) => s.section || 'S1'
+}) {
+  const isLecture = attendanceType === 'lecture';
+  const typeLabel = isLecture ? 'محاضرة' : 'سكشن';
+  
+  let filterLabel = 'كافة الطلاب';
+  if (filterType === 'present') filterLabel = 'الحاضرون فقط';
+  else if (filterType === 'absent') filterLabel = 'الغائبون فقط';
+  else if (filterType === 'late') filterLabel = 'المتأخرون فقط';
+  else if (filterType === 'excused') filterLabel = 'أصحاب الأعذار فقط';
+
+  let countPresent = 0;
+  let countAbsent = 0;
+  let countLate = 0;
+  let countExcused = 0;
+  let countUnrecorded = 0;
+
+  students.forEach(s => {
+    const st = attendanceRecords[s.user_id];
+    if (st === 'present') countPresent++;
+    else if (st === 'absent') countAbsent++;
+    else if (st === 'late') countLate++;
+    else if (st === 'excused') countExcused++;
+    else countUnrecorded++;
+  });
+
+  const rowsHtml = students.map((s, idx) => {
+    const st = attendanceRecords[s.user_id];
+    let badgeClass = 'badge-unrecorded';
+    let statusText = 'لم يرصد';
+    if (st === 'present') { badgeClass = 'badge-present'; statusText = 'حاضر'; }
+    else if (st === 'absent') { badgeClass = 'badge-absent'; statusText = 'غائب'; }
+    else if (st === 'late') { badgeClass = 'badge-late'; statusText = 'تأخير'; }
+    else if (st === 'excused') { badgeClass = 'badge-excused'; statusText = 'عذر'; }
+
+    const sec = getStudentSubSection(s);
+    const reason = excuseReasons[s.user_id] ? escapeHtml(excuseReasons[s.user_id]) : '—';
+
+    return `
+      <tr>
+        <td style="text-align:center;font-weight:bold;color:#64748b;">${idx + 1}</td>
+        <td style="text-align:center;font-family:monospace;font-weight:bold;">${escapeHtml(s.user_id)}</td>
+        <td style="font-weight:600;">${escapeHtml(s.name)}</td>
+        <td style="text-align:center;">${escapeHtml(sec)}</td>
+        <td style="text-align:center;"><span class="badge ${badgeClass}">${statusText}</span></td>
+        <td style="font-size:0.8rem;color:#475569;text-align:center;">${reason}</td>
+        <td style="text-align:center;min-width:70px;"></td>
+      </tr>
+    `;
+  }).join('');
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html dir="rtl" lang="ar">
+    <head>
+      <meta charset="utf-8" />
+      <title>كشف غياب - ${escapeHtml(subjectName)} - أسبوع ${escapeHtml(weekNum)}</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+      <style>
+        @page {
+          size: A4 portrait;
+          margin: 12mm 10mm;
+        }
+        * {
+          box-sizing: border-box;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+        body {
+          font-family: 'Cairo', system-ui, -apple-system, sans-serif;
+          margin: 0;
+          padding: 0;
+          color: #0f172a;
+          background: #fff;
+          font-size: 11pt;
+          direction: rtl;
+        }
+        .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          border-bottom: 2px solid #0f172a;
+          padding-bottom: 10px;
+          margin-bottom: 12px;
+        }
+        .header-title h1 {
+          margin: 0;
+          font-size: 16pt;
+          font-weight: 800;
+          color: #1e1b4b;
+        }
+        .header-title p {
+          margin: 3px 0 0 0;
+          font-size: 10pt;
+          color: #475569;
+        }
+        .meta-card {
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          border-radius: 8px;
+          padding: 10px 14px;
+          margin-bottom: 12px;
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 8px;
+          font-size: 9.5pt;
+        }
+        .meta-item {
+          display: flex;
+          gap: 6px;
+        }
+        .meta-label {
+          color: #64748b;
+          font-weight: 600;
+        }
+        .meta-value {
+          color: #0f172a;
+          font-weight: 700;
+        }
+        .stats-bar {
+          display: flex;
+          gap: 10px;
+          margin-bottom: 14px;
+          flex-wrap: wrap;
+        }
+        .stat-pill {
+          padding: 4px 10px;
+          border-radius: 6px;
+          font-size: 9pt;
+          font-weight: 700;
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          border: 1px solid transparent;
+        }
+        .stat-total { background: #f1f5f9; color: #334155; border-color: #cbd5e1; }
+        .stat-present { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+        .stat-absent { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+        .stat-late { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+        .stat-excused { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 9.5pt;
+          margin-bottom: 20px;
+        }
+        th {
+          background: #1e293b;
+          color: #ffffff;
+          padding: 7px 8px;
+          font-weight: 700;
+          border: 1px solid #1e293b;
+        }
+        td {
+          padding: 6px 8px;
+          border: 1px solid #cbd5e1;
+          vertical-align: middle;
+        }
+        tr:nth-child(even) td {
+          background: #f8fafc;
+        }
+        .badge {
+          display: inline-block;
+          padding: 2px 8px;
+          border-radius: 4px;
+          font-size: 8.5pt;
+          font-weight: 700;
+          text-align: center;
+        }
+        .badge-present { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+        .badge-absent { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+        .badge-late { background: #fef3c7; color: #b45309; border: 1px solid #fcd34d; }
+        .badge-excused { background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; }
+        .badge-unrecorded { background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; }
+        .signatures {
+          display: flex;
+          justify-content: space-between;
+          margin-top: 30px;
+          padding-top: 15px;
+          border-top: 1px dashed #cbd5e1;
+          page-break-inside: avoid;
+        }
+        .sig-box {
+          text-align: center;
+          width: 200px;
+          font-size: 10pt;
+          font-weight: 700;
+          color: #334155;
+        }
+        .sig-line {
+          margin-top: 35px;
+          border-bottom: 1.5px dotted #94a3b8;
+        }
+        .footer {
+          margin-top: 25px;
+          text-align: center;
+          font-size: 8pt;
+          color: #94a3b8;
+          border-top: 1px solid #f1f5f9;
+          padding-top: 6px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div class="header-title">
+          <h1>كشف حضور وغياب الطلاب (${escapeHtml(typeLabel)})</h1>
+          <p>منصة Gradely الأكاديمية لإدارة ورصد المقررات</p>
+        </div>
+        <div style="text-align:left;font-size:9pt;color:#64748b;">
+          <div>تاريخ الطباعة: ${escapeHtml(new Date().toLocaleDateString('ar-EG'))}</div>
+          <div style="font-weight:700;color:#0f172a;margin-top:2px;">الأسبوع ${escapeHtml(weekNum)}</div>
+        </div>
+      </div>
+
+      <div class="meta-card">
+        <div class="meta-item"><span class="meta-label">المادة:</span> <span class="meta-value">${escapeHtml(subjectName)}</span></div>
+        <div class="meta-item"><span class="meta-label">الفرقة:</span> <span class="meta-value">${escapeHtml(yearLevel ? 'الفرقة ' + yearLevel : '—')}</span></div>
+        <div class="meta-item"><span class="meta-label">السكشن / المجموعة:</span> <span class="meta-value">${escapeHtml(sectionName)}</span></div>
+        <div class="meta-item"><span class="meta-label">تاريخ الجلسة:</span> <span class="meta-value">${escapeHtml(sessionDate || '—')}</span></div>
+        <div class="meta-item"><span class="meta-label">المشرف / المعيد:</span> <span class="meta-value">${escapeHtml(instructorName || '—')}</span></div>
+        <div class="meta-item"><span class="meta-label">التصفية:</span> <span class="meta-value">${escapeHtml(filterLabel)}</span></div>
+      </div>
+
+      <div class="stats-bar">
+        <div class="stat-pill stat-total">إجمالي المعروضين: ${students.length}</div>
+        <div class="stat-pill stat-present">حاضر: ${countPresent}</div>
+        <div class="stat-pill stat-absent">غائب: ${countAbsent}</div>
+        <div class="stat-pill stat-late">تأخير: ${countLate}</div>
+        <div class="stat-pill stat-excused">عذر: ${countExcused}</div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th style="width:35px;">م</th>
+            <th style="width:90px;">الرقم الأكاديمي</th>
+            <th>اسم الطالب</th>
+            <th style="width:60px;">السكشن</th>
+            <th style="width:75px;">الحالة</th>
+            <th style="width:110px;">السبب / ملاحظات</th>
+            <th style="width:80px;">التوقيع</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml || '<tr><td colspan="7" style="text-align:center;padding:20px;color:#94a3b8;">لا توجد سجلات مطابقة</td></tr>'}
+        </tbody>
+      </table>
+
+      <div class="signatures">
+        <div class="sig-box">
+          <div>توقيع المعيد / المشرف</div>
+          <div class="sig-line"></div>
+        </div>
+        <div class="sig-box">
+          <div>اعتماد أستاذ المادة</div>
+          <div class="sig-line"></div>
+        </div>
+        <div class="sig-box">
+          <div>شؤون الطلاب / الكنترول</div>
+          <div class="sig-line"></div>
+        </div>
+      </div>
+
+      <div class="footer">
+        تم استخراج هذا الكشف آلياً وموثق عبر نظام Gradely الأكاديمي · ${escapeHtml(sessionDate)}
+      </div>
+
+      <script>
+        window.onload = function() {
+          window.focus();
+          window.print();
+        };
+      </script>
+    </body>
+    </html>
+  `;
+
+  try {
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+    const printWindow = window.open(blobUrl, '_blank');
+    if (printWindow) {
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+  } catch (err) {
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.open();
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+    }
+  }
+}
+
+
 
 

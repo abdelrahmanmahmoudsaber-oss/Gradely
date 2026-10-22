@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { exportExcelFile, parseExcelFile } from '../../utils/excelHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
-import { Download, Upload, Save, Users, Filter, BookOpen, AlertCircle } from 'lucide-react';
+import { Download, Upload, Save, Users, Filter, BookOpen, AlertCircle, Plus, X, Check } from 'lucide-react';
 import { getSectionInstructorName as resolveSectionTA } from '../../utils/sectionHelper';
 
 export default function GradesTab({ user }) {
@@ -20,6 +20,11 @@ export default function GradesTab({ user }) {
   const [importing, setImporting] = useState(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState('');
   const [saveTimeout, setSaveTimeout] = useState(null);
+
+  // Custom grade columns state & modal
+  const [showAddColModal, setShowAddColModal] = useState(false);
+  const [newColName, setNewColName] = useState('');
+  const [addingCol, setAddingCol] = useState(false);
 
   const normalizeYear = (yr) => {
     if (!yr) return '1';
@@ -61,10 +66,9 @@ export default function GradesTab({ user }) {
       let allSubList = cacheManager.get('admin_subjects_base');
 
       if (!allUsersList || !allSubList) {
-        // Minimum Payload: Single query for users (Eliminating duplicate query completely)
         const [userRes, subRes] = await Promise.all([
           supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects'),
-          supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students')
+          supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students')
         ]);
 
         allUsersList = userRes.data || [];
@@ -118,6 +122,104 @@ export default function GradesTab({ user }) {
     if (selectedSubject) fetchGrades();
   }, [selectedSubject]);
 
+  // Extract active custom columns for current subject
+  const getActiveCustomColumns = () => {
+    if (!selectedSubject) return [];
+    const colsMap = new Map();
+    subjects.forEach(sub => {
+      if (Array.isArray(sub.excluded_students)) {
+        sub.excluded_students.forEach(item => {
+          if (typeof item === 'string' && item.startsWith('CONFIG_CUSTOM_COLS:')) {
+            try {
+              const parsed = JSON.parse(item.replace('CONFIG_CUSTOM_COLS:', ''));
+              if (Array.isArray(parsed)) {
+                parsed.forEach(c => {
+                  if (c && c.id && (c.scope === 'global' || c.scope === selectedSubject)) {
+                    colsMap.set(c.id, c);
+                  }
+                });
+              }
+            } catch (e) {}
+          }
+        });
+      }
+    });
+    return Array.from(colsMap.values());
+  };
+
+  // Extract friendly label for standard and custom columns
+  const getColumnLabel = (key, fallback) => {
+    let label = fallback;
+    subjects.forEach(sub => {
+      if (Array.isArray(sub.excluded_students)) {
+        sub.excluded_students.forEach(item => {
+          if (typeof item === 'string' && item.startsWith('CONFIG_COL_LABELS:')) {
+            try {
+              const parsed = JSON.parse(item.replace('CONFIG_COL_LABELS:', ''));
+              if (parsed[selectedSubject] && parsed[selectedSubject][key]) {
+                label = parsed[selectedSubject][key];
+              } else if (parsed.global && parsed.global[key]) {
+                label = parsed.global[key];
+              } else if (parsed[key] && typeof parsed[key] === 'string') {
+                label = parsed[key];
+              }
+            } catch (e) {}
+          }
+        });
+      }
+    });
+    return label;
+  };
+
+  const activeCustomCols = getActiveCustomColumns();
+
+  const handleAddCustomColumn = async (e) => {
+    if (e) e.preventDefault();
+    const trimName = newColName.trim();
+    if (!trimName || !selectedSubject) return;
+
+    setAddingCol(true);
+    try {
+      const colKey = 'custom_' + Date.now();
+      const newColObj = {
+        id: colKey,
+        label: trimName,
+        scope: selectedSubject
+      };
+
+      const existingCols = getActiveCustomColumns();
+      const updatedCols = [...existingCols, newColObj];
+      const colsConfigStr = 'CONFIG_CUSTOM_COLS:' + JSON.stringify(updatedCols);
+      const visSubStr = 'CONFIG_VIS_SUB:' + JSON.stringify({ [selectedSubject]: { [colKey]: true } });
+
+      const targetSub = subjects.find(s => s.id === selectedSubject);
+      if (targetSub) {
+        const cleanExcluded = Array.isArray(targetSub.excluded_students)
+          ? targetSub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG_CUSTOM_COLS:') && !x.startsWith('CONFIG_VIS_SUB:'))
+          : [];
+        cleanExcluded.push(colsConfigStr);
+        cleanExcluded.push(visSubStr);
+
+        const { error } = await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', selectedSubject);
+        if (error) throw error;
+
+        const updatedSubjects = subjects.map(s => s.id === selectedSubject ? { ...s, excluded_students: cleanExcluded } : s);
+        setSubjects(updatedSubjects);
+        cacheManager.set('admin_subjects_base', updatedSubjects);
+      }
+
+      setNewColName('');
+      setShowAddColModal(false);
+      setMessage('✅ تمت إضافة خانة "' + trimName + '" للمادة بنجاح!');
+      setTimeout(() => setMessage(''), 3500);
+    } catch (err) {
+      console.error('Add custom column error:', err);
+      setMessage('❌ حدث خطأ أثناء إضافة الخانة');
+    } finally {
+      setAddingCol(false);
+    }
+  };
+
   const fetchGrades = async () => {
     const cacheKey = 'grades_' + selectedSubject;
     const cached = cacheManager.get(cacheKey);
@@ -126,10 +228,9 @@ export default function GradesTab({ user }) {
       return;
     }
 
-    // Minimum payload: select ONLY grade fields
     const { data } = await supabase
       .from('grades')
-      .select('student_id, quiz_1, quiz_2, project, attendance_score, final_grade')
+      .select('student_id, quiz_1, quiz_2, project, attendance_score, final_grade, custom_grades')
       .eq('subject_id', selectedSubject);
 
     const grds = {};
@@ -139,7 +240,8 @@ export default function GradesTab({ user }) {
           quiz_1: g.quiz_1 || 0,
           quiz_2: g.quiz_2 || 0,
           project: g.project || 0,
-          attendance_score: g.attendance_score || 0
+          attendance_score: g.attendance_score || 0,
+          ...(g.custom_grades || {})
         };
       });
     }
@@ -212,7 +314,7 @@ export default function GradesTab({ user }) {
 
   const availableSections = getSubjectAvailableSections();
 
-    const handleGradeChange = (studentId, field, val) => {
+  const handleGradeChange = (studentId, field, val) => {
     const num = Math.max(0, parseFloat(val) || 0);
     const currentStudentGrades = grades[studentId] || { quiz_1: 0, quiz_2: 0, project: 0, attendance_score: 0 };
     const updatedStudentGrades = { ...currentStudentGrades, [field]: num };
@@ -225,11 +327,20 @@ export default function GradesTab({ user }) {
     cacheManager.invalidate('rep_' + studentId);
     cacheManager.invalidate('student_data_' + studentId);
 
+    // Dynamic total & custom grades extraction
+    const currentActiveCols = getActiveCustomColumns();
+    let totalScore = (updatedStudentGrades.quiz_1 || 0) + (updatedStudentGrades.quiz_2 || 0) + (updatedStudentGrades.project || 0) + (updatedStudentGrades.attendance_score || 0);
+    const customObj = {};
+    currentActiveCols.forEach(col => {
+      const v = updatedStudentGrades[col.id] || 0;
+      customObj[col.id] = v;
+      totalScore += v;
+    });
+
     // Debounced Auto-Save
     if (saveTimeout) clearTimeout(saveTimeout);
     setAutoSaveStatus('جاري الحفظ...');
     const t = setTimeout(async () => {
-      const finalGrade = (updatedStudentGrades.quiz_1 || 0) + (updatedStudentGrades.quiz_2 || 0) + (updatedStudentGrades.project || 0) + (updatedStudentGrades.attendance_score || 0);
       const { error } = await supabase.from('grades').upsert({
         student_id: studentId,
         subject_id: selectedSubject,
@@ -237,7 +348,8 @@ export default function GradesTab({ user }) {
         quiz_2: updatedStudentGrades.quiz_2 || 0,
         project: updatedStudentGrades.project || 0,
         attendance_score: updatedStudentGrades.attendance_score || 0,
-        final_grade: finalGrade
+        custom_grades: customObj,
+        final_grade: totalScore
       }, { onConflict: 'student_id,subject_id' });
 
       if (!error) {
@@ -254,9 +366,17 @@ export default function GradesTab({ user }) {
     setMessage('');
 
     try {
+      const currentActiveCols = getActiveCustomColumns();
       const rowsToUpsert = Object.keys(grades).map(studentId => {
-        const g = grades[studentId];
-        const finalGrade = (g.quiz_1 || 0) + (g.quiz_2 || 0) + (g.project || 0) + (g.attendance_score || 0);
+        const g = grades[studentId] || {};
+        let totalScore = (g.quiz_1 || 0) + (g.quiz_2 || 0) + (g.project || 0) + (g.attendance_score || 0);
+        const customObj = {};
+        currentActiveCols.forEach(col => {
+          const v = g[col.id] || 0;
+          customObj[col.id] = v;
+          totalScore += v;
+        });
+
         return {
           student_id: studentId,
           subject_id: selectedSubject,
@@ -264,7 +384,8 @@ export default function GradesTab({ user }) {
           quiz_2: g.quiz_2 || 0,
           project: g.project || 0,
           attendance_score: g.attendance_score || 0,
-          final_grade: finalGrade
+          custom_grades: customObj,
+          final_grade: totalScore
         };
       });
 
@@ -281,7 +402,7 @@ export default function GradesTab({ user }) {
         cacheManager.invalidate('rep_' + id);
         cacheManager.invalidate('student_data_' + id);
       });
-      setMessage('✅ تم حفظ وتأكيد الدرجات بنجاح!');
+      setMessage('✅ تم حفظ وتأكيد كافة الدرجات بنجاح!');
       setTimeout(() => setMessage(''), 3500);
     } catch (err) {
       console.error('Save grades error:', err);
@@ -291,35 +412,52 @@ export default function GradesTab({ user }) {
     }
   };
 
-    // Download pre-filled grades template for the current subject and section
+  // Download pre-filled grades template for the current subject and section (including custom columns)
   const handleDownloadGradesTemplate = () => {
     if (!currentSub) return;
+    const currentActiveCols = getActiveCustomColumns();
+
     const templateData = displayedEnrolledStudents.map(stu => {
       const g = grades[stu.user_id] || { quiz_1: 0, quiz_2: 0, project: 0, attendance_score: 0 };
-      const total = (g.quiz_1 || 0) + (g.quiz_2 || 0) + (g.project || 0) + (g.attendance_score || 0);
-      return {
+      let total = (g.quiz_1 || 0) + (g.quiz_2 || 0) + (g.project || 0) + (g.attendance_score || 0);
+
+      const row = {
         'ID': stu.user_id,
         'Name': stu.name,
         'Section': getStudentSubSection(stu, selectedSubject),
-        'Quiz 1': g.quiz_1 || 0,
-        'Quiz 2': g.quiz_2 || 0,
-        'Project': g.project || 0,
-        'Attendance': g.attendance_score || 0,
-        'Total': total
+        [getColumnLabel('showQuiz1', 'كويز 1')]: g.quiz_1 || 0,
+        [getColumnLabel('showQuiz2', 'كويز 2')]: g.quiz_2 || 0,
+        [getColumnLabel('showProject', 'المشروع')]: g.project || 0,
+        [getColumnLabel('showAttendanceScore', 'درجة الحضور')]: g.attendance_score || 0
       };
+
+      currentActiveCols.forEach(col => {
+        const val = g[col.id] || 0;
+        total += val;
+        row[col.label] = val;
+      });
+
+      row['المجموع الكلي'] = total;
+      return row;
     });
 
     if (templateData.length === 0) {
-      templateData.push({
+      const sampleRow = {
         'ID': '2200101',
         'Name': 'اسم الطالب التجريبي',
         'Section': 'S1',
-        'Quiz 1': 10,
-        'Quiz 2': 10,
-        'Project': 20,
-        'Attendance': 10,
-        'Total': 50
+        [getColumnLabel('showQuiz1', 'كويز 1')]: 10,
+        [getColumnLabel('showQuiz2', 'كويز 2')]: 10,
+        [getColumnLabel('showProject', 'المشروع')]: 20,
+        [getColumnLabel('showAttendanceScore', 'درجة الحضور')]: 10
+      };
+      let sampleTotal = 50;
+      currentActiveCols.forEach(col => {
+        sampleRow[col.label] = 10;
+        sampleTotal += 10;
       });
+      sampleRow['المجموع الكلي'] = sampleTotal;
+      templateData.push(sampleRow);
     }
 
     const secLabel = selectedSection !== 'all' ? ('_' + selectedSection) : '_All';
@@ -328,19 +466,30 @@ export default function GradesTab({ user }) {
 
   const handleExport = async () => {
     if (!currentSub) return;
+    const currentActiveCols = getActiveCustomColumns();
+
     const exportData = displayedEnrolledStudents.map(stu => {
       const g = grades[stu.user_id] || { quiz_1: 0, quiz_2: 0, project: 0, attendance_score: 0 };
-      const total = (g.quiz_1 || 0) + (g.quiz_2 || 0) + (g.project || 0) + (g.attendance_score || 0);
-      return {
+      let total = (g.quiz_1 || 0) + (g.quiz_2 || 0) + (g.project || 0) + (g.attendance_score || 0);
+
+      const row = {
         'ID': stu.user_id,
         'Name': stu.name,
         'Section': getStudentSubSection(stu, selectedSubject),
-        'Quiz 1': g.quiz_1 || 0,
-        'Quiz 2': g.quiz_2 || 0,
-        'Project': g.project || 0,
-        'Attendance': g.attendance_score || 0,
-        'Total': total
+        [getColumnLabel('showQuiz1', 'كويز 1')]: g.quiz_1 || 0,
+        [getColumnLabel('showQuiz2', 'كويز 2')]: g.quiz_2 || 0,
+        [getColumnLabel('showProject', 'المشروع')]: g.project || 0,
+        [getColumnLabel('showAttendanceScore', 'درجة الحضور')]: g.attendance_score || 0
       };
+
+      currentActiveCols.forEach(col => {
+        const val = g[col.id] || 0;
+        total += val;
+        row[col.label] = val;
+      });
+
+      row['المجموع الكلي'] = total;
+      return row;
     });
 
     await exportExcelFile(exportData, 'Grades_' + currentSub.name + (selectedSection !== 'all' ? '_' + selectedSection : '') + '.xlsx');
@@ -355,22 +504,40 @@ export default function GradesTab({ user }) {
     try {
       const rows = await parseExcelFile(file);
       const newGrades = { ...grades };
+      const currentActiveCols = getActiveCustomColumns();
 
       rows.forEach(r => {
         const id = (r['ID'] || r['الرقم الأكاديمي'] || r['الكود'])?.toString().trim();
         if (id) {
-          newGrades[id] = {
-            quiz_1: parseFloat(r['Quiz 1'] || r['كويز 1'] || 0) || 0,
-            quiz_2: parseFloat(r['Quiz 2'] || r['كويز 2'] || 0) || 0,
-            project: parseFloat(r['Project'] || r['المشروع'] || 0) || 0,
-            attendance_score: parseFloat(r['Attendance'] || r['درجة الحضور'] || 0) || 0
+          const currentStudent = newGrades[id] || {};
+          const q1 = r['كويز 1'] ?? r['Quiz 1'] ?? r[getColumnLabel('showQuiz1', 'كويز 1')];
+          const q2 = r['كويز 2'] ?? r['Quiz 2'] ?? r[getColumnLabel('showQuiz2', 'كويز 2')];
+          const prj = r['المشروع'] ?? r['Project'] ?? r[getColumnLabel('showProject', 'المشروع')];
+          const att = r['درجة الحضور'] ?? r['الحضور'] ?? r['Attendance'] ?? r[getColumnLabel('showAttendanceScore', 'درجة الحضور')];
+
+          const updatedStudent = {
+            ...currentStudent,
+            quiz_1: q1 !== undefined ? (parseFloat(q1) || 0) : (currentStudent.quiz_1 || 0),
+            quiz_2: q2 !== undefined ? (parseFloat(q2) || 0) : (currentStudent.quiz_2 || 0),
+            project: prj !== undefined ? (parseFloat(prj) || 0) : (currentStudent.project || 0),
+            attendance_score: att !== undefined ? (parseFloat(att) || 0) : (currentStudent.attendance_score || 0)
           };
+
+          // Parse any custom column values from Excel
+          currentActiveCols.forEach(col => {
+            const cVal = r[col.label] ?? r[col.id];
+            if (cVal !== undefined && cVal !== null && cVal !== '') {
+              updatedStudent[col.id] = parseFloat(cVal) || 0;
+            }
+          });
+
+          newGrades[id] = updatedStudent;
         }
       });
 
       setGrades(newGrades);
       cacheManager.set('grades_' + selectedSubject, newGrades);
-      setMessage('✅ تم استيراد الدرجات من الملف، اضغط "حفظ التعديلات" لتثبيتها');
+      setMessage('✅ تم استيراد وتحديث الدرجات من الملف، اضغط "حفظ التعديلات" لتثبيتها');
     } catch (err) {
       console.error(err);
       setMessage('❌ فشل في قراءة ملف الدرجات');
@@ -397,10 +564,20 @@ export default function GradesTab({ user }) {
         <div style={{display:'flex',gap:'10px',flexWrap:'wrap',alignItems:'center'}}>
           <button 
             className="btn-secondary" 
+            onClick={() => { setNewColName(''); setShowAddColModal(true); }}
+            disabled={!selectedSubject}
+            style={{color:'var(--primary-hover)',borderColor:'rgba(79, 70, 229, 0.4)',display:'inline-flex',alignItems:'center',gap:'8px',padding:'8px 14px',fontSize:'0.9rem',fontWeight:700}}
+            title="إضافة خانة درجات مخصصة جديدة لهذه المادة (تظهر فوراً في الجدول ونموذج الإكسيل)"
+          >
+            <Plus size={17} /> إضافة خانة درجات جديدة
+          </button>
+
+          <button 
+            className="btn-secondary" 
             onClick={handleDownloadGradesTemplate} 
             disabled={!selectedSubject || displayedEnrolledStudents.length === 0}
             style={{color:'var(--primary-hover)',borderColor:'rgba(79, 70, 229, 0.4)',display:'inline-flex',alignItems:'center',gap:'8px',padding:'8px 14px',fontSize:'0.9rem',fontWeight:700}}
-            title="تحميل كشف رصد إكسيل جاهز يحتوي على أسماء وأكواد طلاب هذه المادة لرصد درجاتهم وإعادة رفعه"
+            title="تحميل كشف رصد إكسيل جاهز يحتوي على أسماء وأكواد طلاب هذه المادة وكافة خاناتها لرصد درجاتهم وإعادة رفعه"
           >
             <Download size={17} /> 📥 تحميل نموذج رصد درجات المادة (.xlsx)
           </button>
@@ -429,6 +606,13 @@ export default function GradesTab({ user }) {
           </button>
         </div>
       </div>
+
+      {autoSaveStatus && (
+        <div style={{color:'var(--primary-hover)',fontSize:'0.85rem',fontWeight:700,marginBottom:'0.8rem',textAlign:'left'}}>
+          {autoSaveStatus}
+        </div>
+      )}
+
       {message && (
         <div style={{
           background: message.startsWith('✅') ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.15)',
@@ -484,17 +668,24 @@ export default function GradesTab({ user }) {
                 <th style={{padding:'14px 16px'}}>الرقم الأكاديمي</th>
                 <th style={{padding:'14px 16px'}}>اسم الطالب</th>
                 <th style={{padding:'14px 16px'}}>السكشن</th>
-                <th style={{padding:'14px 16px',textAlign:'center'}}>كويز 1</th>
-                <th style={{padding:'14px 16px',textAlign:'center'}}>كويز 2</th>
-                <th style={{padding:'14px 16px',textAlign:'center'}}>المشروع</th>
-                <th style={{padding:'14px 16px',textAlign:'center'}}>درجة الحضور</th>
+                <th style={{padding:'14px 16px',textAlign:'center'}}>{getColumnLabel('showQuiz1', 'كويز 1')}</th>
+                <th style={{padding:'14px 16px',textAlign:'center'}}>{getColumnLabel('showQuiz2', 'كويز 2')}</th>
+                <th style={{padding:'14px 16px',textAlign:'center'}}>{getColumnLabel('showProject', 'المشروع')}</th>
+                <th style={{padding:'14px 16px',textAlign:'center'}}>{getColumnLabel('showAttendanceScore', 'درجة الحضور')}</th>
+                {activeCustomCols.map(col => (
+                  <th key={col.id} style={{padding:'14px 16px',textAlign:'center',color:'var(--primary-hover)'}}>
+                    {col.label}
+                  </th>
+                ))}
                 <th style={{padding:'14px 16px',textAlign:'center'}}>المجموع</th>
               </tr>
             </thead>
             <tbody>
               {displayedEnrolledStudents.map(stu => {
                 const g = grades[stu.user_id] || { quiz_1: 0, quiz_2: 0, project: 0, attendance_score: 0 };
-                const total = (g.quiz_1 || 0) + (g.quiz_2 || 0) + (g.project || 0) + (g.attendance_score || 0);
+                let total = (g.quiz_1 || 0) + (g.quiz_2 || 0) + (g.project || 0) + (g.attendance_score || 0);
+                activeCustomCols.forEach(col => { total += (g[col.id] || 0); });
+
                 return (
                   <tr key={stu.id} style={{borderBottom:'1px solid var(--border)'}}>
                     <td style={{padding:'14px 16px',fontWeight:'bold'}}>{stu.user_id}</td>
@@ -516,6 +707,17 @@ export default function GradesTab({ user }) {
                     <td style={{padding:'10px 14px',textAlign:'center'}}>
                       <input type="number" className="input-field" style={{width:'80px',textAlign:'center',padding:'6px'}} value={g.attendance_score} onChange={e=>handleGradeChange(stu.user_id,'attendance_score',e.target.value)} />
                     </td>
+                    {activeCustomCols.map(col => (
+                      <td key={col.id} style={{padding:'10px 14px',textAlign:'center'}}>
+                        <input 
+                          type="number" 
+                          className="input-field" 
+                          style={{width:'80px',textAlign:'center',padding:'6px',borderColor:'rgba(79, 70, 229, 0.4)'}} 
+                          value={g[col.id] || 0} 
+                          onChange={e=>handleGradeChange(stu.user_id, col.id, e.target.value)} 
+                        />
+                      </td>
+                    ))}
                     <td style={{padding:'14px 16px',textAlign:'center',fontWeight:'bold',color:'var(--primary-hover)',fontSize:'1.1rem'}}>
                       {total}
                     </td>
@@ -524,13 +726,71 @@ export default function GradesTab({ user }) {
               })}
               {displayedEnrolledStudents.length === 0 && (
                 <tr>
-                  <td colSpan="8" style={{textAlign:'center',padding:'3rem',color:'var(--text-muted)'}}>
+                  <td colSpan={8 + activeCustomCols.length} style={{textAlign:'center',padding:'3rem',color:'var(--text-muted)'}}>
                     لا يوجد طلاب يطابقون التصفية في هذه المادة
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Modal: Add Custom Column */}
+      {showAddColModal && (
+        <div 
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.8)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem'
+          }}
+          onClick={e => { if (e.target === e.currentTarget) setShowAddColModal(false); }}
+        >
+          <div className="panel fade-in" style={{maxWidth: '450px', width: '100%', border: '1px solid rgba(79, 70, 229, 0.4)', borderRadius: '16px'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',borderBottom:'1px solid var(--border)',paddingBottom:'0.8rem'}}>
+              <h3 style={{margin:0,fontSize:'1.15rem',display:'flex',alignItems:'center',gap:'8px',color:'var(--primary-hover)'}}>
+                <Plus size={19} /> إضافة خانة درجات جديدة للمادة
+              </h3>
+              <button onClick={() => setShowAddColModal(false)} style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddCustomColumn}>
+              <div style={{marginBottom:'1.2rem'}}>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'0.88rem',fontWeight:700}}>
+                  المادة المحددة:
+                </label>
+                <div style={{padding:'8px 12px',background:'var(--bg)',borderRadius:'8px',fontSize:'0.9rem',fontWeight:700,color:'var(--primary-hover)'}}>
+                  {currentSub ? currentSub.name : 'يرجى اختيار مادة أولاً'}
+                </div>
+              </div>
+
+              <div style={{marginBottom:'1.5rem'}}>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'0.88rem',fontWeight:700}}>
+                  اسم الخانة الجديدة (مثال: ميدتيرم، تاسك 1، شيت عملي):
+                </label>
+                <input 
+                  type="text" 
+                  className="input-field" 
+                  placeholder="مثال: ميدتيرم" 
+                  value={newColName} 
+                  onChange={e => setNewColName(e.target.value)} 
+                  required 
+                  autoFocus
+                  style={{width:'100%',padding:'10px'}} 
+                />
+              </div>
+
+              <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+                <button type="button" className="btn-secondary" onClick={() => setShowAddColModal(false)} disabled={addingCol}>
+                  إلغاء
+                </button>
+                <button type="submit" className="btn-primary" disabled={addingCol || !newColName.trim()} style={{background:'var(--primary)'}}>
+                  {addingCol ? 'جاري الإضافة...' : 'إضافة وتثبيت الخانة'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

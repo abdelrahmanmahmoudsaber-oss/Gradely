@@ -129,10 +129,22 @@ export default function OverviewTab({ user }) {
           if (typeof item === 'string') {
             if (item.startsWith('CONFIG:')) {
               try { settings.global = JSON.parse(item.replace('CONFIG:', '')); } catch (e) {}
+            } else if (item.startsWith('CONFIG_VIS_SUB:')) {
+              try {
+                const parsed = JSON.parse(item.replace('CONFIG_VIS_SUB:', ''));
+                if (parsed && typeof parsed === 'object') {
+                  settings[sub.id] = parsed[sub.id] || parsed;
+                }
+              } catch (e) {}
             } else if (item.startsWith('CONFIG_SUB:')) {
               try {
                 const parsed = JSON.parse(item.replace('CONFIG_SUB:', ''));
-                Object.assign(settings, parsed);
+                if (parsed[sub.id] && !settings[sub.id]) {
+                  settings[sub.id] = parsed[sub.id];
+                }
+                if (parsed.global && !settings.global) {
+                  settings.global = parsed.global;
+                }
               } catch (e) {}
             } else if (item.startsWith('CONFIG_CUSTOM_COLS:')) {
               try {
@@ -317,13 +329,13 @@ export default function OverviewTab({ user }) {
       const subConfigStr = 'CONFIG_SUB:' + JSON.stringify(updatedSettings);
 
       if (currentSubScope !== 'global') {
-        // Fast direct save to the specific subject (Works 100% for TAs under RLS)
+        // Fast direct save to the specific subject using isolated tag (never gets overwritten by other subjects)
         const { data: targetSub } = await supabase.from('subjects').select('id, excluded_students').eq('id', currentSubScope).single();
         if (targetSub) {
           const cleanExcluded = Array.isArray(targetSub.excluded_students)
-            ? targetSub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG_SUB:') && !x.startsWith('CONFIG:'))
+            ? targetSub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG_VIS_SUB:') && !x.startsWith('CONFIG_SUB:') && !x.startsWith('CONFIG:'))
             : [];
-          cleanExcluded.push(subConfigStr);
+          cleanExcluded.push('CONFIG_VIS_SUB:' + JSON.stringify(updatedSubScope));
           await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', currentSubScope);
         }
       } else {
@@ -332,10 +344,9 @@ export default function OverviewTab({ user }) {
         if (subData && subData.length > 0) {
           await Promise.all(subData.map(async sub => {
             const cleanExcluded = Array.isArray(sub.excluded_students) 
-              ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG:') && !x.startsWith('CONFIG_SUB:')) 
+              ? sub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG:')) 
               : [];
             cleanExcluded.push(globalConfigStr);
-            cleanExcluded.push(subConfigStr);
             return supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', sub.id);
           }));
         }
@@ -900,10 +911,11 @@ export default function OverviewTab({ user }) {
         // Direct single subject save for TA and Super Admin (Works 100% under RLS)
         const { data: targetSub } = await supabase.from('subjects').select('id, excluded_students').eq('id', targetScopeKey).single();
         if (targetSub) {
+          const visSubStr = 'CONFIG_VIS_SUB:' + JSON.stringify({ [targetScopeKey]: updatedScopeVis });
           const cleanExcluded = Array.isArray(targetSub.excluded_students)
-            ? targetSub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG_SUB:') && !x.startsWith('CONFIG_CUSTOM_COLS:') && !x.startsWith('CONFIG_COL_LABELS:'))
+            ? targetSub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG_SUB:') && !x.startsWith('CONFIG_VIS_SUB:') && !x.startsWith('CONFIG_CUSTOM_COLS:') && !x.startsWith('CONFIG_COL_LABELS:'))
             : [];
-          cleanExcluded.push(subConfigStr);
+          cleanExcluded.push(visSubStr);
           cleanExcluded.push(colsConfigStr);
           cleanExcluded.push(labelsConfigStr);
           await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', targetScopeKey);
