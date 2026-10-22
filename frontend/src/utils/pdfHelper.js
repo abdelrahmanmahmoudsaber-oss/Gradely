@@ -809,15 +809,17 @@ export function printWeekAttendancePDF({
   subjectName = 'المقرر الدراسي',
   yearLevel = '',
   sectionName = 'الكل',
+  groupName = '',
   weekNum = 1,
   sessionDate = '',
-  instructorName = 'مشرف المادة',
+  instructorName = 'معيد المادة',
   attendanceType = 'section',
   filterType = 'all',
   students = [],
   attendanceRecords = {},
   excuseReasons = {},
-  getStudentSubSection = (s) => s.section || 'S1'
+  getStudentSubSection = (s) => s.section || 'S1',
+  getStudentLectureGroup = () => 'A'
 }) {
   const isLecture = attendanceType === 'lecture';
   const typeLabel = isLecture ? 'محاضرة' : 'سكشن';
@@ -853,7 +855,7 @@ export function printWeekAttendancePDF({
     else if (st === 'excused') { badgeClass = 'badge-excused'; statusText = 'عذر'; }
 
     const sec = getStudentSubSection(s);
-    const reason = excuseReasons[s.user_id] ? escapeHtml(excuseReasons[s.user_id]) : '—';
+    const grp = getStudentLectureGroup ? getStudentLectureGroup(s) : 'A';
 
     return `
       <tr>
@@ -861,9 +863,9 @@ export function printWeekAttendancePDF({
         <td style="text-align:center;font-family:monospace;font-weight:bold;">${escapeHtml(s.user_id)}</td>
         <td style="font-weight:600;">${escapeHtml(s.name)}</td>
         <td style="text-align:center;">${escapeHtml(sec)}</td>
+        <td style="text-align:center;font-weight:bold;color:#0d9488;">${escapeHtml(grp)}</td>
         <td style="text-align:center;"><span class="badge ${badgeClass}">${statusText}</span></td>
-        <td style="font-size:0.8rem;color:#475569;text-align:center;">${reason}</td>
-        <td style="text-align:center;min-width:70px;"></td>
+        <td style="text-align:center;min-width:65px;">&nbsp;</td>
       </tr>
     `;
   }).join('');
@@ -1026,7 +1028,6 @@ export function printWeekAttendancePDF({
       <div class="header">
         <div class="header-title">
           <h1>كشف حضور وغياب الطلاب (${escapeHtml(typeLabel)})</h1>
-          <p>منصة Gradely الأكاديمية لإدارة ورصد المقررات</p>
         </div>
         <div style="text-align:left;font-size:9pt;color:#64748b;">
           <div>تاريخ الطباعة: ${escapeHtml(new Date().toLocaleDateString('ar-EG'))}</div>
@@ -1037,10 +1038,9 @@ export function printWeekAttendancePDF({
       <div class="meta-card">
         <div class="meta-item"><span class="meta-label">المادة:</span> <span class="meta-value">${escapeHtml(subjectName)}</span></div>
         <div class="meta-item"><span class="meta-label">الفرقة:</span> <span class="meta-value">${escapeHtml(yearLevel ? 'الفرقة ' + yearLevel : '—')}</span></div>
-        <div class="meta-item"><span class="meta-label">السكشن / المجموعة:</span> <span class="meta-value">${escapeHtml(sectionName)}</span></div>
+        <div class="meta-item"><span class="meta-label">المجموعة:</span> <span class="meta-value">${escapeHtml(groupName || sectionName || 'A / B')}</span></div>
         <div class="meta-item"><span class="meta-label">تاريخ الجلسة:</span> <span class="meta-value">${escapeHtml(sessionDate || '—')}</span></div>
-        <div class="meta-item"><span class="meta-label">المشرف / المعيد:</span> <span class="meta-value">${escapeHtml(instructorName || '—')}</span></div>
-        <div class="meta-item"><span class="meta-label">التصفية:</span> <span class="meta-value">${escapeHtml(filterLabel)}</span></div>
+        <div class="meta-item"><span class="meta-label">المعيد:</span> <span class="meta-value">${escapeHtml(instructorName || '—')}</span></div>
       </div>
 
       <div class="stats-bar">
@@ -1058,34 +1058,15 @@ export function printWeekAttendancePDF({
             <th style="width:90px;">الرقم الأكاديمي</th>
             <th>اسم الطالب</th>
             <th style="width:60px;">السكشن</th>
-            <th style="width:75px;">الحالة</th>
-            <th style="width:110px;">السبب / ملاحظات</th>
-            <th style="width:80px;">التوقيع</th>
+            <th style="width:60px;">الجروب</th>
+            <th style="width:80px;">الحالة</th>
+            <th style="width:75px;">الدرجة</th>
           </tr>
         </thead>
         <tbody>
           ${rowsHtml || '<tr><td colspan="7" style="text-align:center;padding:20px;color:#94a3b8;">لا توجد سجلات مطابقة</td></tr>'}
         </tbody>
       </table>
-
-      <div class="signatures">
-        <div class="sig-box">
-          <div>توقيع المعيد / المشرف</div>
-          <div class="sig-line"></div>
-        </div>
-        <div class="sig-box">
-          <div>اعتماد أستاذ المادة</div>
-          <div class="sig-line"></div>
-        </div>
-        <div class="sig-box">
-          <div>شؤون الطلاب / الكنترول</div>
-          <div class="sig-line"></div>
-        </div>
-      </div>
-
-      <div class="footer">
-        تم استخراج هذا الكشف آلياً وموثق عبر نظام Gradely الأكاديمي · ${escapeHtml(sessionDate)}
-      </div>
 
       <script>
         window.onload = function() {

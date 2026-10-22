@@ -471,7 +471,8 @@ export default function AttendanceTab({ user }) {
 
   const handleYearFilterChange = (yr) => {
     setSelectedYear(yr);
-    const valid = subjects.filter(s => yr === 'all' || normalizeYear(s.year_level) === yr);
+    const pool = attendanceType === 'lecture' ? allSystemSubjects : subjects;
+    const valid = pool.filter(s => yr === 'all' || normalizeYear(s.year_level) === yr);
     if (valid.length > 0) { 
       setSelectedSubject(valid[0].id); 
       setFilterYearToAdd(normalizeYear(valid[0].year_level)); 
@@ -479,6 +480,31 @@ export default function AttendanceTab({ user }) {
       setSelectedSubject('');
     }
   };
+
+  const handleToggleAttendanceType = (type) => {
+    setAttendanceType(type);
+    const pool = type === 'lecture' ? allSystemSubjects : subjects;
+    const valid = pool.filter(s => selectedYear === 'all' || normalizeYear(s.year_level) === selectedYear);
+    if (!valid.some(s => s.id === selectedSubject)) {
+      if (valid.length > 0) {
+        setSelectedSubject(valid[0].id);
+        setFilterYearToAdd(normalizeYear(valid[0].year_level));
+      } else {
+        setSelectedSubject('');
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (displayedSubjects.length > 0) {
+      if (!displayedSubjects.some(s => s.id === selectedSubject)) {
+        setSelectedSubject(displayedSubjects[0].id);
+        setFilterYearToAdd(normalizeYear(displayedSubjects[0].year_level));
+      }
+    } else if (selectedSubject) {
+      setSelectedSubject('');
+    }
+  }, [displayedSubjects, selectedSubject]);
 
   const currentSub = (attendanceType === 'lecture' ? allSystemSubjects : subjects).find(s => s.id === selectedSubject);
 
@@ -1040,10 +1066,15 @@ export default function AttendanceTab({ user }) {
         ? (currentSub?.instructor_name || 'أستاذ المادة')
         : (getSectionInstructorName(selectedSubject, selectedSection) || currentSub?.instructor_name || 'معيد المادة');
 
+      const resolvedGroupName = attendanceType === 'lecture'
+        ? (selectedGroup !== 'all' ? selectedGroup : 'A / B')
+        : (secName !== 'All' ? secName : 'كافة السكاشن');
+
       printWeekAttendancePDF({
         subjectName: subName,
         yearLevel: yr,
-        sectionName: secName !== 'All' ? `سكشن ${secName}` : 'كافة السكاشن',
+        sectionName: resolvedGroupName,
+        groupName: resolvedGroupName,
         weekNum: week,
         sessionDate: sessionDate,
         instructorName: activeInst,
@@ -1052,7 +1083,8 @@ export default function AttendanceTab({ user }) {
         students: targetStudents,
         attendanceRecords: attendanceRecords,
         excuseReasons: excuseReasons,
-        getStudentSubSection: (s) => getStudentSubSection(s, selectedSubject)
+        getStudentSubSection: (s) => getStudentSubSection(s, selectedSubject),
+        getStudentLectureGroup: (s) => getStudentLectureGroup(s, selectedSubject)
       });
     } else {
       // Excel Export
@@ -1261,7 +1293,7 @@ export default function AttendanceTab({ user }) {
             )}
           </div>
           <p className="text-muted" style={{margin:'5px 0 0 0'}}>
-            الطلاب المعروضون: <strong>{displayedEnrolledStudents.length} طالب</strong> {selectedSection !== 'all' ? '(سكشن ' + selectedSection + ')' : '(جميع السكاشن)'}
+            الطلاب المعروضون: <strong>{displayedEnrolledStudents.length} طالب</strong> {attendanceType === 'lecture' ? (selectedGroup !== 'all' ? '(مجموعة ' + selectedGroup + ')' : '(جميع مجموعات المحاضرة)') : (selectedSection !== 'all' ? '(سكشن ' + selectedSection + ')' : '(جميع السكاشن)')}
           </p>
         </div>
         <div style={{display:'flex',gap:'10px',flexWrap:'wrap'}}>
@@ -1332,7 +1364,7 @@ export default function AttendanceTab({ user }) {
       {/* ATTENDANCE TYPE SELECTOR (SECTIONS VS LECTURES) */}
       <div style={{display:'flex',gap:'10px',marginBottom:'1.2rem',background:'var(--surface)',padding:'6px',borderRadius:'10px',border:'1px solid var(--border)',width:'fit-content'}}>
         <button 
-          onClick={() => { setAttendanceType('section'); }}
+          onClick={() => handleToggleAttendanceType('section')}
           style={{
             background: attendanceType === 'section' ? 'var(--primary)' : 'transparent',
             color: attendanceType === 'section' ? 'white' : 'var(--text-muted)',
@@ -1343,7 +1375,7 @@ export default function AttendanceTab({ user }) {
           <span>🏢</span> غياب السكاشن (Section)
         </button>
         <button 
-          onClick={() => { setAttendanceType('lecture'); }}
+          onClick={() => handleToggleAttendanceType('lecture')}
           style={{
             background: attendanceType === 'lecture' ? '#0d9488' : 'transparent',
             color: attendanceType === 'lecture' ? 'white' : 'var(--text-muted)',
@@ -1370,7 +1402,7 @@ export default function AttendanceTab({ user }) {
 
         <div style={{flex:1.5,minWidth:'200px'}}>
           <label style={{display:'block',marginBottom:'8px',fontSize:'0.9rem',fontWeight:'bold'}}>2. المادة الدراسية:</label>
-          <select className="input-field" value={selectedSubject} onChange={e => { setSelectedSubject(e.target.value); const sub = subjects.find(s => s.id === e.target.value); if (sub) setFilterYearToAdd(normalizeYear(sub.year_level)); }}>
+          <select className="input-field" value={selectedSubject} onChange={e => { setSelectedSubject(e.target.value); const sub = activeSubjectsPool.find(s => s.id === e.target.value); if (sub) setFilterYearToAdd(normalizeYear(sub.year_level)); }}>
             {displayedSubjects.length === 0 ? <option value="">-- لا توجد مواد متاحة --</option> : displayedSubjects.map(s => <option key={s.id} value={s.id}>{s.name} (فرقة {normalizeYear(s.year_level)})</option>)}
           </select>
         </div>
