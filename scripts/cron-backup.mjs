@@ -78,17 +78,18 @@ async function fetchBackupData() {
       p_backup_secret: BACKUP_SECRET
     });
 
-    if (!rpcErr && rpcData && rpcData.users && rpcData.subjects) {
+    if (rpcErr) {
+      console.error(`[RPC ERROR] get_system_backup_data returned error:`, rpcErr);
+    } else if (rpcData && rpcData.users && rpcData.subjects) {
       console.log(`[DATA] Fetched via Cloud RPC: ${rpcData.users.length} students, ${rpcData.subjects.length} subjects, ${rpcData.attendance?.length || 0} attendance records, ${rpcData.grades?.length || 0} grades.`);
       return rpcData;
-    } else if (rpcErr) {
-      console.log(`[INFO] Cloud RPC fallback (${rpcErr.message}), attempting direct table pagination...`);
     }
   } catch (e) {
-    console.log('[INFO] Cloud RPC fallback notice:', e.message);
+    console.error('[RPC EXCEPTION] Failed to call get_system_backup_data:', e.message);
   }
 
   // Fallback: Paginated table queries
+  console.log('[INFO] Attempting direct table queries fallback...');
   async function fetchAll(table, cols) {
     const rows = [];
     let from = 0;
@@ -108,6 +109,10 @@ async function fetchBackupData() {
     fetchAll('attendance', 'student_id, subject_id, week_number, status'),
     fetchAll('grades', 'student_id, subject_id, quiz_1, quiz_2, project, attendance_score, final_grade')
   ]);
+
+  if ((!users || users.length === 0) && (!subjects || subjects.length === 0)) {
+    throw new Error('Database fetch returned 0 records. Ensure public.get_system_backup_data RPC migration is executed in Supabase.');
+  }
 
   return { users, subjects, attendance, grades };
 }
@@ -344,7 +349,8 @@ async function sendBackupWebhook(buffer) {
 
   const res = await fetch(WEBHOOK_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    redirect: 'follow',
     body: JSON.stringify(payload)
   });
 
