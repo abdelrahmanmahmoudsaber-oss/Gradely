@@ -195,8 +195,8 @@ export default function StudentsTab({ user }) {
     fetchData();
   }, []);
 
-  const fetchData = async () => {
-    const { allUsersList, allSubList } = await getAdminBaseData(user, true);
+  const fetchData = async (force = false) => {
+    const { allUsersList, allSubList } = await getAdminBaseData(user, force);
     if (allUsersList && allUsersList.length > 0) setAllUsers(allUsersList);
     if (allSubList && allSubList.length > 0) setAllSubjects(allSubList);
   };

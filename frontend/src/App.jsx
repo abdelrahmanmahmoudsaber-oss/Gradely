@@ -85,7 +85,9 @@ export default function App() {
         if (adminSession && storedToken) {
           try {
             const parsed = JSON.parse(adminSession);
-            if (parsed && (parsed.role === 'admin' || parsed.role === 'super_admin') && parsed.user_id) {
+            // Strict defense against client-side role tampering: numeric IDs are strictly students
+            const isStudentId = /^\d{6,8}$/.test(String(parsed?.user_id || '').trim());
+            if (!isStudentId && parsed && (parsed.role === 'admin' || parsed.role === 'super_admin') && parsed.user_id) {
               const { data: isValid } = await supabase.rpc('verify_student_token_for_user', {
                 p_session_token: storedToken,
                 p_user_id: parsed.user_id
@@ -95,6 +97,9 @@ export default function App() {
                 setAuthLoading(false);
                 return;
               }
+            } else if (isStudentId) {
+              // Tampered role detected: purge forged admin session immediately
+              localStorage.removeItem('gradely_admin_session');
             }
           } catch (e) {}
         }

@@ -74,8 +74,8 @@ export default function SubjectsTab({ user }) {
     fetchInitial();
   }, []);
 
-  const fetchInitial = async () => {
-    const { allUsersList, allSubList } = await getAdminBaseData(user, true);
+  const fetchInitial = async (force = false) => {
+    const { allUsersList, allSubList } = await getAdminBaseData(user, force);
     if (allSubList) setSubjects(allSubList);
     if (allUsersList) setAllUsers(allUsersList);
   };
