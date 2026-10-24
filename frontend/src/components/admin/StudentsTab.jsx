@@ -62,6 +62,7 @@ export default function StudentsTab({ user }) {
   const [assignedSubjects, setAssignedSubjects] = useState([]); // for TAs
   const [selectedEnrollSubjects, setSelectedEnrollSubjects] = useState([]); // for students
   const [editMode, setEditMode] = useState(false);
+  const [editingUserRole, setEditingUserRole] = useState(null);
   const [submittingUser, setSubmittingUser] = useState(false);
   const [modalError, setModalError] = useState('');
 
@@ -199,10 +200,23 @@ export default function StudentsTab({ user }) {
       .from('users')
       .select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at, last_sign_in_at')
       .order('created_at', { ascending: false });
-    if (usersData) setAllUsers(usersData);
+    if (usersData && usersData.length > 0) {
+      setAllUsers(usersData);
+      cacheManager.set('admin_users_base', usersData);
+    } else if (usersData) {
+      setAllUsers(usersData);
+    } else {
+      const cached = cacheManager.get('admin_users_base');
+      if (cached && cached.length > 0) setAllUsers(cached);
+    }
 
     const { data: subData } = await supabase.from('subjects').select('*');
-    if (subData) setAllSubjects(subData);
+    if (subData && subData.length > 0) {
+      setAllSubjects(subData);
+      cacheManager.set('admin_subjects_base', subData);
+    } else if (subData) {
+      setAllSubjects(subData);
+    }
   };
 
   // When yearLevel changes in student form, preselect matching subjects
@@ -220,12 +234,19 @@ export default function StudentsTab({ user }) {
 
     setSubmittingUser(true);
     try {
+      const targetRole = editMode && editingUserRole
+        ? editingUserRole
+        : (addingType === 'admin' ? 'admin' : 'student');
+
+      const isStudentRole = targetRole === 'student';
+      const isAdminRole = targetRole === 'admin' || targetRole === 'super_admin';
+
       const payload = {
         name: trimName,
-        role: addingType === 'admin' ? 'admin' : 'student',
-        year_level: addingType === 'student' ? yearLevel : null,
-        section: addingType === 'student' ? normalizeSection(section) : null,
-        assigned_subjects: addingType === 'admin' ? assignedSubjects : null,
+        role: targetRole,
+        year_level: isStudentRole ? yearLevel : null,
+        section: isStudentRole ? normalizeSection(section) : null,
+        assigned_subjects: isAdminRole ? assignedSubjects : null,
       };
 
       if (editMode) {
@@ -394,7 +415,7 @@ export default function StudentsTab({ user }) {
         }
       }
 
-      setUserId(''); setOriginalUserId(''); setName(''); setPassword(''); setConfirmPassword(''); setEditMode(false); setAssignedSubjects([]); setSelectedEnrollSubjects([]); setSection('S1');
+      setUserId(''); setOriginalUserId(''); setName(''); setPassword(''); setConfirmPassword(''); setEditMode(false); setEditingUserRole(null); setAssignedSubjects([]); setSelectedEnrollSubjects([]); setSection('S1');
       setShowAddModal(false);
       cacheManager.invalidate('admin_users_base');
       await fetchData();
@@ -449,7 +470,8 @@ export default function StudentsTab({ user }) {
     setName(userObj.name);
     setPassword('');
     setConfirmPassword('');
-    setAddingType(userObj.role === 'admin' ? 'admin' : 'student');
+    setEditingUserRole(userObj.role);
+    setAddingType(userObj.role === 'admin' || userObj.role === 'super_admin' ? 'admin' : 'student');
     setYearLevel(normalizeYear(userObj.year_level));
     setSection(normalizeSection(userObj.section || 'S1'));
     setAssignedSubjects(Array.isArray(userObj.assigned_subjects) ? userObj.assigned_subjects : []);

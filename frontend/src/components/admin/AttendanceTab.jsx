@@ -208,17 +208,25 @@ export default function AttendanceTab({ user }) {
       let allUsersList = cacheManager.get('admin_users_base');
       let allSubList = cacheManager.get('admin_subjects_base');
 
-      if (!allUsersList || !allSubList) {
+      if (!allUsersList || !allSubList || allUsersList.length === 0 || allSubList.length === 0) {
         const [userRes, subRes] = await Promise.all([
           supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects'),
           supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students')
         ]);
 
-        allUsersList = userRes.data || [];
-        allSubList = subRes.data || [];
+        if (userRes.data && userRes.data.length > 0) {
+          allUsersList = userRes.data;
+          cacheManager.set('admin_users_base', allUsersList);
+        } else if (!allUsersList) {
+          allUsersList = userRes.data || [];
+        }
 
-        cacheManager.set('admin_users_base', allUsersList);
-        cacheManager.set('admin_subjects_base', allSubList);
+        if (subRes.data && subRes.data.length > 0) {
+          allSubList = subRes.data;
+          cacheManager.set('admin_subjects_base', allSubList);
+        } else if (!allSubList) {
+          allSubList = subRes.data || [];
+        }
       }
 
       const freshCurrentUser = allUsersList.find(u => u.user_id === user.user_id) || user;
@@ -476,6 +484,8 @@ export default function AttendanceTab({ user }) {
 
   const handleYearFilterChange = (yr) => {
     setSelectedYear(yr);
+    setSelectedGroup('all');
+    setSelectedSection('all');
     const pool = attendanceType === 'lecture' ? allSystemSubjects : subjects;
     const valid = pool.filter(s => yr === 'all' || normalizeYear(s.year_level) === yr);
     if (valid.length > 0) { 
@@ -488,6 +498,8 @@ export default function AttendanceTab({ user }) {
 
   const handleToggleAttendanceType = (type) => {
     setAttendanceType(type);
+    setSelectedGroup('all');
+    setSelectedSection('all');
     const pool = type === 'lecture' ? allSystemSubjects : subjects;
     const valid = pool.filter(s => selectedYear === 'all' || normalizeYear(s.year_level) === selectedYear);
     if (!valid.some(s => s.id === selectedSubject)) {
@@ -504,6 +516,8 @@ export default function AttendanceTab({ user }) {
     if (displayedSubjects.length > 0) {
       if (!displayedSubjects.some(s => s.id === selectedSubject)) {
         setSelectedSubject(displayedSubjects[0].id);
+        setSelectedGroup('all');
+        setSelectedSection('all');
         setFilterYearToAdd(normalizeYear(displayedSubjects[0].year_level));
       }
     } else if (selectedSubject) {
@@ -515,8 +529,13 @@ export default function AttendanceTab({ user }) {
 
   const getEnrolledStudents = () => {
     if (!currentSub) return [];
-    if (Array.isArray(currentSub.enrolled_students)) return allStudents.filter(stu => currentSub.enrolled_students.includes(stu.user_id));
-    return [];
+    if (Array.isArray(currentSub.enrolled_students) && currentSub.enrolled_students.length > 0) {
+      const matched = allStudents.filter(stu => currentSub.enrolled_students.includes(stu.user_id));
+      if (matched.length > 0) return matched;
+    }
+    // Fallback: match all students in the subject's academic year level
+    const subYear = normalizeYear(currentSub.year_level);
+    return allStudents.filter(stu => normalizeYear(stu.year_level) === subYear);
   };
 
   const enrolledStudents = getEnrolledStudents();
@@ -1437,7 +1456,7 @@ export default function AttendanceTab({ user }) {
 
         <div style={{flex:1.5,minWidth:'200px'}}>
           <label style={{display:'block',marginBottom:'8px',fontSize:'0.9rem',fontWeight:'bold'}}>2. المادة الدراسية:</label>
-          <select className="input-field" value={selectedSubject} onChange={e => { setSelectedSubject(e.target.value); const sub = activeSubjectsPool.find(s => s.id === e.target.value); if (sub) setFilterYearToAdd(normalizeYear(sub.year_level)); }}>
+          <select className="input-field" value={selectedSubject} onChange={e => { setSelectedSubject(e.target.value); setSelectedGroup('all'); setSelectedSection('all'); const sub = activeSubjectsPool.find(s => s.id === e.target.value); if (sub) setFilterYearToAdd(normalizeYear(sub.year_level)); }}>
             {displayedSubjects.length === 0 ? <option value="">-- لا توجد مواد متاحة --</option> : displayedSubjects.map(s => <option key={s.id} value={s.id}>{s.name} (فرقة {normalizeYear(s.year_level)})</option>)}
           </select>
         </div>

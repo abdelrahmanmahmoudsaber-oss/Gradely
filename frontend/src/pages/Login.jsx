@@ -123,14 +123,20 @@ export default function Login({ onLogin }) {
             throw new Error('فشل استلام رمز الجلسة الآمنة من الخادم. يرجى المحاولة مرة أخرى.');
           }
           localStorage.setItem('gradely_session_token', rpcResult.session_token);
+          
+          // rpcResult may wrap profile data in a nested .user object
+          const userObj = rpcResult.user || rpcResult;
+          const resolvedRole = userObj.role || 'student';
+
           const finalUser = {
-            user_id: rpcResult.user_id || candUserId,
-            name: rpcResult.name,
-            role: rpcResult.role || 'student',
-            year_level: rpcResult.year_level,
-            section: rpcResult.section,
-            assigned_subjects: rpcResult.assigned_subjects || [],
-            session_token: rpcResult.session_token
+            id: userObj.id,
+            user_id: userObj.user_id || candUserId,
+            name: userObj.name || candUserId,
+            role: resolvedRole,
+            year_level: userObj.year_level,
+            section: userObj.section,
+            assigned_subjects: Array.isArray(userObj.assigned_subjects) ? userObj.assigned_subjects : [],
+            session_token: rpcResult.session_token || userObj.session_token
           };
 
           if (finalUser && finalUser.user_id) {

@@ -77,26 +77,41 @@ export default function App() {
           localStorage.removeItem('gradely_user_display');
         }
       } else {
-        // Fallback for students who authenticated via secure verify_legacy_login
+        // Fallback for users (students and TAs) who authenticated via secure verify_legacy_login
+        const adminSession = localStorage.getItem('gradely_admin_session');
         const studentSession = localStorage.getItem('gradely_student_session');
         const storedToken = localStorage.getItem('gradely_session_token');
+
+        if (adminSession && storedToken) {
+          try {
+            const parsed = JSON.parse(adminSession);
+            if (parsed && (parsed.role === 'admin' || parsed.role === 'super_admin') && parsed.user_id) {
+              const { data: isValid } = await supabase.rpc('verify_student_token_for_user', {
+                p_session_token: storedToken,
+                p_user_id: parsed.user_id
+              });
+              if (isValid === true) {
+                setUser({ ...parsed, session_token: storedToken });
+                setAuthLoading(false);
+                return;
+              }
+            }
+          } catch (e) {}
+        }
+
         if (studentSession && storedToken) {
           try {
             const parsed = JSON.parse(studentSession);
             if (parsed && parsed.role === 'student' && parsed.user_id) {
-              // ISSUE-27 & Attendance fix: validate the stored token server-side for THIS specific user.
-              // A forged, expired, or mismatched localStorage entry cannot pass a live server check.
               const { data: isValid, error: rpcErr } = await supabase.rpc('verify_student_token_for_user', {
                 p_session_token: storedToken,
                 p_user_id: parsed.user_id
               });
               if (isValid === true) {
-                // Token is valid and belongs to this student — restore session
                 setUser({ ...parsed, session_token: storedToken });
                 setAuthLoading(false);
                 return;
               }
-              // Transitional fallback if verify_student_token_for_user RPC is not yet deployed
               if (rpcErr && (rpcErr.code === 'PGRST202' || rpcErr.message?.includes('not find'))) {
                 const { error: validationErr } = await supabase.rpc('get_my_attendance', {
                   p_session_token: storedToken
@@ -107,13 +122,14 @@ export default function App() {
                   return;
                 }
               }
-              // Token invalid, expired, or belongs to another user — clear session
             }
           } catch (e) {}
         }
+
         setUser(null);
         localStorage.removeItem('gradely_user_display');
         localStorage.removeItem('gradely_student_session');
+        localStorage.removeItem('gradely_admin_session');
         localStorage.removeItem('gradely_session_token');
         cacheManager.clear();
       }
@@ -138,6 +154,8 @@ export default function App() {
         setUser(null);
         localStorage.removeItem('gradely_user_display');
         localStorage.removeItem('gradely_student_session');
+        localStorage.removeItem('gradely_admin_session');
+        localStorage.removeItem('gradely_session_token');
       }
     });
 
@@ -154,6 +172,10 @@ export default function App() {
     }));
     if (userData.role === 'student') {
       localStorage.setItem('gradely_student_session', JSON.stringify(userData));
+      localStorage.removeItem('gradely_admin_session');
+    } else {
+      localStorage.setItem('gradely_admin_session', JSON.stringify(userData));
+      localStorage.removeItem('gradely_student_session');
     }
   };
 
