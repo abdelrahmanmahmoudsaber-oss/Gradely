@@ -805,9 +805,12 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
 
 /**
  * Generates and downloads an official A4 Week Attendance Sheet PDF directly to device.
- * Matches exact laptop/PC layout: single top header, meta-card, statistics bar,
- * full continuous table, and signatures section (no repeated page headers or platform footers).
- * Fast single-pass html2canvas rendering with row-boundary aware A4 pagination to prevent any cut rows.
+ * Exports clean, highly-organized multi-page Weekly Attendance PDF.
+ * - Sorts students by Group (Group A finished first, then Group B, etc.)
+ * - Renders page-by-page to guarantee 0 sliced or half-cut student rows
+ * - Keeps column headers aligned across all pages
+ * - Page 2+ contains no redundant title banner, seamlessly continuing the table
+ * - Crisp borders with no distorted border radius
  */
 export async function printWeekAttendancePDF({
   subjectName = 'المقرر الدراسي',
@@ -824,18 +827,36 @@ export async function printWeekAttendancePDF({
   excuseReasons = {},
   getStudentSubSection = (s) => s.section || 'S1',
   getStudentLectureGroup = () => 'A',
-  filename = ''
+  filename = '',
+  onProgress = null
 }) {
   const isLecture = attendanceType === 'lecture';
   const typeLabel = isLecture ? 'محاضرة' : 'سكشن';
 
+  // 1. Sort students strictly by Group (Group A first, then Group B, Group C...)
+  // Within group: by section (S1, S2, S3...), then by academic ID numerically
+  const sortedStudents = [...students].sort((a, b) => {
+    const grpA = (getStudentLectureGroup ? getStudentLectureGroup(a) : (a.group || 'A')) || 'A';
+    const grpB = (getStudentLectureGroup ? getStudentLectureGroup(b) : (b.group || 'A')) || 'A';
+    const grpCmp = grpA.localeCompare(grpB, 'ar', { numeric: true });
+    if (grpCmp !== 0) return grpCmp;
+
+    const secA = (getStudentSubSection ? getStudentSubSection(a) : (a.section || 'S1')) || 'S1';
+    const secB = (getStudentSubSection ? getStudentSubSection(b) : (b.section || 'S1')) || 'S1';
+    const secCmp = secA.localeCompare(secB, 'ar', { numeric: true });
+    if (secCmp !== 0) return secCmp;
+
+    return String(a.user_id || '').localeCompare(String(b.user_id || ''), undefined, { numeric: true });
+  });
+
+  // Calculate overall statistics
   let countPresent = 0;
   let countAbsent = 0;
   let countLate = 0;
   let countExcused = 0;
   let countUnrecorded = 0;
 
-  students.forEach(s => {
+  sortedStudents.forEach(s => {
     const st = attendanceRecords[s.user_id];
     if (st === 'present') countPresent++;
     else if (st === 'absent') countAbsent++;
@@ -844,9 +865,71 @@ export async function printWeekAttendancePDF({
     else countUnrecorded++;
   });
 
-  const rowsHtml = students.map((s, idx) => {
+  // 2. Discrete Page Partitioning: Guarantee NO row cutting
+  // Page 1 has top title, info grid, and summary badges -> takes up to 23 rows.
+  // Page 2+ has no title -> takes up to 28 rows (25 if signatures fit on it).
+  const PAGE_1_MAX_WITH_SIGS = 20;
+  const PAGE_1_MAX_MULTI = 23;
+  const SUBSEQUENT_PAGE_MAX_WITH_SIGS = 25;
+  const SUBSEQUENT_PAGE_MAX_MULTI = 28;
+
+  const pagesData = [];
+
+  if (sortedStudents.length <= PAGE_1_MAX_WITH_SIGS) {
+    pagesData.push({
+      pageNumber: 1,
+      students: sortedStudents,
+      startIndex: 0,
+      isFirstPage: true,
+      isLastPage: true
+    });
+  } else {
+    // Page 1
+    pagesData.push({
+      pageNumber: 1,
+      students: sortedStudents.slice(0, PAGE_1_MAX_MULTI),
+      startIndex: 0,
+      isFirstPage: true,
+      isLastPage: false
+    });
+
+    let remaining = sortedStudents.slice(PAGE_1_MAX_MULTI);
+    let curStartIndex = PAGE_1_MAX_MULTI;
+    let pageNum = 2;
+
+    while (remaining.length > 0) {
+      if (remaining.length <= SUBSEQUENT_PAGE_MAX_WITH_SIGS) {
+        pagesData.push({
+          pageNumber: pageNum,
+          students: remaining,
+          startIndex: curStartIndex,
+          isFirstPage: false,
+          isLastPage: true
+        });
+        break;
+      } else {
+        const count = SUBSEQUENT_PAGE_MAX_MULTI;
+        pagesData.push({
+          pageNumber: pageNum,
+          students: remaining.slice(0, count),
+          startIndex: curStartIndex,
+          isFirstPage: false,
+          isLastPage: false
+        });
+        remaining = remaining.slice(count);
+        curStartIndex += count;
+        pageNum++;
+      }
+    }
+  }
+
+  const totalPages = pagesData.length;
+  const safeFilename = (filename || `Attendance_${subjectName}_Week${weekNum}.pdf`).replace(/[/\\?%*:|"<>]/g, '_');
+  const finalFilename = safeFilename.endsWith('.pdf') ? safeFilename : `${safeFilename}.pdf`;
+
+  const renderStudentRow = (s, globalIdx) => {
     const st = attendanceRecords[s.user_id];
-    let badgeBg = '#f1f5f9';
+    let badgeBg = '#f8fafc';
     let badgeColor = '#64748b';
     let badgeBorder = '#cbd5e1';
     let statusText = 'لم يرصد';
@@ -875,192 +958,208 @@ export async function printWeekAttendancePDF({
 
     const sec = getStudentSubSection(s);
     const grp = getStudentLectureGroup ? getStudentLectureGroup(s) : 'A';
+    const isGrpA = grp === 'A';
 
     return `
-      <tr style="border-bottom: 1px solid #cbd5e1; background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
-        <td style="text-align:center;font-weight:bold;color:#64748b;padding:6px 4px;border:1px solid #cbd5e1;font-size:11.5px;">${idx + 1}</td>
-        <td style="text-align:center;font-family:monospace;font-weight:bold;padding:6px 6px;border:1px solid #cbd5e1;color:#1e293b;font-size:11.5px;">${escapeHtml(s.user_id)}</td>
-        <td style="font-weight:600;padding:6px 8px;border:1px solid #cbd5e1;color:#0f172a;text-align:right;font-size:11.5px;">${escapeHtml(s.name)}</td>
-        <td style="text-align:center;padding:6px 4px;border:1px solid #cbd5e1;color:#334155;font-size:11.5px;">${escapeHtml(sec)}</td>
-        <td style="text-align:center;font-weight:bold;color:#0d9488;padding:6px 4px;border:1px solid #cbd5e1;font-size:11.5px;">${escapeHtml(grp)}</td>
-        <td style="text-align:center;padding:6px 4px;border:1px solid #cbd5e1;">
-          <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;background-color:${badgeBg};color:${badgeColor};border:1px solid ${badgeBorder};">${statusText}</span>
+      <tr style="border-bottom: 1px solid #cbd5e1; background-color: ${globalIdx % 2 === 0 ? '#ffffff' : '#f8fafc'}; height: 26px;">
+        <td style="text-align:center;font-weight:700;color:#64748b;padding:4px 3px;border:1px solid #cbd5e1;font-size:11px;">${globalIdx + 1}</td>
+        <td style="text-align:center;font-family:monospace;font-weight:700;padding:4px 4px;border:1px solid #cbd5e1;color:#1e293b;font-size:11.5px;">${escapeHtml(s.user_id)}</td>
+        <td style="font-weight:700;padding:4px 8px;border:1px solid #cbd5e1;color:#0f172a;text-align:right;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(s.name)}</td>
+        <td style="text-align:center;padding:4px 3px;border:1px solid #cbd5e1;color:#334155;font-size:11px;">${escapeHtml(sec)}</td>
+        <td style="text-align:center;padding:4px 3px;border:1px solid #cbd5e1;">
+          <span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:10.5px;font-weight:800;background-color:${isGrpA ? '#e0e7ff' : '#fae8ff'};color:${isGrpA ? '#3730a3' : '#86198f'};border:1px solid ${isGrpA ? '#c7d2fe' : '#f5d0fe'};">
+            ${escapeHtml(grp)}
+          </span>
         </td>
-        <td style="text-align:center;min-width:65px;padding:6px 4px;border:1px solid #cbd5e1;">&nbsp;</td>
+        <td style="text-align:center;padding:4px 3px;border:1px solid #cbd5e1;">
+          <span style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:10.5px;font-weight:700;background-color:${badgeBg};color:${badgeColor};border:1px solid ${badgeBorder};">
+            ${statusText}
+          </span>
+        </td>
+        <td style="text-align:center;min-width:75px;padding:4px 3px;border:1px solid #cbd5e1;">&nbsp;</td>
       </tr>
     `;
-  }).join('');
+  };
 
-  const safeFilename = (filename || `Attendance_${subjectName}_Week${weekNum}.pdf`).replace(/[/\\?%*:|"<>]/g, '_');
-  const finalFilename = safeFilename.endsWith('.pdf') ? safeFilename : `${safeFilename}.pdf`;
-
-  // Render container matching the exact laptop/PC layout
-  const container = document.createElement('div');
-  container.id = 'attendance-pdf-render-root';
-  container.setAttribute('dir', 'rtl');
-  container.style.position = 'fixed';
-  container.style.left = '-10000px';
-  container.style.top = '0';
-  container.style.width = '794px';
-  container.style.backgroundColor = '#ffffff';
-  container.style.color = '#0f172a';
-  container.style.padding = '24px 28px';
-  container.style.boxSizing = 'border-box';
-  container.style.fontFamily = "'Cairo', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-
-  container.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #0f172a;padding-bottom:10px;margin-bottom:12px;">
-      <div>
-        <h1 style="margin:0;font-size:20px;font-weight:800;color:#1e1b4b;">كشف حضور وغياب الطلاب (${escapeHtml(typeLabel)})</h1>
-      </div>
-      <div style="text-align:left;font-size:12px;color:#64748b;">
-        <div>تاريخ الطباعة: ${escapeHtml(new Date().toLocaleDateString('ar-EG'))}</div>
-        <div style="font-weight:700;color:#0f172a;margin-top:2px;">الأسبوع ${escapeHtml(weekNum)}</div>
-      </div>
-    </div>
-
-    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;margin-bottom:12px;display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;font-size:13px;">
-      <div><span style="color:#64748b;font-weight:600;">المادة:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(subjectName)}</span></div>
-      <div><span style="color:#64748b;font-weight:600;">الفرقة:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(yearLevel ? 'الفرقة ' + yearLevel : '—')}</span></div>
-      <div><span style="color:#64748b;font-weight:600;">المجموعة:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(groupName || sectionName || 'A / B')}</span></div>
-      <div><span style="color:#64748b;font-weight:600;">تاريخ الجلسة:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(sessionDate || '—')}</span></div>
-      <div><span style="color:#64748b;font-weight:600;">المعيد:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(instructorName || '—')}</span></div>
-    </div>
-
-    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;font-size:12px;">
-      <div style="padding:4px 10px;border-radius:6px;font-weight:700;background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;">إجمالي المعروضين: ${students.length}</div>
-      <div style="padding:4px 10px;border-radius:6px;font-weight:700;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;">حاضر: ${countPresent}</div>
-      <div style="padding:4px 10px;border-radius:6px;font-weight:700;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;">غائب: ${countAbsent}</div>
-      <div style="padding:4px 10px;border-radius:6px;font-weight:700;background:#fffbeb;color:#b45309;border:1px solid #fde68a;">تأخير: ${countLate}</div>
-      <div style="padding:4px 10px;border-radius:6px;font-weight:700;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;">عذر: ${countExcused}</div>
-    </div>
-
-    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:24px;">
-      <thead>
-        <tr style="background:#1e293b;color:#ffffff;">
-          <th style="width:35px;padding:8px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">م</th>
-          <th style="width:95px;padding:8px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الرقم الأكاديمي</th>
-          <th style="padding:8px 8px;border:1px solid #1e293b;font-weight:700;text-align:right;">اسم الطالب</th>
-          <th style="width:65px;padding:8px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">السكشن</th>
-          <th style="width:65px;padding:8px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الجروب</th>
-          <th style="width:85px;padding:8px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الحالة</th>
-          <th style="width:75px;padding:8px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الدرجة</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rowsHtml || '<tr><td colspan="7" style="text-align:center;padding:20px;color:#94a3b8;border:1px solid #cbd5e1;">لا توجد سجلات مطابقة</td></tr>'}
-      </tbody>
-    </table>
-
-    <div style="display:flex;justify-content:space-between;margin-top:30px;padding-top:15px;border-top:1px dashed #cbd5e1;">
-      <div style="text-align:center;width:200px;font-size:13px;font-weight:700;color:#334155;">
-        توقيع معيد المادة
-        <div style="margin-top:35px;border-bottom:1.5px dotted #94a3b8;"></div>
-      </div>
-      <div style="text-align:center;width:200px;font-size:13px;font-weight:700;color:#334155;">
-        توقيع أستاذ المادة
-        <div style="margin-top:35px;border-bottom:1.5px dotted #94a3b8;"></div>
-      </div>
-    </div>
-  `;
-
-  document.body.appendChild(container);
+  const pdf = new jsPDF('p', 'mm', 'a4');
+  const pdfWidth = 210;
+  const pdfHeight = 297;
 
   try {
     if (document.fonts && document.fonts.ready) {
       try {
         await document.fonts.ready;
-      } catch (e) {
-        // ignore font readiness error
-      }
+      } catch (e) {}
     }
-    // Allow browser layout flush
-    await new Promise(resolve => setTimeout(resolve, 60));
 
-    // Calculate row boundaries in container coordinates
-    const rows = Array.from(container.querySelectorAll('tbody tr'));
-    const containerTop = container.offsetTop;
-    const rowBounds = rows.map(r => {
-      const top = r.offsetTop - containerTop;
-      return {
-        top: top,
-        bottom: top + r.offsetHeight
-      };
-    });
-
-    // Single fast pass of html2canvas
-    const canvas = await html2canvas(container, {
-      scale: 1.5,
-      useCORS: true,
-      logging: false,
-      backgroundColor: '#ffffff',
-      windowWidth: 794
-    });
-
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    const pdfWidth = 210; // mm
-    const pdfHeight = 297; // mm
-
-    // In container px: A4 height is 794 * (297/210) ≈ 1123px.
-    // Usable page height leaving safe margins (top/bottom) ≈ 1040px
-    const pageMaxHeightPx = 1040;
-    const scale = canvas.width / container.offsetWidth;
-
-    // Calculate split points matching exact row borders (no row slicing!)
-    let splits = [0];
-    let currentY = 0;
-    const totalContentHeight = container.offsetHeight;
-
-    while (currentY < totalContentHeight) {
-      const targetY = currentY + pageMaxHeightPx;
-      if (targetY >= totalContentHeight) {
-        splits.push(totalContentHeight);
-        break;
+    // Render page by page
+    for (let p = 0; p < totalPages; p++) {
+      const pageInfo = pagesData[p];
+      if (onProgress) {
+        onProgress(p + 1, totalPages);
       }
-      // Find the last row whose bottom <= targetY
-      let splitAt = targetY;
-      for (let i = rowBounds.length - 1; i >= 0; i--) {
-        if (rowBounds[i].bottom <= targetY && rowBounds[i].bottom > currentY) {
-          splitAt = rowBounds[i].bottom;
-          break;
+
+      // Build rows for this page with clean group headers if group transitions
+      let pageRowsHtml = '';
+      let lastGrp = null;
+
+      pageInfo.students.forEach((stu, localIdx) => {
+        const globalIdx = pageInfo.startIndex + localIdx;
+        const curGrp = getStudentLectureGroup ? getStudentLectureGroup(stu) : 'A';
+
+        // Group transition divider
+        if (localIdx === 0 && !pageInfo.isFirstPage) {
+          pageRowsHtml += `
+            <tr style="background:#f1f5f9;border-top:1.5px solid #6366f1;border-bottom:1.5px solid #6366f1;">
+              <td colspan="7" style="padding:4px 10px;font-weight:800;font-size:11px;color:#312e81;text-align:right;">
+                📌 طلاب مجموعة (جروب ${escapeHtml(curGrp)})
+              </td>
+            </tr>
+          `;
+        } else if (lastGrp && curGrp !== lastGrp) {
+          pageRowsHtml += `
+            <tr style="background:#f1f5f9;border-top:1.5px solid #6366f1;border-bottom:1.5px solid #6366f1;">
+              <td colspan="7" style="padding:4px 10px;font-weight:800;font-size:11px;color:#312e81;text-align:right;">
+                📌 طلاب مجموعة (جروب ${escapeHtml(curGrp)})
+              </td>
+            </tr>
+          `;
         }
+        lastGrp = curGrp;
+
+        pageRowsHtml += renderStudentRow(stu, globalIdx);
+      });
+
+      const pageContainer = document.createElement('div');
+      pageContainer.id = `attendance-pdf-page-${p + 1}`;
+      pageContainer.setAttribute('dir', 'rtl');
+      pageContainer.style.position = 'fixed';
+      pageContainer.style.left = '-10000px';
+      pageContainer.style.top = '0';
+      pageContainer.style.width = '794px';
+      pageContainer.style.height = '1122px';
+      pageContainer.style.maxHeight = '1122px';
+      pageContainer.style.boxSizing = 'border-box';
+      pageContainer.style.padding = '22px 26px';
+      pageContainer.style.backgroundColor = '#ffffff';
+      pageContainer.style.color = '#0f172a';
+      pageContainer.style.fontFamily = "'Cairo', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+      pageContainer.style.display = 'flex';
+      pageContainer.style.flexDirection = 'column';
+      pageContainer.style.justifyContent = 'space-between';
+      pageContainer.style.overflow = 'hidden';
+
+      // Top block: Page 1 has full title & metadata; Page 2+ has NO redundant title banner
+      const topSectionHtml = pageInfo.isFirstPage ? `
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #0f172a;padding-bottom:6px;margin-bottom:8px;">
+            <div>
+              <h1 style="margin:0;font-size:18px;font-weight:800;color:#1e1b4b;">كشف حضور وغياب الطلاب (${escapeHtml(typeLabel)})</h1>
+            </div>
+            <div style="text-align:left;font-size:11px;color:#64748b;">
+              <div>تاريخ الطباعة: ${escapeHtml(new Date().toLocaleDateString('ar-EG'))}</div>
+              <div style="font-weight:700;color:#0f172a;margin-top:2px;">الأسبوع ${escapeHtml(weekNum)}</div>
+            </div>
+          </div>
+
+          <div style="background:#f8fafc;border:1px solid #cbd5e1;padding:8px 12px;margin-bottom:8px;display:grid;grid-template-columns:repeat(3, 1fr);gap:6px;font-size:12px;">
+            <div><span style="color:#64748b;font-weight:600;">المادة:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(subjectName)}</span></div>
+            <div><span style="color:#64748b;font-weight:600;">الفرقة:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(yearLevel ? 'الفرقة ' + yearLevel : '—')}</span></div>
+            <div><span style="color:#64748b;font-weight:600;">المجموعة:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(groupName || sectionName || 'A / B')}</span></div>
+            <div><span style="color:#64748b;font-weight:600;">تاريخ الجلسة:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(sessionDate || '—')}</span></div>
+            <div><span style="color:#64748b;font-weight:600;">المعيد:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(instructorName || '—')}</span></div>
+          </div>
+
+          <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;font-size:11px;">
+            <div style="padding:3px 8px;border-radius:4px;font-weight:700;background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;">إجمالي المعروضين: ${sortedStudents.length}</div>
+            <div style="padding:3px 8px;border-radius:4px;font-weight:700;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;">حاضر: ${countPresent}</div>
+            <div style="padding:3px 8px;border-radius:4px;font-weight:700;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;">غائب: ${countAbsent}</div>
+            <div style="padding:3px 8px;border-radius:4px;font-weight:700;background:#fffbeb;color:#b45309;border:1px solid #fde68a;">تأخير: ${countLate}</div>
+            <div style="padding:3px 8px;border-radius:4px;font-weight:700;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;">عذر: ${countExcused}</div>
+          </div>
+        </div>
+      ` : `
+        <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1.5px solid #0f172a;padding-bottom:5px;margin-bottom:8px;font-size:11px;color:#64748b;">
+          <div><span style="font-weight:700;color:#0f172a;">متابعة كشف الحضور:</span> ${escapeHtml(subjectName)} — الأسبوع ${escapeHtml(weekNum)}</div>
+          <div style="font-weight:600;color:#334155;">${escapeHtml(groupName || sectionName || 'A / B')}</div>
+        </div>
+      `;
+
+      // Table block with consistent column widths
+      const tableSectionHtml = `
+        <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:auto;table-layout:fixed;border:1.5px solid #1e293b;">
+          <thead>
+            <tr style="background:#1e293b;color:#ffffff;height:30px;">
+              <th style="width:36px;padding:5px 2px;border:1px solid #1e293b;font-weight:700;text-align:center;">م</th>
+              <th style="width:95px;padding:5px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الرقم الأكاديمي</th>
+              <th style="padding:5px 8px;border:1px solid #1e293b;font-weight:700;text-align:right;">اسم الطالب</th>
+              <th style="width:55px;padding:5px 2px;border:1px solid #1e293b;font-weight:700;text-align:center;">السكشن</th>
+              <th style="width:55px;padding:5px 2px;border:1px solid #1e293b;font-weight:700;text-align:center;">الجروب</th>
+              <th style="width:75px;padding:5px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الحالة</th>
+              <th style="width:75px;padding:5px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الدرجة</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${pageRowsHtml || '<tr><td colspan="7" style="text-align:center;padding:15px;color:#94a3b8;border:1px solid #cbd5e1;">لا توجد سجلات مطابقة</td></tr>'}
+          </tbody>
+        </table>
+      `;
+
+      // Bottom block: Signatures on the last page + Footer on all pages
+      const bottomSectionHtml = `
+        <div>
+          ${pageInfo.isLastPage ? `
+            <div style="display:flex;justify-content:space-between;margin-top:14px;padding-top:8px;border-top:1px dashed #cbd5e1;">
+              <div style="text-align:center;width:190px;font-size:11.5px;font-weight:700;color:#334155;">
+                توقيع معيد المادة
+                <div style="margin-top:25px;border-bottom:1.5px dotted #94a3b8;"></div>
+              </div>
+              <div style="text-align:center;width:190px;font-size:11.5px;font-weight:700;color:#334155;">
+                توقيع أستاذ المادة
+                <div style="margin-top:25px;border-bottom:1.5px dotted #94a3b8;"></div>
+              </div>
+            </div>
+          ` : ''}
+
+          <div style="display:flex;justify-content:space-between;align-items:center;padding-top:5px;border-top:1px solid #e2e8f0;margin-top:6px;font-size:10px;color:#94a3b8;">
+            <span>منصة Gradely الأكاديمية</span>
+            <span>صفحة ${pageInfo.pageNumber} من ${totalPages}</span>
+          </div>
+        </div>
+      `;
+
+      pageContainer.innerHTML = `
+        ${topSectionHtml}
+        ${tableSectionHtml}
+        ${bottomSectionHtml}
+      `;
+
+      document.body.appendChild(pageContainer);
+
+      await new Promise(r => setTimeout(r, 60));
+
+      const canvas = await html2canvas(pageContainer, {
+        scale: 1.5,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: 794,
+        windowHeight: 1122
+      });
+
+      if (p > 0) {
+        pdf.addPage();
       }
-      if (splitAt <= currentY) {
-        splitAt = targetY;
-      }
-      splits.push(splitAt);
-      currentY = splitAt;
-    }
 
-    // Slice canvas cleanly into A4 pages
-    for (let p = 0; p < splits.length - 1; p++) {
-      if (p > 0) pdf.addPage();
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
 
-      const startY = splits[p] * scale;
-      const endY = splits[p + 1] * scale;
-      const sliceHeight = endY - startY;
-
-      const sliceCanvas = document.createElement('canvas');
-      sliceCanvas.width = canvas.width;
-      sliceCanvas.height = sliceHeight;
-      const ctx = sliceCanvas.getContext('2d');
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
-      ctx.drawImage(
-        canvas,
-        0, startY, canvas.width, sliceHeight,
-        0, 0, canvas.width, sliceHeight
-      );
-
-      const imgData = sliceCanvas.toDataURL('image/jpeg', 0.92);
-      const pdfSliceHeight = (sliceHeight * pdfWidth) / canvas.width;
-      pdf.addImage(imgData, 'JPEG', 0, 8, pdfWidth, pdfSliceHeight);
+      document.body.removeChild(pageContainer);
     }
 
     const blob = pdf.output('blob');
     const blobUrl = URL.createObjectURL(blob);
 
-    // Direct trigger download
     try {
       const a = document.createElement('a');
       a.href = blobUrl;
@@ -1085,24 +1184,7 @@ export async function printWeekAttendancePDF({
     };
   } catch (err) {
     console.error('Canvas PDF export failed, fallback to print window:', err);
-    // Graceful fallback to HTML print if canvas failed
-    const blob = new Blob([container.innerHTML], { type: 'text/html;charset=utf-8' });
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = blobUrl;
-    a.target = '_blank';
-    document.body.appendChild(a);
-    a.click();
-    return {
-      success: true,
-      blob,
-      blobUrl,
-      filename: finalFilename
-    };
-  } finally {
-    if (container.parentNode) {
-      container.parentNode.removeChild(container);
-    }
+    throw err;
   }
 }
 
