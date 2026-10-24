@@ -27,7 +27,10 @@ export async function getAdminBaseData(currentUser = null, forceRefresh = false)
     // High-reliability fallback for TAs where direct table SELECT might be restricted
     if (!allUsersList || allUsersList.length === 0 || !allSubList || allSubList.length === 0) {
       try {
-        const { data: bData } = await supabase.rpc('get_system_backup_data');
+        const sessionToken = currentUser?.session_token || localStorage.getItem('gradely_session_token') || '';
+        const { data: bData } = await supabase.rpc('get_system_backup_data', {
+          p_session_token: sessionToken
+        });
         if (bData) {
           if ((!allUsersList || allUsersList.length === 0) && Array.isArray(bData.users) && bData.users.length > 0) {
             allUsersList = bData.users;
@@ -93,7 +96,10 @@ export async function getBackupAttendanceAndGrades(forceRefresh = false) {
 
   if (!att || !grd) {
     try {
-      const { data: bData } = await supabase.rpc('get_system_backup_data');
+      const sessionToken = localStorage.getItem('gradely_session_token') || '';
+      const { data: bData } = await supabase.rpc('get_system_backup_data', {
+        p_session_token: sessionToken
+      });
       if (bData) {
         if (Array.isArray(bData.attendance)) {
           att = bData.attendance;

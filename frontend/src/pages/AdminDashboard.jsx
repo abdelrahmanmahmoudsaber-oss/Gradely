@@ -225,7 +225,53 @@ export default function AdminDashboard({ user, onLogout }) {
           })}
         </nav>
 
-        <div style={{padding: '1.2rem', borderTop: '1px solid var(--border)'}}>
+        <div style={{padding: '1.2rem', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '8px'}}>
+          <button 
+            onClick={() => { setShowPasswordModal(true); setPasswordMsg({type:'',text:''}); setMobileMenuOpen(false); }}
+            style={{
+              width: '100%',
+              background: 'rgba(99, 102, 241, 0.08)',
+              border: '1px solid rgba(99, 102, 241, 0.25)',
+              color: '#c7d2fe',
+              padding: '10px 12px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              fontSize: '0.9rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+          >
+            <KeyRound size={16} />
+            تغيير كلمة المرور
+          </button>
+
+          <button 
+            onClick={() => { setShowSessionsModal(true); setMobileMenuOpen(false); }}
+            style={{
+              width: '100%',
+              background: 'rgba(99, 102, 241, 0.08)',
+              border: '1px solid rgba(99, 102, 241, 0.25)',
+              color: '#c7d2fe',
+              padding: '10px 12px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              fontSize: '0.9rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+          >
+            <Smartphone size={16} />
+            الأجهزة المتصلة
+          </button>
+
           <button 
             onClick={onLogout}
             style={{
@@ -286,38 +332,18 @@ export default function AdminDashboard({ user, onLogout }) {
             >
               <Menu size={22} />
             </button>
-            <h1 style={{margin: 0, fontSize: 'clamp(1.2rem, 3vw, 1.5rem)', fontWeight: 800}}>{getPageTitle()}</h1>
+            <h1 style={{margin: 0, fontSize: 'clamp(1.05rem, 2.5vw, 1.4rem)', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{getPageTitle()}</h1>
           </div>
 
-          <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+          <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
             <button 
               onClick={() => { setShowPasswordModal(true); setPasswordMsg({type:'',text:''}); }}
+              title="تغيير كلمة المرور"
               style={{
-                background: 'rgba(79, 70, 229, 0.1)',
-                border: '1px solid rgba(79, 70, 229, 0.3)',
-                color: 'var(--primary-hover)',
-                padding: '6px 14px',
-                borderRadius: '20px',
-                fontSize: '0.85rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                transition: 'all 0.2s'
-              }}
-            >
-              <KeyRound size={15} /> تغيير كلمة المرور
-            </button>
-
-            <button
-              onClick={() => setShowSessionsModal(true)}
-              title="عرض الأجهزة المتصلة بالحساب وإلغاء تسجيل الدخول عن بُعد"
-              style={{
-                background: 'rgba(79, 70, 229, 0.1)',
-                color: 'var(--primary-hover)',
-                border: '1px solid rgba(79, 70, 229, 0.3)',
-                padding: '7px 12px',
+                background: 'rgba(99, 102, 241, 0.12)',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                color: '#a5b4fc',
+                padding: '7px 11px',
                 borderRadius: '8px',
                 fontSize: '0.85rem',
                 fontWeight: 700,
@@ -328,7 +354,28 @@ export default function AdminDashboard({ user, onLogout }) {
                 transition: 'all 0.2s'
               }}
             >
-              <Smartphone size={15} /> الأجهزة المتصلة
+              <KeyRound size={16} /> <span className="hide-on-mobile">تغيير كلمة المرور</span>
+            </button>
+
+            <button
+              onClick={() => setShowSessionsModal(true)}
+              title="الأجهزة المتصلة بالحساب"
+              style={{
+                background: 'rgba(99, 102, 241, 0.12)',
+                color: '#a5b4fc',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                padding: '7px 11px',
+                borderRadius: '8px',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.2s'
+              }}
+            >
+              <Smartphone size={16} /> <span className="hide-on-mobile">الأجهزة المتصلة</span>
             </button>
           </div>
         </header>

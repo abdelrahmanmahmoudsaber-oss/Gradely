@@ -5,20 +5,14 @@ import { supabase } from './supabaseClient';
 import { cacheManager } from './utils/dataCache';
 import NetworkIndicator from './components/NetworkIndicator';
 import InstallPwaBanner from './components/InstallPwaBanner';
+import SplashScreen from './components/SplashScreen';
 import { registerCurrentDevice } from './utils/deviceHelper';
 
 // Code Splitting / Lazy Loading: Isolates Admin bundles and code from Student bundle
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const StudentDashboard = lazy(() => import('./pages/StudentDashboard'));
 
-const PageLoader = () => (
-  <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg, #0f172a)' }}>
-    <div style={{ textAlign: 'center', color: 'var(--text-muted, #94a3b8)', fontSize: '1.1rem' }}>
-      <div style={{ fontSize: '2rem', marginBottom: '1rem', animation: 'spin 1s linear infinite' }}>⏳</div>
-      جاري تحميل بيانات المنصة...
-    </div>
-  </div>
-);
+const PageLoader = () => <SplashScreen statusText="جاري تحميل الصفحة والمكونات..." />;
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -230,14 +224,7 @@ export default function App() {
 
   // Show nothing while the session is being checked — prevents login flash.
   if (authLoading) {
-    return (
-      <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
-        <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '1.1rem' }}>
-          <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>⏳</div>
-          جاري التحقق من الجلسة...
-        </div>
-      </div>
-    );
+    return <SplashScreen statusText="جاري التحقق من الجلسة ومزامنة البيانات..." />;
   }
 
   return (

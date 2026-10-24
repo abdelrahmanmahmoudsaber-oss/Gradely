@@ -1070,12 +1070,28 @@ export default function AttendanceTab({ user }) {
     const secName = selectedSection !== 'all' ? selectedSection : 'All';
     const filename = `Attendance_${subName}_${secName}_Week${week}_${exportFilter}_${sessionDate}`;
 
+    const isRecordedStatus = (st) => {
+      if (!st) return false;
+      const s = String(st).toLowerCase().trim();
+      return s === 'present' || s === 'absent' || s === 'late' || s === 'excused' || s === 'حاضر' || s === 'غائب' || s === 'تأخير' || s === 'عذر';
+    };
+
     let targetStudents = baseEnrolledStudents;
-    if (exportFilter === 'recorded') targetStudents = baseEnrolledStudents.filter(s => !!attendanceRecords[s.user_id]);
-    else if (exportFilter === 'present') targetStudents = baseEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'present');
-    else if (exportFilter === 'absent') targetStudents = baseEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'absent');
-    else if (exportFilter === 'late') targetStudents = baseEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'late');
-    else if (exportFilter === 'excused') targetStudents = baseEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'excused');
+    if (attendanceType === 'lecture' && selectedGroup !== 'all') {
+      targetStudents = targetStudents.filter(s => getStudentLectureGroup(s, selectedSubject) === selectedGroup);
+    }
+
+    if (exportFilter === 'recorded') {
+      targetStudents = targetStudents.filter(s => isRecordedStatus(attendanceRecords[s.user_id]));
+    } else if (exportFilter === 'present') {
+      targetStudents = targetStudents.filter(s => attendanceRecords[s.user_id] === 'present');
+    } else if (exportFilter === 'absent') {
+      targetStudents = targetStudents.filter(s => attendanceRecords[s.user_id] === 'absent');
+    } else if (exportFilter === 'late') {
+      targetStudents = targetStudents.filter(s => attendanceRecords[s.user_id] === 'late');
+    } else if (exportFilter === 'excused') {
+      targetStudents = targetStudents.filter(s => attendanceRecords[s.user_id] === 'excused');
+    }
 
     if (exportFormat === 'txt') {
       // Output clean, raw IDs line-by-line without brackets or extra text for direct 1-click copy/paste

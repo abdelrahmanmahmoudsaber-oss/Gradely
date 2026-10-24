@@ -1091,7 +1091,7 @@ export async function printWeekAttendancePDF({
           <thead>
             <tr style="background:#1e293b;color:#ffffff;height:30px;">
               <th style="width:36px;padding:5px 2px;border:1px solid #1e293b;font-weight:700;text-align:center;">م</th>
-              <th style="width:95px;padding:5px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الرقم الأكاديمي</th>
+              <th style="width:110px;padding:5px 3px;border:1px solid #1e293b;font-weight:700;text-align:center;white-space:nowrap;font-size:11px;">الرقم الأكاديمي</th>
               <th style="padding:5px 8px;border:1px solid #1e293b;font-weight:700;text-align:right;">اسم الطالب</th>
               <th style="width:55px;padding:5px 2px;border:1px solid #1e293b;font-weight:700;text-align:center;">السكشن</th>
               <th style="width:55px;padding:5px 2px;border:1px solid #1e293b;font-weight:700;text-align:center;">الجروب</th>
@@ -1121,8 +1121,7 @@ export async function printWeekAttendancePDF({
             </div>
           ` : ''}
 
-          <div style="display:flex;justify-content:space-between;align-items:center;padding-top:5px;border-top:1px solid #e2e8f0;margin-top:6px;font-size:10px;color:#94a3b8;">
-            <span>منصة Gradely الأكاديمية</span>
+          <div style="display:flex;justify-content:flex-end;align-items:center;padding-top:5px;border-top:1px solid #e2e8f0;margin-top:6px;font-size:10px;color:#94a3b8;">
             <span>صفحة ${pageInfo.pageNumber} من ${totalPages}</span>
           </div>
         </div>
