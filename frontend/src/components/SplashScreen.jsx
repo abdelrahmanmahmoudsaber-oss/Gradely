@@ -1,6 +1,6 @@
 import React from 'react';
 
-export default function SplashScreen({ statusText = 'جاري تجهيز بياناتك...' }) {
+export default function SplashScreen({ statusText = 'جاري التحقق من الجلسة ومزامنة البيانات...' }) {
   return (
     <div style={{
       position: 'fixed',
@@ -12,14 +12,14 @@ export default function SplashScreen({ statusText = 'جاري تجهيز بيا�
       flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: 'clamp(2rem, 5vh, 3.5rem) 1.25rem',
+      padding: 'clamp(2rem, 5vh, 3.5rem) 16px',
       boxSizing: 'border-box',
       zIndex: 99999,
       fontFamily: "'Cairo', system-ui, -apple-system, sans-serif",
       color: '#ffffff',
       overflow: 'hidden'
     }}>
-      {/* Ambient background ribbons & glows */}
+      {/* Ambient background curves & radial glows */}
       <svg
         style={{
           position: 'absolute',
@@ -33,65 +33,37 @@ export default function SplashScreen({ statusText = 'جاري تجهيز بيا�
         preserveAspectRatio="none"
       >
         <defs>
-          <linearGradient id="curveGoldBlueTop" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#d97706" stopOpacity="0.8" />
-            <stop offset="40%" stopColor="#f59e0b" stopOpacity="0.5" />
-            <stop offset="70%" stopColor="#38bdf8" stopOpacity="0.7" />
-            <stop offset="100%" stopColor="#1e40af" stopOpacity="0" />
+          <linearGradient id="curveGoldTop" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#d97706" stopOpacity="0.7" />
+            <stop offset="50%" stopColor="#f59e0b" stopOpacity="0.4" />
+            <stop offset="100%" stopColor="#38bdf8" stopOpacity="0" />
           </linearGradient>
-          <linearGradient id="curveGoldBlueBottom" x1="100%" y1="100%" x2="0%" y2="0%">
-            <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.8" />
-            <stop offset="40%" stopColor="#818cf8" stopOpacity="0.6" />
-            <stop offset="70%" stopColor="#f59e0b" stopOpacity="0.5" />
+          <linearGradient id="curveBlueBottom" x1="100%" y1="100%" x2="0%" y2="0%">
+            <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.7" />
+            <stop offset="50%" stopColor="#818cf8" stopOpacity="0.4" />
             <stop offset="100%" stopColor="#d97706" stopOpacity="0" />
           </linearGradient>
-          <radialGradient id="centerAmbient" cx="50%" cy="38%" r="45%">
-            <stop offset="0%" stopColor="#1e3a8a" stopOpacity="0.35" />
-            <stop offset="60%" stopColor="#0f172a" stopOpacity="0.1" />
+          <radialGradient id="centerAmbientGlow" cx="50%" cy="36%" r="45%">
+            <stop offset="0%" stopColor="#1e3a8a" stopOpacity="0.38" />
+            <stop offset="60%" stopColor="#0f172a" stopOpacity="0.12" />
             <stop offset="100%" stopColor="#070b14" stopOpacity="0" />
           </radialGradient>
         </defs>
 
-        {/* Ambient Center Glow */}
-        <rect width="400" height="800" fill="url(#centerAmbient)" />
+        <rect width="400" height="800" fill="url(#centerAmbientGlow)" />
 
-        {/* Top-left elegant curves */}
-        <path
-          d="M -60 140 C 60 70, 160 30, 280 -60"
-          stroke="url(#curveGoldBlueTop)"
-          strokeWidth="2.5"
-          fill="none"
-          opacity="0.75"
-        />
-        <path
-          d="M -80 200 C 40 130, 140 80, 320 -30"
-          stroke="url(#curveGoldBlueTop)"
-          strokeWidth="1.2"
-          fill="none"
-          opacity="0.45"
-        />
+        {/* Diagonal aesthetic lines */}
+        <path d="M -80 150 C 40 80, 160 40, 320 -50" stroke="url(#curveGoldTop)" strokeWidth="2.2" fill="none" opacity="0.7" />
+        <path d="M -100 210 C 20 140, 140 90, 360 -20" stroke="url(#curveGoldTop)" strokeWidth="1" fill="none" opacity="0.35" />
 
-        {/* Bottom-right elegant curves */}
-        <path
-          d="M 120 860 C 240 790, 340 730, 460 620"
-          stroke="url(#curveGoldBlueBottom)"
-          strokeWidth="2.5"
-          fill="none"
-          opacity="0.75"
-        />
-        <path
-          d="M 80 890 C 200 820, 310 760, 480 660"
-          stroke="url(#curveGoldBlueBottom)"
-          strokeWidth="1.2"
-          fill="none"
-          opacity="0.4"
-        />
+        <path d="M 100 870 C 240 800, 340 730, 480 610" stroke="url(#curveBlueBottom)" strokeWidth="2.2" fill="none" opacity="0.7" />
+        <path d="M 60 900 C 200 830, 300 760, 500 650" stroke="url(#curveBlueBottom)" strokeWidth="1" fill="none" opacity="0.35" />
       </svg>
 
-      {/* Invisible spacer for vertical balance */}
-      <div style={{ height: '10px' }} />
+      {/* Top spacer */}
+      <div style={{ height: '8px' }} />
 
-      {/* Main Brand & Status Content */}
+      {/* Center Brand Area */}
       <div style={{
         display: 'flex',
         flexDirection: 'column',
@@ -101,76 +73,72 @@ export default function SplashScreen({ statusText = 'جاري تجهيز بيا�
         width: '100%',
         zIndex: 2
       }}>
-        {/* Glow App Icon Container */}
+        {/* Glassmorphic Squircle Icon Tile */}
         <div style={{
           position: 'relative',
-          marginBottom: '1.4rem'
+          marginBottom: '1.25rem'
         }}>
-          {/* Intense Neon Blue Glow */}
+          {/* Soft Neon Blue Glow */}
           <div style={{
             position: 'absolute',
-            inset: '-10px',
-            background: 'radial-gradient(circle, rgba(56, 189, 248, 0.5) 0%, rgba(99, 102, 241, 0.4) 50%, rgba(7, 11, 20, 0) 75%)',
+            inset: '-12px',
+            background: 'radial-gradient(circle, rgba(56, 189, 248, 0.5) 0%, rgba(99, 102, 241, 0.35) 50%, rgba(7, 11, 20, 0) 75%)',
             borderRadius: '34px',
             filter: 'blur(20px)',
-            opacity: 0.85,
+            opacity: 0.9,
             animation: 'gradelyPulse 3s ease-in-out infinite'
           }} />
 
-          {/* Squircle Tile with Glassmorphism */}
+          {/* Squircle Tile */}
           <div style={{
             position: 'relative',
-            width: '92px',
-            height: '92px',
+            width: '94px',
+            height: '94px',
             background: 'linear-gradient(145deg, #131c31 0%, #0a0f1d 100%)',
             borderRadius: '26px',
             border: '1.5px solid rgba(56, 189, 248, 0.45)',
-            boxShadow: '0 15px 35px rgba(0, 0, 0, 0.7), inset 0 1px 1px rgba(255, 255, 255, 0.25)',
+            boxShadow: '0 16px 36px rgba(0, 0, 0, 0.75), inset 0 1px 1px rgba(255, 255, 255, 0.25)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            backdropFilter: 'blur(10px)'
+            backdropFilter: 'blur(12px)'
           }}>
-            {/* Gradely Stylized Icon: G wearing Mortarboard */}
-            <svg width="60" height="60" viewBox="0 0 100 100" fill="none">
+            <svg width="62" height="62" viewBox="0 0 100 100" fill="none">
               <defs>
-                <linearGradient id="gLetterGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <linearGradient id="gLetter3D" x1="0%" y1="0%" x2="100%" y2="100%">
                   <stop offset="0%" stopColor="#38bdf8" />
-                  <stop offset="50%" stopColor="#60a5fa" />
+                  <stop offset="45%" stopColor="#60a5fa" />
                   <stop offset="100%" stopColor="#818cf8" />
                 </linearGradient>
-                <linearGradient id="capGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <linearGradient id="capGoldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
                   <stop offset="0%" stopColor="#f59e0b" />
                   <stop offset="100%" stopColor="#d97706" />
                 </linearGradient>
-                <filter id="iconDropShadow" x="-20%" y="-20%" width="140%" height="140%">
+                <filter id="shadow3D" x="-20%" y="-20%" width="140%" height="140%">
                   <feDropShadow dx="0" dy="3" stdDeviation="3" floodColor="#000000" floodOpacity="0.5" />
                 </filter>
               </defs>
 
-              {/* Bold Stylized 'G' */}
+              {/* 3D Stylized 'G' */}
               <path
                 d="M 52 28 C 36 28 24 40 24 56 C 24 72 36 84 52 84 C 68 84 76 73 76 62 L 52 62 L 52 50 L 88 50 C 89 74 74 94 52 94 C 28 94 12 76 12 56 C 12 34 29 18 52 18 C 63 18 73 22 80 29 L 71 38 C 66 32 59 28 52 28 Z"
-                fill="url(#gLetterGrad)"
-                filter="url(#iconDropShadow)"
+                fill="url(#gLetter3D)"
+                filter="url(#shadow3D)"
               />
 
-              {/* Graduation Cap on top left of G */}
+              {/* Graduation Cap */}
               <g transform="translate(18, 10) rotate(-16) scale(0.9)">
-                {/* Cap diamond */}
                 <polygon
                   points="26,4 48,13 26,22 4,13"
-                  fill="url(#capGrad)"
+                  fill="url(#capGoldGrad)"
                   stroke="#fbbf24"
                   strokeWidth="1.2"
                 />
-                {/* Cap skull base */}
                 <path
                   d="M 12 16 L 12 24 C 12 28 40 28 40 24 L 40 16 Z"
                   fill="#b45309"
                   opacity="0.9"
                 />
-                {/* Tassel Button & Hanging String */}
                 <circle cx="26" cy="13" r="2.2" fill="#fef3c7" />
                 <path
                   d="M 26 13 Q 10 18 8 26"
@@ -184,28 +152,49 @@ export default function SplashScreen({ statusText = 'جاري تجهيز بيا�
           </div>
         </div>
 
-        {/* Brand Name with Purple 'y' */}
-        <h1 style={{
-          margin: '0 0 1.6rem 0',
-          fontSize: 'clamp(2.4rem, 6vw, 2.9rem)',
-          fontWeight: 900,
-          letterSpacing: '-0.5px',
+        {/* Brand Name - STRICT LTR to prevent 'yGradel' reversal */}
+        <div dir="ltr" style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          lineHeight: 1
+          lineHeight: 1,
+          marginBottom: '0.4rem',
+          unicodeBidi: 'isolate'
         }}>
-          <span style={{ color: '#ffffff' }}>Gradel</span>
           <span style={{
-            background: 'linear-gradient(135deg, #a855f7 0%, #818cf8 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent'
-          }}>y</span>
-        </h1>
+            fontSize: 'clamp(2.5rem, 6.5vw, 3rem)',
+            fontWeight: 900,
+            color: '#ffffff',
+            letterSpacing: '-0.5px'
+          }}>
+            Gradel
+          </span>
+          <span style={{
+            fontSize: 'clamp(2.5rem, 6.5vw, 3rem)',
+            fontWeight: 900,
+            color: '#38bdf8',
+            textShadow: '0 0 16px rgba(56, 189, 248, 0.65)',
+            letterSpacing: '-0.5px'
+          }}>
+            y
+          </span>
+        </div>
 
-        {/* Glowing Progress Bar */}
+        {/* Tracking Subtitle */}
         <div style={{
-          width: '210px',
+          fontSize: '0.68rem',
+          letterSpacing: '3.5px',
+          color: '#64748b',
+          fontWeight: 800,
+          textTransform: 'uppercase',
+          marginBottom: '2rem'
+        }}>
+          ACADEMIC INTELLIGENCE
+        </div>
+
+        {/* Loading Section */}
+        <div style={{
+          width: '220px',
           height: '5px',
           background: 'rgba(255, 255, 255, 0.08)',
           borderRadius: '999px',
@@ -218,26 +207,26 @@ export default function SplashScreen({ statusText = 'جاري تجهيز بيا�
             position: 'absolute',
             top: 0,
             bottom: 0,
-            width: '50%',
+            width: '45%',
             background: 'linear-gradient(90deg, #38bdf8 0%, #818cf8 60%, #a855f7 100%)',
             borderRadius: '999px',
-            boxShadow: '0 0 12px #38bdf8',
+            boxShadow: '0 0 14px #38bdf8',
             animation: 'gradelyIndeterminate 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite'
           }} />
         </div>
 
-        {/* Status Text */}
-        <span style={{
-          fontSize: '0.92rem',
+        {/* Arabic Status Caption */}
+        <span dir="rtl" style={{
+          fontSize: '0.9rem',
           color: '#94a3b8',
-          fontWeight: 500,
+          fontWeight: 600,
           letterSpacing: '0.2px'
         }}>
           {statusText}
         </span>
       </div>
 
-      {/* Developer Credits - Ultra Clean & Organized Bottom Pill */}
+      {/* Floating Bottom Footer */}
       <div style={{
         display: 'flex',
         flexDirection: 'column',
@@ -245,120 +234,128 @@ export default function SplashScreen({ statusText = 'جاري تجهيز بيا�
         gap: '9px',
         zIndex: 2,
         width: '100%',
-        maxWidth: '440px'
+        maxWidth: '390px',
+        boxSizing: 'border-box'
       }}>
-        {/* Separator with DEVELOPED BY */}
+        {/* Tiny uppercase DEVELOPED BY */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           gap: '12px',
           width: '100%',
-          color: '#64748b',
-          fontSize: '0.72rem',
-          fontWeight: 700,
-          letterSpacing: '1.2px'
+          color: '#475569',
+          fontSize: '0.68rem',
+          fontWeight: 800,
+          letterSpacing: '2px'
         }}>
           <div style={{ flex: 1, height: '1px', background: 'rgba(255, 255, 255, 0.08)' }} />
           <span>DEVELOPED BY</span>
           <div style={{ flex: 1, height: '1px', background: 'rgba(255, 255, 255, 0.08)' }} />
         </div>
 
-        {/* Outer Glowing Glass Pill */}
-        <div style={{
+        {/* Frosted Glass Pill Container - STRICT LTR & No Overflow */}
+        <div dir="ltr" style={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center',
-          gap: '14px',
-          padding: '10px 18px',
-          background: 'rgba(15, 23, 42, 0.65)',
+          justifyContent: 'space-between',
+          width: '100%',
+          padding: '8px 12px',
+          background: 'rgba(15, 23, 42, 0.7)',
           border: '1.2px solid rgba(56, 189, 248, 0.35)',
           boxShadow: '0 0 25px rgba(56, 189, 248, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.12)',
-          borderRadius: '24px',
+          borderRadius: '26px',
           backdropFilter: 'blur(16px)',
-          maxWidth: '96vw',
-          width: 'max-content',
-          boxSizing: 'border-box'
+          boxSizing: 'border-box',
+          gap: '6px'
         }}>
-          {/* Eng Abdelrahman Mahmoud */}
+          {/* Badge 1: MT - Eng Mostafa Tag */}
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '8px'
+            gap: '7px',
+            flex: '1 1 0',
+            minWidth: 0,
+            justifyContent: 'flex-start'
           }}>
             <div style={{
-              width: '28px',
-              height: '28px',
-              borderRadius: '50%',
-              background: 'linear-gradient(135deg, #1e40af, #3b82f6)',
-              border: '1.5px solid #60a5fa',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '0.72rem',
-              fontWeight: 900,
-              color: '#ffffff',
-              boxShadow: '0 0 10px rgba(59, 130, 246, 0.5)',
-              flexShrink: 0
-            }}>
-              AM
-            </div>
-            <span style={{
-              fontSize: 'clamp(0.78rem, 2.5vw, 0.88rem)',
-              fontWeight: 700,
-              color: '#f8fafc',
-              whiteSpace: 'nowrap',
-              letterSpacing: '0.2px'
-            }}>
-              Eng Abdelrahman Mahmoud
-            </span>
-          </div>
-
-          {/* Thin Glass Divider */}
-          <div style={{
-            width: '1px',
-            height: '18px',
-            background: 'rgba(255, 255, 255, 0.15)',
-            flexShrink: 0
-          }} />
-
-          {/* Eng Mostafa Tag */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px'
-          }}>
-            <div style={{
-              width: '28px',
-              height: '28px',
+              width: '26px',
+              height: '26px',
               borderRadius: '50%',
               background: 'linear-gradient(135deg, #0d9488, #14b8a6)',
               border: '1.5px solid #5eead4',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '0.72rem',
+              fontSize: '0.7rem',
               fontWeight: 900,
               color: '#ffffff',
-              boxShadow: '0 0 10px rgba(20, 184, 166, 0.5)',
+              boxShadow: '0 0 8px rgba(20, 184, 166, 0.45)',
               flexShrink: 0
             }}>
               MT
             </div>
             <span style={{
-              fontSize: 'clamp(0.78rem, 2.5vw, 0.88rem)',
+              fontSize: 'clamp(0.72rem, 2.3vw, 0.8rem)',
               fontWeight: 700,
               color: '#f8fafc',
               whiteSpace: 'nowrap',
-              letterSpacing: '0.2px'
+              overflow: 'hidden',
+              textOverflow: 'ellipsis'
             }}>
               Eng Mostafa Tag
+            </span>
+          </div>
+
+          {/* Thin Glass Divider */}
+          <div style={{
+            width: '1px',
+            height: '16px',
+            background: 'rgba(255, 255, 255, 0.15)',
+            flexShrink: 0
+          }} />
+
+          {/* Badge 2: AM - Eng Abdelrahman Mahmoud */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '7px',
+            flex: '1.15 1 0',
+            minWidth: 0,
+            justifyContent: 'flex-start'
+          }}>
+            <div style={{
+              width: '26px',
+              height: '26px',
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #1e40af, #3b82f6)',
+              border: '1.5px solid #60a5fa',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '0.7rem',
+              fontWeight: 900,
+              color: '#ffffff',
+              boxShadow: '0 0 8px rgba(59, 130, 246, 0.45)',
+              flexShrink: 0
+            }}>
+              AM
+            </div>
+            <span style={{
+              fontSize: 'clamp(0.72rem, 2.3vw, 0.8rem)',
+              fontWeight: 700,
+              color: '#f8fafc',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis'
+            }}>
+              Eng Abdelrahman Mahmoud
             </span>
           </div>
         </div>
       </div>
 
-      {/* Keyframe animations */}
+      {/* Animations */}
       <style>{`
         @keyframes gradelyIndeterminate {
           0% {
@@ -370,12 +367,12 @@ export default function SplashScreen({ statusText = 'جاري تجهيز بيا�
         }
         @keyframes gradelyPulse {
           0%, 100% {
-            opacity: 0.7;
+            opacity: 0.75;
             transform: scale(1);
           }
           50% {
             opacity: 1;
-            transform: scale(1.08);
+            transform: scale(1.06);
           }
         }
       `}</style>
