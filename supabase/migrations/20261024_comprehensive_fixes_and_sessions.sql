@@ -1,12 +1,18 @@
 -- ==============================================================================
 -- Migration: 20261024_comprehensive_fixes_and_sessions.sql
--- 1. Sync TA Ashraf Hussein (ahamdy2004) with native Supabase Auth without JSONB cast errors.
--- 2. Update subjects & excluded_students to replace Mostafa Abubakr with Ashraf Hussein.
--- 3. Fix Audit Finding T2-F1: Prevent get_my_subjects from leaking foreign student IDs.
--- 4. Fix Audit Finding T1-F2: Enforce POST method on verify_student_token_for_user.
--- 5. Fix Audit Finding T2-F2: Revoke get_system_visibility from anon.
--- 6. Facebook-style Active Sessions & Connected Devices Manager (Register, List, Revoke).
+-- 1. Temporarily disable trigger & update protect_user_role_and_permissions to recognize postgres/SQL editor.
+-- 2. Sync TA Ashraf Hussein (ahamdy2004) with native Supabase Auth & assign subjects as JSONB.
+-- 3. Replace Mostafa Abubakr with Ashraf Hussein across subjects & section configurations.
+-- 4. Fix Audit Finding T2-F1: Prevent get_my_subjects from leaking foreign student IDs.
+-- 5. Fix Audit Finding T1-F2: Enforce POST method on verify_student_token_for_user.
+-- 6. Fix Audit Finding T2-F2: Revoke get_system_visibility from anon.
+-- 7. Facebook-style Active Sessions & Connected Devices Manager (Register, List, Revoke).
 -- ==============================================================================
+
+-- ------------------------------------------------------------------------------
+-- 0. TEMPORARILY DISABLE TRIGGER FOR ADMIN SETUP IN SQL EDITOR
+-- ------------------------------------------------------------------------------
+ALTER TABLE public.users DISABLE TRIGGER trg_protect_user_role;
 
 -- ------------------------------------------------------------------------------
 -- 1. SYNC ASHRAF HUSSEIN (ahamdy2004) & ASSIGN SUBJECTS AS VALID JSONB
@@ -84,6 +90,61 @@ BEGIN
   -- Clear any lockout
   DELETE FROM public.login_attempts WHERE LOWER(user_id) IN ('ahamdy2004', 'mostafaabubakr', v_email);
 END $$;
+
+-- Re-enable trigger
+ALTER TABLE public.users ENABLE TRIGGER trg_protect_user_role;
+
+-- ------------------------------------------------------------------------------
+-- 1.1 HARDEN TRIGGER TO ALLOW SQL EDITOR (postgres) AND BLOCK STUDENTS STRICTLY
+-- ------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.protect_user_role_and_permissions()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- Allow direct executions from dashboard SQL editor (postgres superuser) or service_role backend
+  IF current_user IN ('postgres', 'supabase_admin') OR (COALESCE(auth.jwt() ->> 'role', '') = 'service_role') THEN
+    RETURN NEW;
+  END IF;
+
+  IF (TG_OP = 'INSERT') THEN
+    IF NEW.role IS NULL OR TRIM(COALESCE(NEW.role, '')) = '' THEN
+      NEW.role := 'student';
+    END IF;
+
+    IF NEW.role IN ('admin', 'super_admin') THEN
+      IF NOT public.is_super_admin() THEN
+        RAISE EXCEPTION 'Unauthorized: Only Super Admin can create administrator accounts'
+          USING errcode = '42501';
+      END IF;
+    END IF;
+
+    RETURN NEW;
+  END IF;
+
+  IF (TG_OP = 'UPDATE') THEN
+    IF (NEW.role IS DISTINCT FROM OLD.role) THEN
+      IF NOT public.is_super_admin() THEN
+        RAISE EXCEPTION 'Unauthorized: Only Super Admin can modify user roles'
+          USING errcode = '42501';
+      END IF;
+    END IF;
+
+    IF (OLD.role IN ('admin', 'super_admin') OR NEW.role IN ('admin', 'super_admin')) THEN
+      IF NOT public.is_super_admin() THEN
+        RAISE EXCEPTION 'Unauthorized: Non-administrators cannot modify administrative accounts'
+          USING errcode = '42501';
+      END IF;
+    END IF;
+
+    RETURN NEW;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
 
 -- ------------------------------------------------------------------------------
 -- 2. UPDATE SUBJECTS & REPLACE MOSTAFA ABUBAKR IN SECTION CONFIGURATIONS
@@ -240,8 +301,8 @@ CREATE INDEX IF NOT EXISTS idx_active_sessions_token ON public.active_sessions(t
 
 ALTER TABLE public.active_sessions ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Users can view and manage their own sessions" ON public.active_sessions;
-CREATE POLICY "Users can view and manage their own sessions"
+DROP POLICY IF EXISTS "Active sessions access" ON public.active_sessions;
+CREATE POLICY "Active sessions access"
   ON public.active_sessions
   FOR ALL
   TO authenticated, anon
@@ -298,7 +359,6 @@ AS $$
 DECLARE
   v_res jsonb;
 BEGIN
-  -- Verify caller has a valid token
   IF p_user_id IS NULL OR p_session_token IS NULL THEN
     RETURN '[]'::jsonb;
   END IF;
@@ -342,9 +402,7 @@ BEGIN
   WHERE id = p_target_session_id AND user_id = TRIM(p_user_id);
 
   IF v_target_token IS NOT NULL THEN
-    -- Invalidate from active_sessions
     DELETE FROM public.active_sessions WHERE id = p_target_session_id;
-    -- Also invalidate from student_sessions so requests fail immediately
     DELETE FROM public.student_sessions WHERE token = v_target_token;
   END IF;
 
@@ -354,7 +412,7 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.revoke_target_session(text, text, uuid) TO anon, authenticated;
 
--- RPC: Revoke all other sessions (Facebook-style: Log out from all other devices)
+-- RPC: Revoke all other sessions (Facebook-style)
 CREATE OR REPLACE FUNCTION public.revoke_all_other_sessions(
   p_user_id text,
   p_session_token text
@@ -365,11 +423,9 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  -- Invalidate from student_sessions
   DELETE FROM public.student_sessions 
   WHERE user_id = TRIM(p_user_id) AND token <> TRIM(p_session_token);
 
-  -- Invalidate from active_sessions
   DELETE FROM public.active_sessions 
   WHERE user_id = TRIM(p_user_id) AND token <> TRIM(p_session_token);
 
