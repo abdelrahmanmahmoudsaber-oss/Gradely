@@ -1,17 +1,25 @@
-const CACHE_NAME = 'gradely-static-v1';
-const STATIC_ASSETS = [
+const CACHE_NAME = 'gradely-cache-v2';
+const STATIC_PRECACHE = [
   '/',
   '/favicon.svg',
-  '/gradely_logo.png'
+  '/pwa-192x192.png',
+  '/pwa-512x512.png',
+  '/manifest.webmanifest'
 ];
 
+// Precache essential assets on install and activate immediately
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(STATIC_PRECACHE).catch((err) => {
+        console.warn('PWA precache notice:', err);
+      });
+    })
   );
 });
 
+// Clean up old caches on activation and claim all open tabs
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
@@ -22,33 +30,76 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
+// Listen for skip waiting messages from the application
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
 
-  // Never intercept Supabase or API requests
-  if (url.origin.includes('supabase.co') || url.pathname.startsWith('/rest/v1')) {
+// Intercept requests with smart caching strategies
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  const url = new URL(req.url);
+
+  // 1. Never intercept Supabase, POST/PUT/DELETE requests, or external APIs
+  if (
+    req.method !== 'GET' ||
+    url.origin.includes('supabase.co') ||
+    url.pathname.startsWith('/rest/v1') ||
+    url.pathname.startsWith('/auth/v1')
+  ) {
     return;
   }
 
-  // Network-first strategy for navigation and scripts
-  if (event.request.mode === 'navigate' || url.pathname.endsWith('.js') || url.pathname.endsWith('.html')) {
+  // 2. Navigation / HTML pages: NETWORK-FIRST with cache fallback
+  // Ensures user always gets the latest deployed index.html when online
+  if (req.mode === 'navigate' || url.pathname.endsWith('.html') || url.pathname === '/') {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match(event.request))
+      fetch(req)
+        .then((networkRes) => {
+          if (networkRes && networkRes.status === 200) {
+            const clone = networkRes.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
+          }
+          return networkRes;
+        })
+        .catch(() => caches.match(req).then((cached) => cached || caches.match('/')))
     );
     return;
   }
 
-  // Stale-while-revalidate for images & static assets
+  // 3. Versioned build assets (/assets/*): CACHE-FIRST with network fallback
+  // Hashed bundle files never change, so serving from cache makes app load instantaneously
+  if (url.pathname.startsWith('/assets/')) {
+    event.respondWith(
+      caches.match(req).then((cachedRes) => {
+        if (cachedRes) return cachedRes;
+        return fetch(req).then((networkRes) => {
+          if (networkRes && networkRes.status === 200) {
+            const clone = networkRes.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
+          }
+          return networkRes;
+        });
+      })
+    );
+    return;
+  }
+
+  // 4. Other static images/fonts/manifest: STALE-WHILE-REVALIDATE
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request).then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200) {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache));
-        }
-        return networkResponse;
-      }).catch(() => cachedResponse);
-      return cachedResponse || fetchPromise;
+    caches.match(req).then((cachedRes) => {
+      const fetchPromise = fetch(req)
+        .then((networkRes) => {
+          if (networkRes && networkRes.status === 200) {
+            const clone = networkRes.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
+          }
+          return networkRes;
+        })
+        .catch(() => cachedRes);
+      return cachedRes || fetchPromise;
     })
   );
 });

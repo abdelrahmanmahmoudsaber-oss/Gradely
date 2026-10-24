@@ -4,6 +4,7 @@ import Login from './pages/Login';
 import { supabase } from './supabaseClient';
 import { cacheManager } from './utils/dataCache';
 import NetworkIndicator from './components/NetworkIndicator';
+import InstallPwaBanner from './components/InstallPwaBanner';
 import { registerCurrentDevice } from './utils/deviceHelper';
 
 // Code Splitting / Lazy Loading: Isolates Admin bundles and code from Student bundle
@@ -243,6 +244,7 @@ export default function App() {
     <Router>
       <div className="app-root">
         <NetworkIndicator />
+        <InstallPwaBanner />
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route

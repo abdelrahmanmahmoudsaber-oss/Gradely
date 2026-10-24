@@ -15,18 +15,51 @@ window.addEventListener('vite:preloadError', (event) => {
   }
 });
 
-// Register PWA Service Worker if supported
+// Register PWA Service Worker & auto-update on new releases
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  let refreshing = false;
+
+  // When a new SW takes control, reload cleanly to display fresh updates
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!refreshing) {
+      refreshing = true;
+      window.location.reload();
+    }
+  });
+
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').then(reg => {
-      // Check for updates periodically
+    navigator.serviceWorker.register('/sw.js').then((reg) => {
+      // 1. Immediately check for updates on load
+      reg.update().catch(() => {});
+
+      // 2. Check for updates whenever window regains focus (e.g. returning to PWA)
+      window.addEventListener('focus', () => {
+        reg.update().catch(() => {});
+      });
+
+      // 3. Check for updates on visibility change
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          reg.update().catch(() => {});
+        }
+      });
+
+      // 4. Background periodic update check (every 3 minutes)
+      setInterval(() => {
+        reg.update().catch(() => {});
+      }, 3 * 60 * 1000);
+
+      // 5. If new worker is waiting, activate it immediately
+      if (reg.waiting) {
+        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+      }
+
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
         if (newWorker) {
           newWorker.addEventListener('statechange', () => {
             if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              // New version available - notify or update cleanly
-              console.log('Gradely update installed, ready to reload.');
+              newWorker.postMessage({ type: 'SKIP_WAITING' });
             }
           });
         }
