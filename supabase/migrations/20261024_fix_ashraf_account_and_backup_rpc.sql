@@ -14,13 +14,7 @@
 UPDATE public.users
 SET name = 'Ashraf Hussein',
     role = 'admin',
-    assigned_subjects = ARRAY[
-      'YEAR1_MATH0:all',
-      'YEAR2_CNT:all',
-      'YEAR2_OOP:all',
-      'YEAR4_ACN:all',
-      'YEAR4_CG:all'
-    ]
+    assigned_subjects = '["YEAR1_MATH0:all", "YEAR2_CNT:all", "YEAR2_OOP:all", "YEAR4_ACN:all", "YEAR4_CG:all"]'::jsonb
 WHERE LOWER(user_id) = 'ahamdy2004';
 
 -- Update auth.users metadata if an auth record exists
