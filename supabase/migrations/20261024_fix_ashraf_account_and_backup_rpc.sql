@@ -33,7 +33,13 @@ WHERE LOWER(email) = 'ahamdy2004@gradely.app'
 UPDATE public.subjects
 SET instructor_id = 'ahamdy2004',
     instructor_name = 'Ashraf Hussein'
-WHERE id IN ('YEAR1_MATH0', 'YEAR2_CNT', 'YEAR2_OOP', 'YEAR4_ACN', 'YEAR4_CG')
+WHERE id IN (
+  '54028b6f-d152-4c69-97a5-1cdadefc047e'::uuid, -- Math 0
+  '3d986c7e-7653-459c-bc96-e75e62f51197'::uuid, -- CNT
+  'd0c29368-cddb-44e4-89f4-951d0249782c'::uuid, -- OOP
+  'caa1505f-592b-4e9b-a958-94a57bff5caa'::uuid, -- ACN
+  '4f1ec16d-476c-471a-b36b-f6881ee5011e'::uuid  -- CG
+)
    OR instructor_id = 'ahamdy2004'
    OR instructor_id = 'mostafaabubakr'
    OR instructor_name IN ('أشرف حسين', 'Mostafa Abubakr', 'مصطفى أبو بكر');
