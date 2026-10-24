@@ -1,15 +1,18 @@
 -- ==============================================================================
 -- Migration: 20261024_fix_ashraf_account_and_backup_rpc.sql
--- 1. Configure Ashraf Hussein with his exact 6 subjects and 20 sections / 20 hours:
+-- 1. Exact 20 Sections & 6 Subjects Configuration for Ashraf Hussein:
 --    - Mathematics - 0: S1, S2, S3 (3 sections)
 --    - Computer Networks Technology: S1, S2, S3, S4 (4 sections)
 --    - Object Oriented Programming: S1, S2, S3, S4 (4 sections)
 --    - Advanced Computer Networks: S1, S2, S3, S4 (4 sections)
---    - Computer Graphics: S1, S2, S3 (3 sections)
---    - Mathematics 3: S1, S4 (2 sections) [Abdelrahman has S2, S3]
---    Total = 20 sections (20 hours) across 6 subjects.
--- 2. Update subjects table metadata and section TA tags.
--- 3. Update get_system_backup_data RPC to securely authorize session-token TAs.
+--    - Computer Graphics: S1, S2, S3, S4 (4 sections)
+--    - Mathematics 3: S1 only (1 section)
+--    TOTAL: 3 + 4 + 4 + 4 + 4 + 1 = 20 sections (20 hours) across 6 subjects.
+-- 2. Exact Mathematics 3 Section Distribution:
+--    - S1: Ashraf Hussein
+--    - S2, S3, S4: Abdelrahman Mahmoud
+-- 3. Update subjects metadata and clean up all section TA tags.
+-- 4. Update get_system_backup_data RPC to securely authorize session tokens.
 -- ==============================================================================
 
 -- ------------------------------------------------------------------------------
@@ -37,8 +40,8 @@ SET name = 'Ashraf Hussein',
       "4f1ec16d-476c-471a-b36b-f6881ee5011e:S1",
       "4f1ec16d-476c-471a-b36b-f6881ee5011e:S2",
       "4f1ec16d-476c-471a-b36b-f6881ee5011e:S3",
-      "a96b19a2-d1f4-4a9c-800d-edaedd75449b:S1",
-      "a96b19a2-d1f4-4a9c-800d-edaedd75449b:S4"
+      "4f1ec16d-476c-471a-b36b-f6881ee5011e:S4",
+      "a96b19a2-d1f4-4a9c-800d-edaedd75449b:S1"
     ]'::jsonb
 WHERE LOWER(user_id) = 'ahamdy2004';
 
@@ -53,23 +56,29 @@ WHERE LOWER(email) = 'ahamdy2004@gradely.app'
    OR id IN (SELECT auth_id FROM public.users WHERE LOWER(user_id) = 'ahamdy2004' AND auth_id IS NOT NULL);
 
 -- ------------------------------------------------------------------------------
--- 2. UPDATE ABDELRAHMAN MAHMOUD (amahmoudsaber2026) ASSIGNED SUBJECTS FOR MATH 3
+-- 2. UPDATE ABDELRAHMAN MAHMOUD (amahmoudsaber2026) IN public.users
+-- Ensure Math 3 has S2, S3, S4 (and NOT S1)
 -- ------------------------------------------------------------------------------
 UPDATE public.users
 SET assigned_subjects = (
-  -- Remove any old Math 3 S1 or S4 assignments, keep S2 and S3
   (
     SELECT jsonb_agg(elem)
     FROM jsonb_array_elements(assigned_subjects) elem
     WHERE elem::text NOT LIKE '%a96b19a2-d1f4-4a9c-800d-edaedd75449b:S1%'
+      AND elem::text NOT LIKE '%a96b19a2-d1f4-4a9c-800d-edaedd75449b:S2%'
+      AND elem::text NOT LIKE '%a96b19a2-d1f4-4a9c-800d-edaedd75449b:S3%'
       AND elem::text NOT LIKE '%a96b19a2-d1f4-4a9c-800d-edaedd75449b:S4%'
-  ) || '["a96b19a2-d1f4-4a9c-800d-edaedd75449b:S2", "a96b19a2-d1f4-4a9c-800d-edaedd75449b:S3"]'::jsonb
+  ) || '[
+    "a96b19a2-d1f4-4a9c-800d-edaedd75449b:S2",
+    "a96b19a2-d1f4-4a9c-800d-edaedd75449b:S3",
+    "a96b19a2-d1f4-4a9c-800d-edaedd75449b:S4"
+  ]'::jsonb
 )
 WHERE LOWER(user_id) = 'amahmoudsaber2026'
   AND assigned_subjects IS NOT NULL;
 
 -- ------------------------------------------------------------------------------
--- 3. UPDATE SUBJECTS INSTRUCTOR AND SECTION TA METADATA
+-- 3. UPDATE SUBJECTS METADATA & SECTION TA TAGS
 -- ------------------------------------------------------------------------------
 -- 3a. Update 5 primary subjects of Ashraf
 UPDATE public.subjects
@@ -83,22 +92,38 @@ WHERE id IN (
   '4f1ec16d-476c-471a-b36b-f6881ee5011e'::uuid  -- CG
 );
 
--- 3b. Update Mathematics 3 section TA tags in excluded_students:
--- S1: Ashraf Hussein, S2: Abdelrahman Mahmoud, S3: Abdelrahman Mahmoud, S4: Ashraf Hussein
+-- 3b. Update Computer Graphics (4 sections: S1, S2, S3, S4 all Ashraf Hussein)
 UPDATE public.subjects
 SET excluded_students = (
-  -- Filter out existing TA tags for Math 3, then append clean updated ones
   (
     SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
     FROM jsonb_array_elements(COALESCE(excluded_students, '[]'::jsonb)) elem
     WHERE elem::text NOT LIKE '%CONFIG_SECTION_TAS%'
       AND elem::text NOT LIKE '%TA_S%'
   ) || '[
-    "CONFIG_SECTION_TAS:{\"S1\":\"Ashraf Hussein\",\"S2\":\"Abdelrahman Mahmoud\",\"S3\":\"Abdelrahman Mahmoud\",\"S4\":\"Ashraf Hussein\"}",
+    "CONFIG_SECTION_TAS:{\"S1\":\"Ashraf Hussein\",\"S2\":\"Ashraf Hussein\",\"S3\":\"Ashraf Hussein\",\"S4\":\"Ashraf Hussein\"}",
+    "TA_S1:Ashraf Hussein",
+    "TA_S2:Ashraf Hussein",
+    "TA_S3:Ashraf Hussein",
+    "TA_S4:Ashraf Hussein"
+  ]'::jsonb
+)
+WHERE id = '4f1ec16d-476c-471a-b36b-f6881ee5011e'::uuid;
+
+-- 3c. Update Mathematics 3 (S1: Ashraf Hussein | S2, S3, S4: Abdelrahman Mahmoud)
+UPDATE public.subjects
+SET excluded_students = (
+  (
+    SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
+    FROM jsonb_array_elements(COALESCE(excluded_students, '[]'::jsonb)) elem
+    WHERE elem::text NOT LIKE '%CONFIG_SECTION_TAS%'
+      AND elem::text NOT LIKE '%TA_S%'
+  ) || '[
+    "CONFIG_SECTION_TAS:{\"S1\":\"Ashraf Hussein\",\"S2\":\"Abdelrahman Mahmoud\",\"S3\":\"Abdelrahman Mahmoud\",\"S4\":\"Abdelrahman Mahmoud\"}",
     "TA_S1:Ashraf Hussein",
     "TA_S2:Abdelrahman Mahmoud",
     "TA_S3:Abdelrahman Mahmoud",
-    "TA_S4:Ashraf Hussein"
+    "TA_S4:Abdelrahman Mahmoud"
   ]'::jsonb
 )
 WHERE id = 'a96b19a2-d1f4-4a9c-800d-edaedd75449b'::uuid;
@@ -121,12 +146,12 @@ WHERE excluded_students IS NOT NULL
     OR excluded_students::text LIKE '%مصطفى أبو بكر%'
   );
 
--- Clear any login lockout records
+-- Clear login lockouts
 DELETE FROM public.login_attempts 
 WHERE LOWER(user_id) IN ('ahamdy2004', 'mostafaabubakr', 'ahamdy2004@gradely.app');
 
 -- ------------------------------------------------------------------------------
--- 4. UPDATE get_system_backup_data RPC TO SECURELY SUPPORT SESSION TOKEN AUTH
+-- 4. UPDATE get_system_backup_data RPC
 -- ------------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS public.get_system_backup_data(text);
 DROP FUNCTION IF EXISTS public.get_system_backup_data();
@@ -141,20 +166,16 @@ DECLARE
   v_is_authorized boolean := false;
   v_res jsonb;
 BEGIN
-  -- Strict HTTP Method restriction: prevent GET token leakage in proxy logs
   IF current_setting('request.method', true) = 'GET' THEN
     RAISE EXCEPTION 'Method Not Allowed' USING errcode = '42501';
   END IF;
 
-  -- 1. Check native Supabase Auth JWT / Service Role / Postgres internal
   IF (
     (auth.uid() IS NOT NULL AND public.is_admin())
     OR (COALESCE(auth.jwt() ->> 'role', '') = 'service_role')
     OR (current_user IN ('postgres', 'supabase_admin'))
   ) THEN
     v_is_authorized := true;
-
-  -- 2. Check session token from student_sessions for verified admin/super_admin
   ELSIF p_session_token IS NOT NULL AND p_session_token <> '' THEN
     IF EXISTS (
       SELECT 1
@@ -168,12 +189,10 @@ BEGIN
     END IF;
   END IF;
 
-  -- Reject if not authorized
   IF NOT v_is_authorized THEN
     RAISE EXCEPTION 'Unauthorized: Administrator authentication required' USING errcode = '42501';
   END IF;
 
-  -- Return complete dataset for authenticated admin dashboard
   SELECT jsonb_build_object(
     'users', (
       SELECT jsonb_agg(u)
