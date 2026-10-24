@@ -1070,22 +1070,32 @@ export default function AttendanceTab({ user }) {
         ? (selectedGroup !== 'all' ? selectedGroup : 'A / B')
         : (secName !== 'All' ? secName : 'كافة السكاشن');
 
-      printWeekAttendancePDF({
-        subjectName: subName,
-        yearLevel: yr,
-        sectionName: resolvedGroupName,
-        groupName: resolvedGroupName,
-        weekNum: week,
-        sessionDate: sessionDate,
-        instructorName: activeInst,
-        attendanceType: attendanceType,
-        filterType: exportFilter,
-        students: targetStudents,
-        attendanceRecords: attendanceRecords,
-        excuseReasons: excuseReasons,
-        getStudentSubSection: (s) => getStudentSubSection(s, selectedSubject),
-        getStudentLectureGroup: (s) => getStudentLectureGroup(s, selectedSubject)
-      });
+      setMessage('⏳ جاري تجهيز وتنزيل كشف الغياب (PDF)...');
+      try {
+        await printWeekAttendancePDF({
+          subjectName: subName,
+          yearLevel: yr,
+          sectionName: resolvedGroupName,
+          groupName: resolvedGroupName,
+          weekNum: week,
+          sessionDate: sessionDate,
+          instructorName: activeInst,
+          attendanceType: attendanceType,
+          filterType: exportFilter,
+          students: targetStudents,
+          attendanceRecords: attendanceRecords,
+          excuseReasons: excuseReasons,
+          getStudentSubSection: (s) => getStudentSubSection(s, selectedSubject),
+          getStudentLectureGroup: (s) => getStudentLectureGroup(s, selectedSubject),
+          filename: `${filename}.pdf`
+        });
+        setMessage('✅ تم تنزيل كشف الغياب (PDF) بنجاح على جهازك!');
+        setTimeout(() => setMessage(''), 4000);
+      } catch (pdfErr) {
+        console.error('Attendance PDF export error:', pdfErr);
+        setMessage('❌ تعذر استخراج ملف PDF. يرجى المحاولة مرة أخرى.');
+        setTimeout(() => setMessage(''), 4000);
+      }
     } else {
       // Excel Export
       const excelRows = targetStudents.map((s, idx) => {

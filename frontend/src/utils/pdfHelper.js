@@ -5,6 +5,8 @@
  */
 
 import { getSectionInstructorName as resolveSectionTA } from './sectionHelper';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 
 const escapeHtml = (str) => {
   if (str == null) return '';
@@ -802,10 +804,11 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
 }
 
 /**
- * Generates and prints an official A4 Week Attendance Sheet PDF.
+ * Generates and downloads an official A4 Week Attendance Sheet PDF directly to device.
+ * Uses html2canvas + jsPDF for direct file download on mobile and PC.
  * Supports Section and Lecture attendance, status filters, counts, signatures, and RTL typography.
  */
-export function printWeekAttendancePDF({
+export async function printWeekAttendancePDF({
   subjectName = 'المقرر الدراسي',
   yearLevel = '',
   sectionName = 'الكل',
@@ -819,16 +822,11 @@ export function printWeekAttendancePDF({
   attendanceRecords = {},
   excuseReasons = {},
   getStudentSubSection = (s) => s.section || 'S1',
-  getStudentLectureGroup = () => 'A'
+  getStudentLectureGroup = () => 'A',
+  filename = ''
 }) {
   const isLecture = attendanceType === 'lecture';
   const typeLabel = isLecture ? 'محاضرة' : 'سكشن';
-  
-  let filterLabel = 'كافة الطلاب';
-  if (filterType === 'present') filterLabel = 'الحاضرون فقط';
-  else if (filterType === 'absent') filterLabel = 'الغائبون فقط';
-  else if (filterType === 'late') filterLabel = 'المتأخرون فقط';
-  else if (filterType === 'excused') filterLabel = 'أصحاب الأعذار فقط';
 
   let countPresent = 0;
   let countAbsent = 0;
@@ -847,258 +845,208 @@ export function printWeekAttendancePDF({
 
   const rowsHtml = students.map((s, idx) => {
     const st = attendanceRecords[s.user_id];
-    let badgeClass = 'badge-unrecorded';
+    let badgeBg = '#f1f5f9';
+    let badgeColor = '#64748b';
+    let badgeBorder = '#cbd5e1';
     let statusText = 'لم يرصد';
-    if (st === 'present') { badgeClass = 'badge-present'; statusText = 'حاضر'; }
-    else if (st === 'absent') { badgeClass = 'badge-absent'; statusText = 'غائب'; }
-    else if (st === 'late') { badgeClass = 'badge-late'; statusText = 'تأخير'; }
-    else if (st === 'excused') { badgeClass = 'badge-excused'; statusText = 'عذر'; }
+
+    if (st === 'present') {
+      badgeBg = '#dcfce7';
+      badgeColor = '#15803d';
+      badgeBorder = '#86efac';
+      statusText = 'حاضر';
+    } else if (st === 'absent') {
+      badgeBg = '#fee2e2';
+      badgeColor = '#b91c1c';
+      badgeBorder = '#fca5a5';
+      statusText = 'غائب';
+    } else if (st === 'late') {
+      badgeBg = '#fef3c7';
+      badgeColor = '#b45309';
+      badgeBorder = '#fcd34d';
+      statusText = 'تأخير';
+    } else if (st === 'excused') {
+      badgeBg = '#dbeafe';
+      badgeColor = '#1d4ed8';
+      badgeBorder = '#93c5fd';
+      statusText = 'عذر';
+    }
 
     const sec = getStudentSubSection(s);
     const grp = getStudentLectureGroup ? getStudentLectureGroup(s) : 'A';
 
     return `
-      <tr>
-        <td style="text-align:center;font-weight:bold;color:#64748b;">${idx + 1}</td>
-        <td style="text-align:center;font-family:monospace;font-weight:bold;">${escapeHtml(s.user_id)}</td>
-        <td style="font-weight:600;">${escapeHtml(s.name)}</td>
-        <td style="text-align:center;">${escapeHtml(sec)}</td>
-        <td style="text-align:center;font-weight:bold;color:#0d9488;">${escapeHtml(grp)}</td>
-        <td style="text-align:center;"><span class="badge ${badgeClass}">${statusText}</span></td>
-        <td style="text-align:center;min-width:65px;">&nbsp;</td>
+      <tr style="border-bottom: 1px solid #cbd5e1; background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+        <td style="text-align:center;font-weight:bold;color:#64748b;padding:6px 4px;border:1px solid #cbd5e1;">${idx + 1}</td>
+        <td style="text-align:center;font-family:monospace;font-weight:bold;padding:6px 6px;border:1px solid #cbd5e1;color:#1e293b;">${escapeHtml(s.user_id)}</td>
+        <td style="font-weight:600;padding:6px 8px;border:1px solid #cbd5e1;color:#0f172a;text-align:right;">${escapeHtml(s.name)}</td>
+        <td style="text-align:center;padding:6px 4px;border:1px solid #cbd5e1;color:#334155;">${escapeHtml(sec)}</td>
+        <td style="text-align:center;font-weight:bold;color:#0d9488;padding:6px 4px;border:1px solid #cbd5e1;">${escapeHtml(grp)}</td>
+        <td style="text-align:center;padding:6px 4px;border:1px solid #cbd5e1;">
+          <span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;background-color:${badgeBg};color:${badgeColor};border:1px solid ${badgeBorder};">${statusText}</span>
+        </td>
+        <td style="text-align:center;min-width:65px;padding:6px 4px;border:1px solid #cbd5e1;">&nbsp;</td>
       </tr>
     `;
   }).join('');
 
-  const htmlContent = `
-    <!DOCTYPE html>
-    <html dir="rtl" lang="ar">
-    <head>
-      <meta charset="utf-8" />
-      <title>كشف غياب - ${escapeHtml(subjectName)} - أسبوع ${escapeHtml(weekNum)}</title>
-      <link rel="preconnect" href="https://fonts.googleapis.com">
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-      <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-      <style>
-        @page {
-          size: A4 portrait;
-          margin: 12mm 10mm;
-        }
-        * {
-          box-sizing: border-box;
-          -webkit-print-color-adjust: exact;
-          print-color-adjust: exact;
-        }
-        body {
-          font-family: 'Cairo', system-ui, -apple-system, sans-serif;
-          margin: 0;
-          padding: 0;
-          color: #0f172a;
-          background: #fff;
-          font-size: 11pt;
-          direction: rtl;
-        }
-        .header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          border-bottom: 2px solid #0f172a;
-          padding-bottom: 10px;
-          margin-bottom: 12px;
-        }
-        .header-title h1 {
-          margin: 0;
-          font-size: 16pt;
-          font-weight: 800;
-          color: #1e1b4b;
-        }
-        .header-title p {
-          margin: 3px 0 0 0;
-          font-size: 10pt;
-          color: #475569;
-        }
-        .meta-card {
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
-          border-radius: 8px;
-          padding: 10px 14px;
-          margin-bottom: 12px;
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 8px;
-          font-size: 9.5pt;
-        }
-        .meta-item {
-          display: flex;
-          gap: 6px;
-        }
-        .meta-label {
-          color: #64748b;
-          font-weight: 600;
-        }
-        .meta-value {
-          color: #0f172a;
-          font-weight: 700;
-        }
-        .stats-bar {
-          display: flex;
-          gap: 10px;
-          margin-bottom: 14px;
-          flex-wrap: wrap;
-        }
-        .stat-pill {
-          padding: 4px 10px;
-          border-radius: 6px;
-          font-size: 9pt;
-          font-weight: 700;
-          display: flex;
-          align-items: center;
-          gap: 5px;
-          border: 1px solid transparent;
-        }
-        .stat-total { background: #f1f5f9; color: #334155; border-color: #cbd5e1; }
-        .stat-present { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
-        .stat-absent { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
-        .stat-late { background: #fffbeb; color: #b45309; border-color: #fde68a; }
-        .stat-excused { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 9.5pt;
-          margin-bottom: 20px;
-        }
-        th {
-          background: #1e293b;
-          color: #ffffff;
-          padding: 7px 8px;
-          font-weight: 700;
-          border: 1px solid #1e293b;
-        }
-        td {
-          padding: 6px 8px;
-          border: 1px solid #cbd5e1;
-          vertical-align: middle;
-        }
-        tr:nth-child(even) td {
-          background: #f8fafc;
-        }
-        .badge {
-          display: inline-block;
-          padding: 2px 8px;
-          border-radius: 4px;
-          font-size: 8.5pt;
-          font-weight: 700;
-          text-align: center;
-        }
-        .badge-present { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
-        .badge-absent { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
-        .badge-late { background: #fef3c7; color: #b45309; border: 1px solid #fcd34d; }
-        .badge-excused { background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; }
-        .badge-unrecorded { background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; }
-        .signatures {
-          display: flex;
-          justify-content: space-between;
-          margin-top: 30px;
-          padding-top: 15px;
-          border-top: 1px dashed #cbd5e1;
-          page-break-inside: avoid;
-        }
-        .sig-box {
-          text-align: center;
-          width: 200px;
-          font-size: 10pt;
-          font-weight: 700;
-          color: #334155;
-        }
-        .sig-line {
-          margin-top: 35px;
-          border-bottom: 1.5px dotted #94a3b8;
-        }
-        .footer {
-          margin-top: 25px;
-          text-align: center;
-          font-size: 8pt;
-          color: #94a3b8;
-          border-top: 1px solid #f1f5f9;
-          padding-top: 6px;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <div class="header-title">
-          <h1>كشف حضور وغياب الطلاب (${escapeHtml(typeLabel)})</h1>
-        </div>
-        <div style="text-align:left;font-size:9pt;color:#64748b;">
-          <div>تاريخ الطباعة: ${escapeHtml(new Date().toLocaleDateString('ar-EG'))}</div>
-          <div style="font-weight:700;color:#0f172a;margin-top:2px;">الأسبوع ${escapeHtml(weekNum)}</div>
-        </div>
+  const safeFilename = (filename || `Attendance_${subjectName}_Week${weekNum}.pdf`).replace(/[/\\?%*:|"<>]/g, '_');
+  const finalFilename = safeFilename.endsWith('.pdf') ? safeFilename : `${safeFilename}.pdf`;
+
+  // Construct render DOM for html2canvas
+  const container = document.createElement('div');
+  container.id = 'attendance-pdf-render-root';
+  container.setAttribute('dir', 'rtl');
+  container.style.position = 'absolute';
+  container.style.left = '0';
+  container.style.top = '0';
+  container.style.zIndex = '-9999';
+  container.style.width = '794px';
+  container.style.backgroundColor = '#ffffff';
+  container.style.color = '#0f172a';
+  container.style.padding = '24px 28px';
+  container.style.boxSizing = 'border-box';
+  container.style.fontFamily = "'Cairo', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+
+  container.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #0f172a;padding-bottom:10px;margin-bottom:12px;">
+      <div>
+        <h1 style="margin:0;font-size:20px;font-weight:800;color:#1e1b4b;">كشف حضور وغياب الطلاب (${escapeHtml(typeLabel)})</h1>
       </div>
-
-      <div class="meta-card">
-        <div class="meta-item"><span class="meta-label">المادة:</span> <span class="meta-value">${escapeHtml(subjectName)}</span></div>
-        <div class="meta-item"><span class="meta-label">الفرقة:</span> <span class="meta-value">${escapeHtml(yearLevel ? 'الفرقة ' + yearLevel : '—')}</span></div>
-        <div class="meta-item"><span class="meta-label">المجموعة:</span> <span class="meta-value">${escapeHtml(groupName || sectionName || 'A / B')}</span></div>
-        <div class="meta-item"><span class="meta-label">تاريخ الجلسة:</span> <span class="meta-value">${escapeHtml(sessionDate || '—')}</span></div>
-        <div class="meta-item"><span class="meta-label">المعيد:</span> <span class="meta-value">${escapeHtml(instructorName || '—')}</span></div>
+      <div style="text-align:left;font-size:12px;color:#64748b;">
+        <div>تاريخ الطباعة: ${escapeHtml(new Date().toLocaleDateString('ar-EG'))}</div>
+        <div style="font-weight:700;color:#0f172a;margin-top:2px;">الأسبوع ${escapeHtml(weekNum)}</div>
       </div>
+    </div>
 
-      <div class="stats-bar">
-        <div class="stat-pill stat-total">إجمالي المعروضين: ${students.length}</div>
-        <div class="stat-pill stat-present">حاضر: ${countPresent}</div>
-        <div class="stat-pill stat-absent">غائب: ${countAbsent}</div>
-        <div class="stat-pill stat-late">تأخير: ${countLate}</div>
-        <div class="stat-pill stat-excused">عذر: ${countExcused}</div>
-      </div>
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;margin-bottom:12px;display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;font-size:13px;">
+      <div><span style="color:#64748b;font-weight:600;">المادة:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(subjectName)}</span></div>
+      <div><span style="color:#64748b;font-weight:600;">الفرقة:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(yearLevel ? 'الفرقة ' + yearLevel : '—')}</span></div>
+      <div><span style="color:#64748b;font-weight:600;">المجموعة:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(groupName || sectionName || 'A / B')}</span></div>
+      <div><span style="color:#64748b;font-weight:600;">تاريخ الجلسة:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(sessionDate || '—')}</span></div>
+      <div><span style="color:#64748b;font-weight:600;">المعيد:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(instructorName || '—')}</span></div>
+    </div>
 
-      <table>
-        <thead>
-          <tr>
-            <th style="width:35px;">م</th>
-            <th style="width:90px;">الرقم الأكاديمي</th>
-            <th>اسم الطالب</th>
-            <th style="width:60px;">السكشن</th>
-            <th style="width:60px;">الجروب</th>
-            <th style="width:80px;">الحالة</th>
-            <th style="width:75px;">الدرجة</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rowsHtml || '<tr><td colspan="7" style="text-align:center;padding:20px;color:#94a3b8;">لا توجد سجلات مطابقة</td></tr>'}
-        </tbody>
-      </table>
+    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;font-size:12px;">
+      <div style="padding:4px 10px;border-radius:6px;font-weight:700;background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;">إجمالي المعروضين: ${students.length}</div>
+      <div style="padding:4px 10px;border-radius:6px;font-weight:700;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;">حاضر: ${countPresent}</div>
+      <div style="padding:4px 10px;border-radius:6px;font-weight:700;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;">غائب: ${countAbsent}</div>
+      <div style="padding:4px 10px;border-radius:6px;font-weight:700;background:#fffbeb;color:#b45309;border:1px solid #fde68a;">تأخير: ${countLate}</div>
+      <div style="padding:4px 10px;border-radius:6px;font-weight:700;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;">عذر: ${countExcused}</div>
+    </div>
 
-      <script>
-        window.onload = function() {
-          window.focus();
-          window.print();
-        };
-      </script>
-    </body>
-    </html>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:20px;">
+      <thead>
+        <tr style="background:#1e293b;color:#ffffff;">
+          <th style="width:35px;padding:8px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">م</th>
+          <th style="width:95px;padding:8px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الرقم الأكاديمي</th>
+          <th style="padding:8px 8px;border:1px solid #1e293b;font-weight:700;text-align:right;">اسم الطالب</th>
+          <th style="width:65px;padding:8px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">السكشن</th>
+          <th style="width:65px;padding:8px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الجروب</th>
+          <th style="width:85px;padding:8px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الحالة</th>
+          <th style="width:75px;padding:8px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الدرجة</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowsHtml || '<tr><td colspan="7" style="text-align:center;padding:20px;color:#94a3b8;border:1px solid #cbd5e1;">لا توجد سجلات مطابقة</td></tr>'}
+      </tbody>
+    </table>
   `;
 
+  document.body.appendChild(container);
+
   try {
-    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
-    const blobUrl = URL.createObjectURL(blob);
-    const printWindow = window.open(blobUrl, '_blank');
-    if (printWindow) {
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
-      return;
+    if (document.fonts && document.fonts.ready) {
+      try {
+        await document.fonts.ready;
+      } catch (e) {
+        // ignore font readiness error
+      }
     }
+    // Allow browser layout flush
+    await new Promise(resolve => setTimeout(resolve, 80));
+
+    const canvas = await html2canvas(container, {
+      scale: 2,
+      useCORS: true,
+      logging: false,
+      backgroundColor: '#ffffff',
+      windowWidth: 794
+    });
+
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pdfWidth = 210; // mm
+    const pdfHeight = 297; // mm
+    const pageCanvasHeight = Math.floor((canvas.width * pdfHeight) / pdfWidth);
+
+    let renderedHeight = 0;
+    let pageIndex = 0;
+
+    while (renderedHeight < canvas.height) {
+      if (pageIndex > 0) {
+        pdf.addPage();
+      }
+      const chunkHeight = Math.min(pageCanvasHeight, canvas.height - renderedHeight);
+      const pageCanvas = document.createElement('canvas');
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = chunkHeight;
+      const ctx = pageCanvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      ctx.drawImage(
+        canvas,
+        0, renderedHeight, canvas.width, chunkHeight,
+        0, 0, canvas.width, chunkHeight
+      );
+
+      const pageImgData = pageCanvas.toDataURL('image/jpeg', 0.95);
+      const pdfSliceHeight = (chunkHeight * pdfWidth) / canvas.width;
+      pdf.addImage(pageImgData, 'JPEG', 0, 0, pdfWidth, pdfSliceHeight);
+
+      renderedHeight += chunkHeight;
+      pageIndex++;
+    }
+
+    // Trigger direct native file download (mobile & desktop)
+    try {
+      const blob = pdf.output('blob');
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = finalFilename;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(blobUrl);
+        } catch (e) {}
+      }, 40000);
+    } catch (saveErr) {
+      pdf.save(finalFilename);
+    }
+
+    return true;
+  } catch (err) {
+    console.error('Canvas PDF export failed, fallback to print window:', err);
+    // Graceful fallback to HTML print if canvas failed
+    const blob = new Blob([container.innerHTML], { type: 'text/html;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = blobUrl;
     a.target = '_blank';
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
-  } catch (err) {
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.open();
-      printWindow.document.write(htmlContent);
-      printWindow.document.close();
+    setTimeout(() => {
+      try {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+      } catch (e) {}
+    }, 60000);
+  } finally {
+    if (container.parentNode) {
+      container.parentNode.removeChild(container);
     }
   }
 }
