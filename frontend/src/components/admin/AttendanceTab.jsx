@@ -526,10 +526,16 @@ export default function AttendanceTab({ user }) {
 
   const baseEnrolledStudents = enrolledStudents
     .filter(stu => {
+      // If user is actively searching by ID or name (>= 2 chars), search across all groups
+      if (studentSearch.trim().length >= 2) return true;
+
       if (attendanceType === 'lecture') {
         if (selectedGroup === 'all') return true;
         const grp = getStudentLectureGroup(stu, selectedSubject);
-        return grp === selectedGroup;
+        if (grp === selectedGroup) return true;
+        // Also keep any student from another group if they were recorded as attending (present/late/excused) in this session
+        const st = attendanceRecords[stu.user_id];
+        return st === 'present' || st === 'late' || st === 'excused';
       } else {
         if (selectedSection === 'all') return true;
         return getStudentSubSection(stu, selectedSubject) === normalizeSection(selectedSection);
@@ -544,6 +550,7 @@ export default function AttendanceTab({ user }) {
   const displayedEnrolledStudents = baseEnrolledStudents.filter(stu => {
     if (statusFilter === 'all') return true;
     const st = attendanceRecords[stu.user_id];
+    if (statusFilter === 'recorded') return !!st;
     if (statusFilter === 'present') return st === 'present';
     if (statusFilter === 'absent') return st === 'absent';
     if (statusFilter === 'late') return st === 'late';
@@ -1046,11 +1053,12 @@ export default function AttendanceTab({ user }) {
     const secName = selectedSection !== 'all' ? selectedSection : 'All';
     const filename = `Attendance_${subName}_${secName}_Week${week}_${exportFilter}_${sessionDate}`;
 
-    let targetStudents = displayedEnrolledStudents;
-    if (exportFilter === 'present') targetStudents = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'present');
-    else if (exportFilter === 'absent') targetStudents = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'absent');
-    else if (exportFilter === 'late') targetStudents = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'late');
-    else if (exportFilter === 'excused') targetStudents = displayedEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'excused');
+    let targetStudents = baseEnrolledStudents;
+    if (exportFilter === 'recorded') targetStudents = baseEnrolledStudents.filter(s => !!attendanceRecords[s.user_id]);
+    else if (exportFilter === 'present') targetStudents = baseEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'present');
+    else if (exportFilter === 'absent') targetStudents = baseEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'absent');
+    else if (exportFilter === 'late') targetStudents = baseEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'late');
+    else if (exportFilter === 'excused') targetStudents = baseEnrolledStudents.filter(s => attendanceRecords[s.user_id] === 'excused');
 
     if (exportFormat === 'txt') {
       // Output clean, raw IDs line-by-line without brackets or extra text for direct 1-click copy/paste
@@ -1123,6 +1131,7 @@ export default function AttendanceTab({ user }) {
           'اسم الطالب': s.name,
           'الفرقة': normalizeYear(s.year_level),
           'السكشن': getStudentSubSection(s, selectedSubject),
+          'الجروب': getStudentLectureGroup(s, selectedSubject),
           'الأسبوع': `الأسبوع ${week}`,
           'تاريخ المحاضرة': sessionDate,
           'الحالة': stLabel,
@@ -1573,6 +1582,25 @@ export default function AttendanceTab({ user }) {
               title="عرض جميع الطلاب"
             >
               📋 الكل: {baseEnrolledStudents.length}
+            </button>
+
+            <button 
+              type="button"
+              onClick={() => setStatusFilter(prev => prev === 'recorded' ? 'all' : 'recorded')}
+              style={{
+                cursor:'pointer',
+                border: statusFilter === 'recorded' ? '2px solid #0d9488' : '1px solid rgba(13, 148, 136, 0.3)',
+                background: statusFilter === 'recorded' ? 'rgba(13, 148, 136, 0.25)' : 'rgba(13, 148, 136, 0.08)',
+                color: '#2dd4bf',
+                padding:'5px 10px',
+                borderRadius:'8px',
+                fontWeight: 800,
+                boxShadow: statusFilter === 'recorded' ? '0 0 10px rgba(13, 148, 136, 0.3)' : 'none',
+                transition: 'all 0.15s ease'
+              }}
+              title="عرض الطلاب الذين تم رصدهم فقط (حاضر + غائب + تأخير + عذر)"
+            >
+              🎯 المرصودون: {countPresent + countAbsent + countLate + countExcused}
             </button>
 
             <button 
@@ -2278,7 +2306,8 @@ export default function AttendanceTab({ user }) {
               <div>
                 <label style={{display:'block',marginBottom:'6px',fontSize:'0.9rem',fontWeight:700}}>2. الطلاب المطلوب تصديرهم:</label>
                 <select className="input-field" value={exportFilter} onChange={e => setExportFilter(e.target.value)} style={{width:'100%',padding:'10px',fontWeight:700}}>
-                  <option value="all">📋 الكشف الكامل (حاضر + غائب + تأخير + عذر)</option>
+                  <option value="all">📋 الكشف الكامل (يتضمن من لم يرصد)</option>
+                  <option value="recorded">🎯 المرصودون فقط (حاضر + غائب + عذر — استبعاد غير المرصودين) ({countPresent + countAbsent + countLate + countExcused} طالب)</option>
                   <option value="present">🟢 الحاضرون فقط ({countPresent} طالب)</option>
                   <option value="absent">🔴 الغائبون فقط ({countAbsent} طالب)</option>
                   <option value="late">🟡 المتأخرون فقط ({countLate} طالب)</option>
