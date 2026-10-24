@@ -2299,29 +2299,49 @@ export default function AttendanceTab({ user }) {
         </div>
       )}
 
-      {/* FLOATING PDF PROGRESS */}
+      {/* PDF EXPORT LOADING MODAL */}
       {pdfExportLoading && (
         <div style={{
           position: 'fixed',
-          bottom: '24px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 999999,
-          background: 'rgba(15, 23, 42, 0.95)',
-          color: '#ffffff',
-          padding: '12px 20px',
-          borderRadius: '12px',
-          boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
+          inset: 0,
+          background: 'rgba(15, 23, 42, 0.75)',
+          backdropFilter: 'blur(5px)',
           display: 'flex',
           alignItems: 'center',
-          gap: '12px',
-          fontSize: '13.5px',
-          fontWeight: '700',
-          border: '1px solid #3b82f6',
-          backdropFilter: 'blur(6px)'
+          justifyContent: 'center',
+          zIndex: 999999,
+          padding: '16px'
         }}>
-          <span>⏳</span>
-          <span>{pdfProgressText || 'جاري تجهيز كشف الغياب...'}</span>
+          <div style={{
+            background: '#1e293b',
+            color: '#ffffff',
+            padding: '26px 30px',
+            borderRadius: '16px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '14px',
+            maxWidth: '340px',
+            width: '100%',
+            textAlign: 'center',
+            border: '1px solid rgba(255, 255, 255, 0.1)'
+          }}>
+            <div style={{
+              width: '42px',
+              height: '42px',
+              border: '3.5px solid rgba(13, 148, 136, 0.25)',
+              borderTopColor: '#0d9488',
+              borderRadius: '50%',
+              animation: 'spin 0.8s linear infinite'
+            }} />
+            <div style={{fontWeight: 700, fontSize: '15.5px', color: '#f8fafc'}}>
+              جاري تجهيز وتحميل كشف PDF...
+            </div>
+            <div style={{fontSize: '12px', color: '#94a3b8', lineHeight: 1.5}}>
+              لحظات وسيبدأ التنزيل تلقائياً على جهازك بنفس التنسيق المعتمد
+            </div>
+          </div>
         </div>
       )}
 
