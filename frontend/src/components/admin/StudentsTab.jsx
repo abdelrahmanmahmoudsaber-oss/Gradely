@@ -52,6 +52,7 @@ export default function StudentsTab({ user }) {
   
   // Form states
   const [userId, setUserId] = useState('');
+  const [originalUserId, setOriginalUserId] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -227,44 +228,127 @@ export default function StudentsTab({ user }) {
         assigned_subjects: addingType === 'admin' ? assignedSubjects : null,
       };
 
-      const { data: existing } = await supabase.from('users').select('id, user_id, name').eq('user_id', trimId).maybeSingle();
-      if (existing) {
+      if (editMode) {
+        const isIdChanged = trimId !== originalUserId;
+
+        if (isIdChanged) {
+          if (originalUserId === 'admin') {
+            setModalError('❌ لا يمكن تغيير اسم مستخدم المدير الرئيسي (admin)!');
+            setSubmittingUser(false);
+            return;
+          }
+
+          // Check if new trimId is already taken by another user
+          const { data: duplicate } = await supabase
+            .from('users')
+            .select('user_id')
+            .eq('user_id', trimId)
+            .maybeSingle();
+
+          if (duplicate) {
+            setModalError('❌ اسم المستخدم الجديد (' + trimId + ') مستخدم بالفعل بحساب آخر!');
+            setSubmittingUser(false);
+            return;
+          }
+
+          // Try atomic RPC admin_change_username first
+          let rpcSuccess = false;
+          try {
+            const { data: rpcRes, error: rpcErr } = await supabase.rpc('admin_change_username', {
+              p_old_user_id: originalUserId,
+              p_new_user_id: trimId
+            });
+            if (!rpcErr && rpcRes && rpcRes.success) {
+              rpcSuccess = true;
+            }
+          } catch (e) {
+            console.warn('admin_change_username RPC notice:', e);
+          }
+
+          // Fallback if RPC is not deployed yet
+          if (!rpcSuccess) {
+            const updatePayload = { ...payload, user_id: trimId, auth_id: null };
+            const { error: updateErr } = await supabase
+              .from('users')
+              .update(updatePayload)
+              .eq('user_id', originalUserId);
+
+            if (updateErr) {
+              console.error('Update user error:', updateErr);
+              setModalError('❌ فشل في تعديل اسم المستخدم: ' + updateErr.message);
+              setSubmittingUser(false);
+              return;
+            }
+
+            try {
+              await supabase.from('subjects').update({ instructor_id: trimId }).eq('instructor_id', originalUserId);
+            } catch (e) {}
+
+            try {
+              await supabase.from('login_attempts').delete().eq('user_id', originalUserId);
+              await supabase.from('student_sessions').delete().eq('user_id', originalUserId);
+            } catch (e) {}
+
+            if (addingType === 'student') {
+              try {
+                await supabase.from('attendance').update({ student_id: trimId }).eq('student_id', originalUserId);
+                await supabase.from('grades').update({ student_id: trimId }).eq('student_id', originalUserId);
+                for (const sub of allSubjects) {
+                  if (Array.isArray(sub.enrolled_students) && sub.enrolled_students.includes(originalUserId)) {
+                    const updatedEnrolled = sub.enrolled_students.map(id => id === originalUserId ? trimId : id);
+                    await supabase.from('subjects').update({ enrolled_students: updatedEnrolled, included_students: updatedEnrolled }).eq('id', sub.id);
+                  }
+                }
+              } catch (e) {}
+            }
+          }
+        }
+
+        // Update the rest of user payload for trimId
+        const { error: finalUpdateErr } = await supabase
+          .from('users')
+          .update(payload)
+          .eq('user_id', trimId);
+
+        if (finalUpdateErr) {
+          console.error('Final update error:', finalUpdateErr);
+          setModalError('❌ فشل في حفظ التعديلات: ' + finalUpdateErr.message);
+          setSubmittingUser(false);
+          return;
+        }
+
+        // If password was provided, update it for the new trimId
         if (trimPass) {
           try {
-            const { error: rpcErr } = await supabase.rpc('admin_update_user_password', { 
+            const { error: passErr } = await supabase.rpc('admin_update_user_password', { 
               p_user_id: trimId, 
               p_new_password: trimPass 
             });
-            if (rpcErr) {
-              console.error('Password update error:', rpcErr);
-              setModalError('❌ فشل في تحديث كلمة المرور: ' + rpcErr.message);
-              setSubmittingUser(false);
-              return;
+            if (passErr) {
+              console.error('Password update error:', passErr);
             }
           } catch (err) {
             console.warn('RPC update password:', err);
           }
-        }
-        const { error: updateErr } = await supabase.from('users').update(payload).eq('user_id', trimId);
-        if (updateErr) {
-          console.error('Update user error:', updateErr);
-          setModalError('❌ فشل في تعديل بيانات المستخدم: ' + updateErr.message);
-          setSubmittingUser(false);
-          return;
         }
 
         // Propagate TA / Instructor name updates immediately to subjects table
         if (addingType === 'admin') {
           try {
             await supabase.from('subjects').update({ instructor_name: trimName }).eq('instructor_id', trimId);
-            if (existing.name && existing.name !== trimName) {
-              await supabase.from('subjects').update({ instructor_name: trimName }).eq('instructor_name', existing.name);
+            if (name && name !== trimName) {
+              await supabase.from('subjects').update({ instructor_name: trimName }).eq('instructor_name', name);
             }
           } catch (syncErr) {
             console.warn('Sync instructor_name on subjects:', syncErr);
           }
         }
-        setMessage('✅ تم تعديل بيانات المستخدم' + (trimPass ? ' وتحديث كلمة المرور المشفرة' : '') + ' بنجاح');
+
+        setMessage(
+          isIdChanged 
+            ? '✅ تم تعديل بيانات الحساب وتغيير اسم المستخدم بنجاح من (' + originalUserId + ') إلى (' + trimId + ')'
+            : '✅ تم تعديل بيانات المستخدم' + (trimPass ? ' وتحديث كلمة المرور' : '') + ' بنجاح'
+        );
       } else {
         const { error: insertErr } = await supabase.from('users').insert({ 
           user_id: trimId, 
@@ -310,7 +394,7 @@ export default function StudentsTab({ user }) {
         }
       }
 
-      setUserId(''); setName(''); setPassword(''); setConfirmPassword(''); setEditMode(false); setAssignedSubjects([]); setSelectedEnrollSubjects([]); setSection('S1');
+      setUserId(''); setOriginalUserId(''); setName(''); setPassword(''); setConfirmPassword(''); setEditMode(false); setAssignedSubjects([]); setSelectedEnrollSubjects([]); setSection('S1');
       setShowAddModal(false);
       cacheManager.invalidate('admin_users_base');
       await fetchData();
@@ -361,6 +445,7 @@ export default function StudentsTab({ user }) {
 
   const handleEdit = (userObj) => {
     setUserId(userObj.user_id);
+    setOriginalUserId(userObj.user_id);
     setName(userObj.name);
     setPassword('');
     setConfirmPassword('');
@@ -1237,8 +1322,13 @@ export default function StudentsTab({ user }) {
               )}
 
               <div>
-                <label style={{display:'block',marginBottom:'6px',fontSize:'0.9rem',fontWeight:700}}>
-                  {addingType === 'admin' ? 'اسم المستخدم / الكود (Username):' : 'الرقم الأكاديمي (ID):'}
+                <label style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'6px',fontSize:'0.9rem',fontWeight:700}}>
+                  <span>{addingType === 'admin' ? 'اسم المستخدم / الكود (Username):' : 'الرقم الأكاديمي (ID):'}</span>
+                  {editMode && originalUserId !== 'admin' && (
+                    <span style={{fontSize:'0.75rem',fontWeight:600,color:'#0d9488',background:'rgba(13,148,136,0.1)',padding:'2px 8px',borderRadius:'4px'}}>
+                      قابل للتعديل ✏️
+                    </span>
+                  )}
                 </label>
                 <input 
                   className="input-field" 
@@ -1246,9 +1336,26 @@ export default function StudentsTab({ user }) {
                   value={userId} 
                   onChange={e=>setUserId(e.target.value)} 
                   required 
-                  disabled={editMode}
+                  disabled={editMode && originalUserId === 'admin'}
                   placeholder={addingType === 'admin' ? 'مثال: ta_ahmed أو 2024100' : 'مثال: 2500850'} 
+                  style={{
+                    borderColor: editMode && originalUserId !== 'admin' && userId.trim() !== originalUserId ? '#f59e0b' : undefined
+                  }}
                 />
+                {editMode && originalUserId === 'admin' && (
+                  <p style={{fontSize:'0.8rem', color:'var(--text-muted)', margin:'4px 0 0 0'}}>
+                    🔒 لا يمكن تغيير اسم مستخدم المدير العام الرئيسي (admin).
+                  </p>
+                )}
+                {editMode && originalUserId !== 'admin' && (
+                  <p style={{fontSize:'0.8rem', color: userId.trim() !== originalUserId ? '#f59e0b' : 'var(--text-muted)', margin:'4px 0 0 0'}}>
+                    {userId.trim() !== originalUserId ? (
+                      <span>⚠️ تنبيه: سيتم تغيير اسم المستخدم لتسجيل الدخول من (<strong>{originalUserId}</strong>) إلى (<strong>{userId.trim()}</strong>).</span>
+                    ) : (
+                      <span>💡 يمكنك تغيير اسم المستخدم (Username) الخاص بالمعيد من هذا الحقل مباشرة.</span>
+                    )}
+                  </p>
+                )}
               </div>
 
               <div>
