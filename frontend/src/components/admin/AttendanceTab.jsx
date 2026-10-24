@@ -78,6 +78,11 @@ export default function AttendanceTab({ user }) {
   const [exportFormat, setExportFormat] = useState('txt'); // 'txt' or 'xlsx'
   const [exportFilter, setExportFilter] = useState('all'); // 'all', 'present', 'absent', 'excused', 'late'
 
+  // PDF Export Feedback and Preview States
+  const [downloadedPdfInfo, setDownloadedPdfInfo] = useState(null); // { filename, blobUrl, blob }
+  const [pdfExportLoading, setPdfExportLoading] = useState(false);
+  const [pdfProgressText, setPdfProgressText] = useState('');
+
   // Excuse Modal
   const [excuseModalStudent, setExcuseModalStudent] = useState(null);
   const [excuseInputText, setExcuseInputText] = useState('');
@@ -1070,9 +1075,10 @@ export default function AttendanceTab({ user }) {
         ? (selectedGroup !== 'all' ? selectedGroup : 'A / B')
         : (secName !== 'All' ? secName : 'كافة السكاشن');
 
-      setMessage('⏳ جاري تجهيز وتنزيل كشف الغياب (PDF)...');
+      setPdfExportLoading(true);
+      setPdfProgressText('جاري تجهيز كشف الغياب (PDF)...');
       try {
-        await printWeekAttendancePDF({
+        const result = await printWeekAttendancePDF({
           subjectName: subName,
           yearLevel: yr,
           sectionName: resolvedGroupName,
@@ -1087,14 +1093,24 @@ export default function AttendanceTab({ user }) {
           excuseReasons: excuseReasons,
           getStudentSubSection: (s) => getStudentSubSection(s, selectedSubject),
           getStudentLectureGroup: (s) => getStudentLectureGroup(s, selectedSubject),
-          filename: `${filename}.pdf`
+          filename: `${filename}.pdf`,
+          onProgress: (cur, tot) => {
+            setPdfProgressText(`جاري تجهيز صفحة ${cur} من ${tot}...`);
+          }
         });
-        setMessage('✅ تم تنزيل كشف الغياب (PDF) بنجاح على جهازك!');
-        setTimeout(() => setMessage(''), 4000);
+
+        if (result && result.blobUrl) {
+          setDownloadedPdfInfo(result);
+          setMessage('✅ تم تنزيل كشف الغياب (PDF) بنجاح على جهازك!');
+          setTimeout(() => setMessage(''), 4000);
+        }
       } catch (pdfErr) {
         console.error('Attendance PDF export error:', pdfErr);
         setMessage('❌ تعذر استخراج ملف PDF. يرجى المحاولة مرة أخرى.');
         setTimeout(() => setMessage(''), 4000);
+      } finally {
+        setPdfExportLoading(false);
+        setPdfProgressText('');
       }
     } else {
       // Excel Export
@@ -2279,6 +2295,135 @@ export default function AttendanceTab({ user }) {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* FLOATING PDF PROGRESS */}
+      {pdfExportLoading && (
+        <div style={{
+          position: 'fixed',
+          bottom: '24px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 999999,
+          background: 'rgba(15, 23, 42, 0.95)',
+          color: '#ffffff',
+          padding: '12px 20px',
+          borderRadius: '12px',
+          boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          fontSize: '13.5px',
+          fontWeight: '700',
+          border: '1px solid #3b82f6',
+          backdropFilter: 'blur(6px)'
+        }}>
+          <span>⏳</span>
+          <span>{pdfProgressText || 'جاري تجهيز كشف الغياب...'}</span>
+        </div>
+      )}
+
+      {/* FLOATING PDF DOWNLOAD NOTIFICATION & 1-CLICK PREVIEW */}
+      {downloadedPdfInfo && (
+        <div style={{
+          position: 'fixed',
+          bottom: '24px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 999999,
+          background: '#1e293b',
+          color: '#ffffff',
+          padding: '16px 20px',
+          borderRadius: '14px',
+          boxShadow: '0 20px 40px rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px',
+          maxWidth: '92vw',
+          width: '450px',
+          border: '1.5px solid #10b981'
+        }}>
+          <div style={{display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+            <div style={{display:'flex', alignItems:'center', gap:'8px', fontWeight:'700', fontSize:'14.5px', color:'#10b981'}}>
+              <span style={{fontSize:'18px'}}>✅</span>
+              <span>تم تنزيل كشف الغياب بنجاح على جهازك!</span>
+            </div>
+            <button 
+              onClick={() => setDownloadedPdfInfo(null)} 
+              style={{background:'none', border:'none', color:'#94a3b8', fontSize:'20px', cursor:'pointer', padding:'0 4px', lineHeight:1}}
+              title="إغلاق"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div style={{fontSize:'11.5px', color:'#cbd5e1', wordBreak:'break-all', direction:'ltr', textAlign:'right', background:'#0f172a', padding:'8px 10px', borderRadius:'6px', border:'1px solid #334155'}}>
+            📄 {downloadedPdfInfo.filename}
+          </div>
+
+          <div style={{display:'flex', gap:'8px'}}>
+            <button
+              onClick={() => {
+                window.open(downloadedPdfInfo.blobUrl, '_blank');
+              }}
+              style={{
+                flex: 1,
+                backgroundColor: '#0d9488',
+                color: '#ffffff',
+                border: 'none',
+                padding: '10px 14px',
+                borderRadius: '8px',
+                fontWeight: '700',
+                fontSize: '13px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+              }}
+            >
+              <span>👁️</span>
+              <span>فتح ومعاينة الكشف فوراً</span>
+            </button>
+
+            {typeof navigator !== 'undefined' && navigator.canShare && (
+              <button
+                onClick={async () => {
+                  try {
+                    const file = new File([downloadedPdfInfo.blob], downloadedPdfInfo.filename, { type: 'application/pdf' });
+                    if (navigator.canShare({ files: [file] })) {
+                      await navigator.share({
+                        files: [file],
+                        title: downloadedPdfInfo.filename,
+                        text: 'كشف غياب وحضور الطلاب'
+                      });
+                    }
+                  } catch (err) {
+                    if (err.name !== 'AbortError') console.warn('Share error:', err);
+                  }
+                }}
+                style={{
+                  backgroundColor: '#3b82f6',
+                  color: '#ffffff',
+                  border: 'none',
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  fontWeight: '700',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span>📤</span>
+                <span>مشاركة</span>
+              </button>
+            )}
           </div>
         </div>
       )}
