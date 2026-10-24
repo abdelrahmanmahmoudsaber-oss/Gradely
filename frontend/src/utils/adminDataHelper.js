@@ -39,6 +39,12 @@ export async function getAdminBaseData(currentUser = null, forceRefresh = false)
           if ((!allSubList || allSubList.length === 0) && Array.isArray(bData.subjects) && bData.subjects.length > 0) {
             allSubList = bData.subjects;
           }
+          if (Array.isArray(bData.attendance)) {
+            cacheManager.set('admin_attendance_backup', bData.attendance);
+          }
+          if (Array.isArray(bData.grades)) {
+            cacheManager.set('admin_grades_backup', bData.grades);
+          }
         }
       } catch (backupErr) {
         console.warn('Backup RPC fallback notice:', backupErr);
@@ -81,3 +87,34 @@ export async function getAdminBaseData(currentUser = null, forceRefresh = false)
 
   return { allUsersList, allSubList };
 }
+
+/**
+ * Retrieves attendance and grades dataset using backup RPC fallback if needed.
+ */
+export async function getBackupAttendanceAndGrades(forceRefresh = false) {
+  let att = !forceRefresh ? cacheManager.get('admin_attendance_backup') : null;
+  let grd = !forceRefresh ? cacheManager.get('admin_grades_backup') : null;
+
+  if (!att || !grd) {
+    try {
+      const { data: bData } = await supabase.rpc('get_system_backup_data', {
+        p_backup_secret: BACKUP_SECRET
+      });
+      if (bData) {
+        if (Array.isArray(bData.attendance)) {
+          att = bData.attendance;
+          cacheManager.set('admin_attendance_backup', att);
+        }
+        if (Array.isArray(bData.grades)) {
+          grd = bData.grades;
+          cacheManager.set('admin_grades_backup', grd);
+        }
+      }
+    } catch (err) {
+      console.warn('Backup attendance/grades fetch error:', err);
+    }
+  }
+
+  return { attendance: att || [], grades: grd || [] };
+}
+

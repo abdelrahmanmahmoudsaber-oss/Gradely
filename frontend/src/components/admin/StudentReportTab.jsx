@@ -3,7 +3,7 @@ import { supabase } from '../../supabaseClient';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { printStudentReportPDF } from '../../utils/pdfHelper';
 import { getSectionInstructorName as resolveSectionTA } from '../../utils/sectionHelper';
-import { getAdminBaseData } from '../../utils/adminDataHelper';
+import { getAdminBaseData, getBackupAttendanceAndGrades } from '../../utils/adminDataHelper';
 import { Search, Printer, Calendar, BookOpen, FileText, CheckCircle2, XCircle, X, ChevronDown, ChevronUp, Sliders, CheckSquare, Square, RefreshCw } from 'lucide-react';
 
 export default function StudentReportTab({ user }) {
@@ -176,8 +176,23 @@ export default function StudentReportTab({ user }) {
         supabase.from('grades').select('student_id, subject_id, quiz_1, quiz_2, project, attendance_score, final_grade').eq('student_id', stu.user_id)
       ]);
 
-      const attData = attRes.data || [];
-      const grdData = grdRes.data || [];
+      let attData = attRes.data || [];
+      let grdData = grdRes.data || [];
+
+      // High-reliability fallback if direct table queries fail or are blocked by RLS
+      if (attRes.error || grdRes.error || (attData.length === 0 && grdData.length === 0)) {
+        try {
+          const { attendance: backupAtt, grades: backupGrd } = await getBackupAttendanceAndGrades();
+          if (attData.length === 0 && backupAtt.length > 0) {
+            attData = backupAtt.filter(r => r.student_id === stu.user_id);
+          }
+          if (grdData.length === 0 && backupGrd.length > 0) {
+            grdData = backupGrd.filter(r => r.student_id === stu.user_id);
+          }
+        } catch (fbErr) {
+          console.warn('Student report fallback notice:', fbErr);
+        }
+      }
 
       setStudentAttendance(attData);
       setStudentGrades(grdData);

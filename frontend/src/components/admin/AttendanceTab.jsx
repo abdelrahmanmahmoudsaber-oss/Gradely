@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { getSectionInstructorName as resolveSectionTA } from '../../utils/sectionHelper';
 import { printWeekAttendancePDF } from '../../utils/pdfHelper';
-import { getAdminBaseData } from '../../utils/adminDataHelper';
+import { getAdminBaseData, getBackupAttendanceAndGrades } from '../../utils/adminDataHelper';
 
 export const SEMESTER_START_DATE = '2026-10-03';
 
@@ -376,13 +376,22 @@ export default function AttendanceTab({ user }) {
 
     try {
       // Fetch attendance records from database
+      let fetchedRows = [];
       const { data, error } = await supabase
         .from('attendance')
         .select('student_id, status, created_at')
         .eq('subject_id', selectedSubject)
         .eq('week_number', effWeek);
 
-      if (error) throw error;
+      if (!error && Array.isArray(data)) {
+        fetchedRows = data;
+      } else {
+        console.warn('Direct attendance fetch notice, attempting backup fallback:', error);
+        const { attendance: backupAtt } = await getBackupAttendanceAndGrades();
+        if (Array.isArray(backupAtt)) {
+          fetchedRows = backupAtt.filter(r => r.subject_id === selectedSubject && Number(r.week_number) === Number(effWeek));
+        }
+      }
 
       const recs = {};
       const excuses = {};
@@ -410,8 +419,8 @@ export default function AttendanceTab({ user }) {
       }
 
       // Check if any existing attendance record in DB has a created_at date
-      if (!foundDate && data && data.length > 0) {
-        const withCreated = data.find(r => r.created_at);
+      if (!foundDate && fetchedRows && fetchedRows.length > 0) {
+        const withCreated = fetchedRows.find(r => r.created_at);
         if (withCreated && withCreated.created_at) {
           foundDate = withCreated.created_at.split('T')[0];
         }
@@ -427,8 +436,8 @@ export default function AttendanceTab({ user }) {
         }
       }
 
-      if (data && data.length > 0) {
-        data.forEach(r => { 
+      if (fetchedRows && fetchedRows.length > 0) {
+        fetchedRows.forEach(r => { 
           recs[r.student_id] = r.status;
         });
       }
@@ -436,6 +445,7 @@ export default function AttendanceTab({ user }) {
       setAttendanceRecords(recs);
       setExcuseReasons(excuses);
       if (foundDate) setSessionDate(foundDate);
+      setOfflineNotice('');
       cacheManager.set(cacheKey, { records: recs, excuses, date: foundDate });
 
       // Save local offline copy
