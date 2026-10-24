@@ -93,9 +93,7 @@ export async function getBackupAttendanceAndGrades(forceRefresh = false) {
 
   if (!att || !grd) {
     try {
-      const { data: bData } = await supabase.rpc('get_system_backup_data', {
-        p_backup_secret: BACKUP_SECRET
-      });
+      const { data: bData } = await supabase.rpc('get_system_backup_data');
       if (bData) {
         if (Array.isArray(bData.attendance)) {
           att = bData.attendance;
