@@ -12,6 +12,7 @@ import {
   Edit, Trash2, LayoutDashboard, ExternalLink, Copy, Check, Settings
 } from 'lucide-react';
 import { getSectionInstructorName as resolveSectionTA, syncAllSubjectsSectionTAs } from '../../utils/sectionHelper';
+import { getAdminBaseData } from '../../utils/adminDataHelper';
 
 export default function OverviewTab({ user }) {
   const [stats, setStats] = useState({
@@ -172,19 +173,7 @@ export default function OverviewTab({ user }) {
     try {
       setLoading(true);
 
-      let allUsersList = cacheManager.get('admin_users_base');
-      let allSubList = cacheManager.get('admin_subjects_base');
-
-      if (!allUsersList || !allSubList) {
-        const [userRes, subRes] = await Promise.all([
-          supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects'),
-          supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students')
-        ]);
-        allUsersList = userRes.data || [];
-        allSubList = subRes.data || [];
-        cacheManager.set('admin_users_base', allUsersList);
-        cacheManager.set('admin_subjects_base', allSubList);
-      }
+      const { allUsersList, allSubList } = await getAdminBaseData(user);
 
       setAllSubjectsList(allSubList);
 

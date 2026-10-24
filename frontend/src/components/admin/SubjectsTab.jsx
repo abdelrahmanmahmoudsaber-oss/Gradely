@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { parseExcelFile, exportExcelFile } from '../../utils/excelHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
+import { getAdminBaseData } from '../../utils/adminDataHelper';
 import { BookOpen, Upload, Plus, Trash2, Edit, Users, UserCheck, X, CheckSquare, Square, Shield, Layers, Download, FileSpreadsheet, Info, RefreshCw } from 'lucide-react';
 import { 
   embedSectionTAsIntoExcludedStudents, 
@@ -74,13 +75,9 @@ export default function SubjectsTab({ user }) {
   }, []);
 
   const fetchInitial = async () => {
-    const [subRes, userRes] = await Promise.all([
-      supabase.from('subjects').select('*').order('created_at', { ascending: false }),
-      supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at')
-    ]);
-
-    if (subRes.data) setSubjects(subRes.data);
-    if (userRes.data) setAllUsers(userRes.data);
+    const { allUsersList, allSubList } = await getAdminBaseData(user, true);
+    if (allSubList) setSubjects(allSubList);
+    if (allUsersList) setAllUsers(allUsersList);
   };
 
   const instructorsList = allUsers.filter(u => u.role === 'admin' || u.role === 'super_admin' || isSuperUser(u));

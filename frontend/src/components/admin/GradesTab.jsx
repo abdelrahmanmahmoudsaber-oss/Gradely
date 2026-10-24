@@ -4,6 +4,7 @@ import { exportExcelFile, parseExcelFile } from '../../utils/excelHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { Download, Upload, Save, Users, Filter, BookOpen, AlertCircle, Plus, X, Check } from 'lucide-react';
 import { getSectionInstructorName as resolveSectionTA } from '../../utils/sectionHelper';
+import { getAdminBaseData } from '../../utils/adminDataHelper';
 
 export default function GradesTab({ user }) {
   const isSuper = isSuperUser(user);
@@ -62,29 +63,7 @@ export default function GradesTab({ user }) {
       setLoading(true);
       const isSuper = isSuperUser(user);
 
-      let allUsersList = cacheManager.get('admin_users_base');
-      let allSubList = cacheManager.get('admin_subjects_base');
-
-      if (!allUsersList || !allSubList || allUsersList.length === 0 || allSubList.length === 0) {
-        const [userRes, subRes] = await Promise.all([
-          supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects'),
-          supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students')
-        ]);
-
-        if (userRes.data && userRes.data.length > 0) {
-          allUsersList = userRes.data;
-          cacheManager.set('admin_users_base', allUsersList);
-        } else if (!allUsersList) {
-          allUsersList = userRes.data || [];
-        }
-
-        if (subRes.data && subRes.data.length > 0) {
-          allSubList = subRes.data;
-          cacheManager.set('admin_subjects_base', allSubList);
-        } else if (!allSubList) {
-          allSubList = subRes.data || [];
-        }
-      }
+      const { allUsersList, allSubList } = await getAdminBaseData(user);
 
       const freshCurrentUser = allUsersList.find(u => u.user_id === user.user_id) || user;
       const rawAssigned = Array.isArray(freshCurrentUser?.assigned_subjects) ? freshCurrentUser.assigned_subjects : [];

@@ -3,6 +3,7 @@ import { supabase } from '../../supabaseClient';
 import { parseExcelFile, exportExcelFile } from '../../utils/excelHelper';
 import { printStudentCredentialsSlips } from '../../utils/pdfHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
+import { getAdminBaseData } from '../../utils/adminDataHelper';
 import { verifyTOTPCode, getGoogleAuthQrUrl, generateRandomBase32 } from '../../utils/totp';
 import { 
   Users, Upload, UserPlus, Edit, Trash2, Search, Shield, GraduationCap, 
@@ -195,28 +196,9 @@ export default function StudentsTab({ user }) {
   }, []);
 
   const fetchData = async () => {
-    // SECURITY HARDENING: Never select plaintext password field
-    const { data: usersData } = await supabase
-      .from('users')
-      .select('id, user_id, name, role, year_level, section, assigned_subjects, auth_id, created_at, last_sign_in_at')
-      .order('created_at', { ascending: false });
-    if (usersData && usersData.length > 0) {
-      setAllUsers(usersData);
-      cacheManager.set('admin_users_base', usersData);
-    } else if (usersData) {
-      setAllUsers(usersData);
-    } else {
-      const cached = cacheManager.get('admin_users_base');
-      if (cached && cached.length > 0) setAllUsers(cached);
-    }
-
-    const { data: subData } = await supabase.from('subjects').select('*');
-    if (subData && subData.length > 0) {
-      setAllSubjects(subData);
-      cacheManager.set('admin_subjects_base', subData);
-    } else if (subData) {
-      setAllSubjects(subData);
-    }
+    const { allUsersList, allSubList } = await getAdminBaseData(user, true);
+    if (allUsersList && allUsersList.length > 0) setAllUsers(allUsersList);
+    if (allSubList && allSubList.length > 0) setAllSubjects(allSubList);
   };
 
   // When yearLevel changes in student form, preselect matching subjects

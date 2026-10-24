@@ -3,6 +3,7 @@ import { supabase } from '../../supabaseClient';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { printStudentReportPDF } from '../../utils/pdfHelper';
 import { getSectionInstructorName as resolveSectionTA } from '../../utils/sectionHelper';
+import { getAdminBaseData } from '../../utils/adminDataHelper';
 import { Search, Printer, Calendar, BookOpen, FileText, CheckCircle2, XCircle, X, ChevronDown, ChevronUp, Sliders, CheckSquare, Square, RefreshCw } from 'lucide-react';
 
 export default function StudentReportTab({ user }) {
@@ -140,13 +141,7 @@ export default function StudentReportTab({ user }) {
         cacheManager.invalidate('admin_subjects_base');
       }
 
-      // Direct live fetch so all newly saved week dates and student assignments are real-time
-      const [userRes, subRes] = await Promise.all([
-        supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects'),
-        supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students')
-      ]);
-      const allUsersList = userRes.data || [];
-      const allSubList = subRes.data || [];
+      const { allUsersList, allSubList } = await getAdminBaseData(user, forceRefresh);
       const adminsList = allUsersList.filter(u => u.role === 'admin' || u.role === 'super_admin' || isSuperUser(u));
       setAllAdmins(adminsList);
 
