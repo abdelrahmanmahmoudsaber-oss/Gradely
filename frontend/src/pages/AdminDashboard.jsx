@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { LogOut, BookOpen, Users, CheckSquare, FileText, LayoutDashboard, Menu, X, Printer, KeyRound, Lock, WifiOff, Wifi, History } from 'lucide-react';
+import { LogOut, BookOpen, Users, CheckSquare, FileText, LayoutDashboard, Menu, X, Printer, KeyRound, Lock, WifiOff, Wifi, History, Smartphone } from 'lucide-react';
+import ActiveSessionsModal from '../components/ActiveSessionsModal';
 import { supabase } from '../supabaseClient';
 import { isSuperUser } from '../utils/dataCache';
 import { checkAndRunScheduledBackup } from '../utils/backupService';
@@ -15,6 +16,7 @@ export default function AdminDashboard({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [showSessionsModal, setShowSessionsModal] = useState(false);
   
   // Password Change Modal State
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -307,6 +309,27 @@ export default function AdminDashboard({ user, onLogout }) {
             >
               <KeyRound size={15} /> تغيير كلمة المرور
             </button>
+
+            <button
+              onClick={() => setShowSessionsModal(true)}
+              title="عرض الأجهزة المتصلة بالحساب وإلغاء تسجيل الدخول عن بُعد"
+              style={{
+                background: 'rgba(79, 70, 229, 0.1)',
+                color: 'var(--primary-hover)',
+                border: '1px solid rgba(79, 70, 229, 0.3)',
+                padding: '7px 12px',
+                borderRadius: '8px',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.2s'
+              }}
+            >
+              <Smartphone size={15} /> الأجهزة المتصلة
+            </button>
           </div>
         </header>
 
@@ -369,7 +392,9 @@ export default function AdminDashboard({ user, onLogout }) {
       </div>
 
       {/* Password Change Modal for TA / Admin */}
-      {showPasswordModal && (
+      {showSessionsModal && <ActiveSessionsModal user={user} onClose={() => setShowSessionsModal(false)} />}
+
+        {showPasswordModal && (
         <div 
           style={{
             position: 'fixed',

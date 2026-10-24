@@ -8,6 +8,7 @@ import {
   BarChart3, Sparkles, Trophy, Target, KeyRound, Lock, X
 } from 'lucide-react';
 import { getSectionInstructorName as resolveSectionTA } from '../utils/sectionHelper';
+import ActiveSessionsModal from '../components/ActiveSessionsModal';
 
 const SUBJECT_COLORS = [
   { bg: 'rgba(79, 70, 229, 0.15)', border: 'var(--primary)', text: 'var(--primary-hover)', tag: '#6366f1' },
@@ -69,6 +70,8 @@ export default function StudentDashboard({ user, onLogout }) {
 
   // Password Change State
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showSessionsModal, setShowSessionsModal] = useState(false);
+  const [refreshingData, setRefreshingData] = useState(false);
   const [isForcePasswordChange, setIsForcePasswordChange] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -373,6 +376,20 @@ export default function StudentDashboard({ user, onLogout }) {
       ]);
 
       setAllAdmins(adminRes.data || []);
+      // Ensure student name is loaded if missing
+      if ((!user?.name || user.name === user.user_id) && user?.user_id) {
+        try {
+          const { data: prof } = await supabase.from('users').select('name').eq('user_id', user.user_id).single();
+          if (prof && prof.name) {
+            user.name = prof.name;
+            try {
+              const cur = JSON.parse(localStorage.getItem('gradely_student_session') || '{}');
+              cur.name = prof.name;
+              localStorage.setItem('gradely_student_session', JSON.stringify(cur));
+            } catch (e) {}
+          }
+        } catch (e) {}
+      }
       if (subData.length === 0) {
         subData = subRes.data || [];
       }
@@ -684,7 +701,7 @@ export default function StudentDashboard({ user, onLogout }) {
         {/* Welcome Section */}
         <div className="fade-in" style={{marginBottom: '2rem', textAlign: 'center'}}>
           <h1 style={{fontSize: 'clamp(1.5rem, 4vw, 2.2rem)', marginBottom: '0.4rem', fontWeight: 800}}>
-            أهلاً بك، <span style={{color: 'var(--primary-hover)'}}>{user.name}</span> 👋
+            أهلاً بك، <span style={{color: 'var(--primary-hover)'}}>{user.name || user.user_id}</span> 👋
           </h1>
           <p className="text-muted" style={{fontSize: '0.95rem', margin: 0}}>
             الرقم الأكاديمي: <strong>{user.user_id}</strong> | فرقة الطالب: <strong>الفرقة {inferStudentYear(user.user_id, user.year_level)}</strong>
@@ -1252,6 +1269,8 @@ export default function StudentDashboard({ user, onLogout }) {
       </main>
 
       {/* Password Change Modal (Enforced on first login or opened manually) */}
+      {showSessionsModal && <ActiveSessionsModal user={user} onClose={() => setShowSessionsModal(false)} />}
+
       {showPasswordModal && (
         <div 
           style={{

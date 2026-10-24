@@ -140,6 +140,19 @@ export const getSectionInstructorName = (subOrId, sec, allAdmins = [], subjectsL
     }
   }
 
+  const sanitizeTaName = (taName) => {
+    if (!taName) return taName;
+    const isAbubakr = /مصطف[يى]\s*أ?بو\s*بكر|mostafa\s*abubakr|abubakr/i.test(taName);
+    const subInstructorIsAshraf = subObj && (
+      (subObj.instructor_name && /أشرف|اشرف|ashraf/i.test(subObj.instructor_name)) ||
+      subObj.instructor_id === 'ahamdy2004'
+    );
+    if (isAbubakr && subInstructorIsAshraf) {
+      return subObj.instructor_name || 'أشرف حسين';
+    }
+    return taName;
+  };
+
   // 1. Search in allAdmins list FIRST (Canonical live truth from database)
   // If an admin or TA has their name updated in users, it immediately reflects here!
   if (subId && Array.isArray(allAdmins) && allAdmins.length > 0) {
@@ -148,7 +161,7 @@ export const getSectionInstructorName = (subOrId, sec, allAdmins = [], subjectsL
       adm.assigned_subjects.includes(subId + ':' + secNorm)
     );
     if (liveAdmin && (liveAdmin.name || liveAdmin.user_id)) {
-      return liveAdmin.name || liveAdmin.user_id;
+      return sanitizeTaName(liveAdmin.name || liveAdmin.user_id);
     }
   }
 
@@ -160,7 +173,7 @@ export const getSectionInstructorName = (subOrId, sec, allAdmins = [], subjectsL
     if (directMatch) {
       const parts = directMatch.split(':');
       if (parts.length >= 3 && parts[2]?.trim()) {
-        return parts[2].trim();
+        return sanitizeTaName(parts[2].trim());
       }
     }
   }
@@ -174,7 +187,7 @@ export const getSectionInstructorName = (subOrId, sec, allAdmins = [], subjectsL
     );
     if (directEntry) {
       const val = directEntry.replace(directTagPrefix, '').trim();
-      if (val) return val;
+      if (val) return sanitizeTaName(val);
     }
 
     // 3b. CONFIG_SECTION_TAS JSON map
@@ -185,7 +198,7 @@ export const getSectionInstructorName = (subOrId, sec, allAdmins = [], subjectsL
       try {
         const parsed = JSON.parse(configEntry.replace('CONFIG_SECTION_TAS:', ''));
         if (parsed && (parsed[secNorm] || parsed[sec])) {
-          return parsed[secNorm] || parsed[sec];
+          return sanitizeTaName(parsed[secNorm] || parsed[sec]);
         }
       } catch (e) {}
     }
@@ -198,14 +211,14 @@ export const getSectionInstructorName = (subOrId, sec, allAdmins = [], subjectsL
         Array.isArray(adm.assigned_subjects) &&
         adm.assigned_subjects.includes(subId)
       ) {
-        return adm.name || adm.user_id;
+        return sanitizeTaName(adm.name || adm.user_id);
       }
     }
   }
 
   // 5. Fallback to main instructor_name on subject
   if (subObj?.instructor_name) {
-    return subObj.instructor_name;
+    return sanitizeTaName(subObj.instructor_name);
   }
 
   return 'المدير الرئيسي';

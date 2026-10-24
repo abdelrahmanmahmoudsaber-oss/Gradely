@@ -12,6 +12,19 @@ export default class ErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
+    const msg = String(error?.message || '');
+    if (
+      msg.includes('dynamically imported module') ||
+      msg.includes('Loading chunk') ||
+      msg.includes('Importing a module script failed')
+    ) {
+      const reloadKey = 'gradely_eb_chunk_reload';
+      const lastReload = parseInt(sessionStorage.getItem(reloadKey) || '0', 10);
+      if (Date.now() - lastReload > 8000) {
+        sessionStorage.setItem(reloadKey, String(Date.now()));
+        window.location.reload();
+      }
+    }
   }
 
   render() {

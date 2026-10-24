@@ -90,6 +90,15 @@ export default function AttendanceTab({ user }) {
   
   // Custom enrollment states (Super Admin only)
   const [showManageStudents, setShowManageStudents] = useState(false);
+
+  useEffect(() => {
+    if (showManageStudents) {
+      setTimeout(() => {
+        const el = document.getElementById('manage-students-panel');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 60);
+    }
+  }, [showManageStudents]);
   const [enrollMode, setEnrollMode] = useState('multi');
   const [filterYearToAdd, setFilterYearToAdd] = useState('1');
   const [filterSectionToAdd, setFilterSectionToAdd] = useState('all');
@@ -1824,7 +1833,7 @@ export default function AttendanceTab({ user }) {
 
       {/* ENROLLMENT MANAGEMENT PANEL (Super Admin Only) */}
       {isSuper && showManageStudents && currentSub && (
-        <div className="panel fade-in" style={{marginBottom:'2rem',border:'1px solid var(--primary)'}}>
+        <div id="manage-students-panel" className="panel fade-in" style={{marginBottom:'2rem',border:'2px solid var(--primary)',boxShadow:'0 0 25px rgba(79, 70, 229, 0.25)'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1rem',flexWrap:'wrap',gap:'1rem'}}>
             <h3 style={{display:'flex',alignItems:'center',gap:'8px',color:'var(--primary-hover)',margin:0}}>
               <Users size={20} /> تسجيل وإضافة طلاب للمادة ({currentSub.name})

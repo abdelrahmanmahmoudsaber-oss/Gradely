@@ -1,0 +1,24 @@
+{
+  "name": "Gradely - بوابة الإدارة الأكاديمية",
+  "short_name": "Gradely",
+  "description": "منصة إدارة الحضور والغياب والدرجات الأكاديمية",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0f1d",
+  "theme_color": "#4f46e5",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/gradely_logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
