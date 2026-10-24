@@ -1269,7 +1269,7 @@ export default function StudentDashboard({ user, onLogout }) {
       </main>
 
       {/* Password Change Modal (Enforced on first login or opened manually) */}
-      {showSessionsModal && <ActiveSessionsModal user={user} onClose={() => setShowSessionsModal(false)} />}
+      {showSessionsModal && <ActiveSessionsModal user={user} onLogout={onLogout} onClose={() => setShowSessionsModal(false)} />}
 
       {showPasswordModal && (
         <div 

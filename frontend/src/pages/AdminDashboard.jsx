@@ -392,7 +392,7 @@ export default function AdminDashboard({ user, onLogout }) {
       </div>
 
       {/* Password Change Modal for TA / Admin */}
-      {showSessionsModal && <ActiveSessionsModal user={user} onClose={() => setShowSessionsModal(false)} />}
+      {showSessionsModal && <ActiveSessionsModal user={user} onLogout={onLogout} onClose={() => setShowSessionsModal(false)} />}
 
         {showPasswordModal && (
         <div 
