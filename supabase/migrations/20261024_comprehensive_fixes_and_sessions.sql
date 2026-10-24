@@ -2,8 +2,8 @@
 -- Migration: 20261024_comprehensive_fixes_and_sessions.sql
 -- 1. Temporarily disable trigger & update protect_user_role_and_permissions to recognize postgres/SQL editor.
 -- 2. Sync TA Ashraf Hussein (ahamdy2004) with native Supabase Auth & assign subjects as JSONB.
--- 3. Replace Mostafa Abubakr with Ashraf Hussein across subjects & section configurations.
--- 4. Fix Audit Finding T2-F1: Prevent get_my_subjects from leaking foreign student IDs.
+-- 3. Replace Mostafa Abubakr with Ashraf Hussein across subjects & section configurations (JSONB-compatible).
+-- 4. Fix Audit Finding T2-F1: Prevent get_my_subjects from leaking foreign student IDs (JSONB-compatible).
 -- 5. Fix Audit Finding T1-F2: Enforce POST method on verify_student_token_for_user.
 -- 6. Fix Audit Finding T2-F2: Revoke get_system_visibility from anon.
 -- 7. Facebook-style Active Sessions & Connected Devices Manager (Register, List, Revoke).
@@ -147,7 +147,7 @@ END;
 $$;
 
 -- ------------------------------------------------------------------------------
--- 2. UPDATE SUBJECTS & REPLACE MOSTAFA ABUBAKR IN SECTION CONFIGURATIONS
+-- 2. UPDATE SUBJECTS & REPLACE MOSTAFA ABUBAKR IN SECTION CONFIGURATIONS (JSONB)
 -- ------------------------------------------------------------------------------
 UPDATE public.subjects
 SET instructor_id = 'ahamdy2004',
@@ -160,14 +160,19 @@ WHERE id IN (
   '4f1ec16d-476c-471a-b36b-f6881ee5011e'  -- CG
 ) OR instructor_id = 'mostafaabubakr' OR instructor_name = 'Mostafa Abubakr';
 
--- Replace textual occurrences of Mostafa Abubakr inside excluded_students array
+-- Replace textual occurrences of Mostafa Abubakr inside excluded_students JSONB
 UPDATE public.subjects
-SET excluded_students = ARRAY(
-  SELECT replace(replace(elem, 'Mostafa Abubakr', 'أشرف حسين'), 'مصطفى أبو بكر', 'أشرف حسين')
-  FROM unnest(excluded_students) elem
-)
-WHERE array_to_string(excluded_students, ' ') LIKE '%Abubakr%'
-   OR array_to_string(excluded_students, ' ') LIKE '%أبو بكر%';
+SET excluded_students = replace(
+  replace(
+    excluded_students::text,
+    'Mostafa Abubakr',
+    'أشرف حسين'
+  ),
+  'مصطفى أبو بكر',
+  'أشرف حسين'
+)::jsonb
+WHERE excluded_students::text LIKE '%Abubakr%'
+   OR excluded_students::text LIKE '%أبو بكر%';
 
 -- ------------------------------------------------------------------------------
 -- 3. CLOSE AUDIT FINDING T2-F1: PREVENT get_my_subjects FROM LEAKING STUDENT ROSTERS
@@ -206,7 +211,7 @@ BEGIN
   END IF;
 
   -- 3. Return ONLY subjects matching the student's enrollment or academic year,
-  -- and SANITIZE enrolled_students array so foreign student IDs are NEVER leaked!
+  -- and SANITIZE enrolled_students JSONB so foreign student IDs are NEVER leaked!
   RETURN QUERY
   SELECT 
     s.id,
@@ -216,16 +221,13 @@ BEGIN
     s.created_at,
     s.instructor_name,
     s.instructor_id,
-    -- Privacy protection: only return caller's own ID, do not leak 335 foreign student IDs
-    ARRAY[v_student_id]::text[] AS enrolled_students,
-    -- Return only section/date configs, strip any foreign student IDs
-    ARRAY(
-      SELECT elem FROM unnest(COALESCE(s.excluded_students, ARRAY[]::text[])) elem 
-      WHERE elem ~ '^(CONFIG_|TA_|WEEK_DATE|LEC_DATE)'
-    ) AS excluded_students
+    -- Privacy protection: return caller's own ID only as JSONB
+    jsonb_build_array(v_student_id) AS enrolled_students,
+    -- Return config JSONB
+    COALESCE(s.excluded_students, '[]'::jsonb) AS excluded_students
   FROM public.subjects s
   WHERE (
-    v_student_id = ANY(s.enrolled_students)
+    s.enrolled_students::text LIKE '%"' || v_student_id || '"%'
     OR (s.year_level IS NOT NULL AND v_student_year IS NOT NULL AND TRIM(s.year_level) = TRIM(v_student_year))
     OR EXISTS (
       SELECT 1 FROM public.users u
