@@ -371,20 +371,24 @@ export default function StudentDashboard({ user, onLogout }) {
       const [subRes, adminRes] = await Promise.all([
         subData.length > 0 
           ? Promise.resolve({ data: subData }) 
-          : supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, excluded_students'),
+          : supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name'),
         supabase.from('users').select('id, user_id, name, role, assigned_subjects').in('role', ['admin', 'super_admin'])
       ]);
 
-      setAllAdmins(adminRes.data || []);
-      // Ensure student name is loaded if missing
-      if ((!user?.name || user.name === user.user_id) && user?.user_id) {
+      // Ensure student profile data (name, assigned_subjects) is loaded if missing
+      if (user?.user_id && (!user.name || user.name === user.user_id || !user.assigned_subjects || user.assigned_subjects.length === 0)) {
         try {
-          const { data: prof } = await supabase.from('users').select('name').eq('user_id', user.user_id).single();
-          if (prof && prof.name) {
-            user.name = prof.name;
+          const { data: prof } = await supabase.from('users').select('name, assigned_subjects, year_level, section').eq('user_id', user.user_id).single();
+          if (prof) {
+            if (prof.name) user.name = prof.name;
+            if (Array.isArray(prof.assigned_subjects) && prof.assigned_subjects.length > 0) {
+              user.assigned_subjects = prof.assigned_subjects;
+            }
+            if (prof.year_level) user.year_level = prof.year_level;
+            if (prof.section) user.section = prof.section;
             try {
               const cur = JSON.parse(localStorage.getItem('gradely_student_session') || '{}');
-              cur.name = prof.name;
+              Object.assign(cur, prof);
               localStorage.setItem('gradely_student_session', JSON.stringify(cur));
             } catch (e) {}
           }
@@ -470,11 +474,14 @@ export default function StudentDashboard({ user, onLogout }) {
       const gVis = currentVisibility.global || currentVisibility;
       setViewMode('attendance');
 
-      const hasExplicitAssignments = Array.isArray(user.assigned_subjects) && user.assigned_subjects.some(e => typeof e === 'string' && e.includes(':'));
+      const hasExplicitAssignments = Array.isArray(user.assigned_subjects) && user.assigned_subjects.length > 0;
 
       const studentSubjects = subData.filter(s => {
         const inEnrolled = Array.isArray(s.enrolled_students) && s.enrolled_students.includes(user.user_id);
-        const inAssigned = Array.isArray(user.assigned_subjects) && user.assigned_subjects.some(e => typeof e === 'string' && e.startsWith(s.id + ':'));
+        const inAssigned = Array.isArray(user.assigned_subjects) && user.assigned_subjects.some(e => {
+          if (typeof e !== 'string') return false;
+          return e === s.id || e.startsWith(s.id + ':');
+        });
         
         if (hasExplicitAssignments) {
           return inAssigned || inEnrolled;

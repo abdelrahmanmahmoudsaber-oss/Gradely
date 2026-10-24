@@ -4,6 +4,7 @@ import Login from './pages/Login';
 import { supabase } from './supabaseClient';
 import { cacheManager } from './utils/dataCache';
 import NetworkIndicator from './components/NetworkIndicator';
+import { registerCurrentDevice } from './utils/deviceHelper';
 
 // Code Splitting / Lazy Loading: Isolates Admin bundles and code from Student bundle
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
@@ -64,6 +65,7 @@ export default function App() {
         const profile = await fetchUserProfile(session.user.id);
         if (profile) {
           setUser(profile);
+          registerCurrentDevice(profile);
           // Cache display info in localStorage ONLY for UX (not security).
           localStorage.setItem('gradely_user_display', JSON.stringify({
             name: profile.name,
@@ -85,21 +87,20 @@ export default function App() {
         if (adminSession && storedToken) {
           try {
             const parsed = JSON.parse(adminSession);
-            // Strict defense against client-side role tampering: numeric IDs are strictly students
-            const isStudentId = /^\d{6,8}$/.test(String(parsed?.user_id || '').trim());
-            if (!isStudentId && parsed && (parsed.role === 'admin' || parsed.role === 'super_admin') && parsed.user_id) {
-              const { data: isValid } = await supabase.rpc('verify_student_token_for_user', {
-                p_session_token: storedToken,
-                p_user_id: parsed.user_id
+            if (parsed && (parsed.role === 'admin' || parsed.role === 'super_admin') && parsed.user_id) {
+              // Server-side database verification to prevent client-side role tampering
+              const { data: isAdmin } = await supabase.rpc('verify_is_admin', {
+                p_user_id: String(parsed.user_id),
+                p_session_token: storedToken
               });
-              if (isValid === true) {
+              if (isAdmin === true) {
                 setUser({ ...parsed, session_token: storedToken });
+                registerCurrentDevice(parsed);
                 setAuthLoading(false);
                 return;
+              } else {
+                localStorage.removeItem('gradely_admin_session');
               }
-            } else if (isStudentId) {
-              // Tampered role detected: purge forged admin session immediately
-              localStorage.removeItem('gradely_admin_session');
             }
           } catch (e) {}
         }
@@ -114,6 +115,7 @@ export default function App() {
               });
               if (isValid === true) {
                 setUser({ ...parsed, session_token: storedToken });
+                registerCurrentDevice(parsed);
                 setAuthLoading(false);
                 return;
               }
@@ -123,6 +125,7 @@ export default function App() {
                 });
                 if (!validationErr) {
                   setUser({ ...parsed, session_token: storedToken });
+                  registerCurrentDevice(parsed);
                   setAuthLoading(false);
                   return;
                 }
@@ -149,6 +152,7 @@ export default function App() {
         const profile = await fetchUserProfile(session.user.id);
         if (profile) {
           setUser(profile);
+          registerCurrentDevice(profile);
           localStorage.setItem('gradely_user_display', JSON.stringify({
             name: profile.name,
             role: profile.role,
@@ -170,6 +174,7 @@ export default function App() {
   const handleLogin = (userData) => {
     // Called from Login.jsx after successful verification
     setUser(userData);
+    registerCurrentDevice(userData);
     localStorage.setItem('gradely_user_display', JSON.stringify({
       name: userData.name,
       role: userData.role,

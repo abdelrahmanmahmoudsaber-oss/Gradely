@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { Smartphone, Laptop, ShieldCheck, LogOut, CheckCircle2, Clock, X, RefreshCw, AlertCircle } from 'lucide-react';
+import { getDeviceSessionToken, getDeviceDetails } from '../utils/deviceHelper';
 
 export default function ActiveSessionsModal({ user, onLogout, onClose }) {
   const [sessions, setSessions] = useState([]);
@@ -9,45 +10,7 @@ export default function ActiveSessionsModal({ user, onLogout, onClose }) {
   const [revokingAll, setRevokingAll] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
 
-  // Persistent unique token per browser/device so every physical device gets its own row
-  const getDeviceSessionToken = () => {
-    let tok = localStorage.getItem('gradely_device_session_token');
-    if (!tok) {
-      tok = 'dev_' + Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10) + '_' + Date.now();
-      localStorage.setItem('gradely_device_session_token', tok);
-    }
-    return tok;
-  };
-
   const currentDeviceToken = getDeviceSessionToken();
-
-  // Helper to detect current device details cleanly
-  const getDeviceDetails = () => {
-    const ua = navigator.userAgent || '';
-    let name = 'متصفح ويب';
-    let type = 'desktop';
-
-    if (/android/i.test(ua)) {
-      name = 'هاتف ذكي (Android)';
-      type = 'mobile';
-    } else if (/iphone|ipad|ipod/i.test(ua)) {
-      name = 'هاتف ذكي (iPhone / iOS)';
-      type = 'mobile';
-    } else if (/windows/i.test(ua)) {
-      name = 'كمبيوتر شخصي (Windows)';
-      type = 'desktop';
-    } else if (/macintosh|mac os x/i.test(ua)) {
-      name = 'جهاز ماك (macOS)';
-      type = 'desktop';
-    }
-
-    if (/edg/i.test(ua)) name += ' · Edge';
-    else if (/chrome/i.test(ua)) name += ' · Chrome';
-    else if (/firefox/i.test(ua)) name += ' · Firefox';
-    else if (/safari/i.test(ua)) name += ' · Safari';
-
-    return { name, type };
-  };
 
   const loadSessions = async () => {
     setLoading(true);

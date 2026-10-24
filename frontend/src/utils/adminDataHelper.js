@@ -1,8 +1,6 @@
 import { supabase } from '../supabaseClient';
 import { cacheManager } from './dataCache';
 
-const BACKUP_SECRET = 'gradely_backup_cron_sec_7f9a2b8e4c1d6e5a';
-
 /**
  * Centrally retrieves core platform data (all users/students and all subjects).
  * First attempts direct PostgREST queries.
@@ -29,9 +27,7 @@ export async function getAdminBaseData(currentUser = null, forceRefresh = false)
     // High-reliability fallback for TAs where direct table SELECT might be restricted
     if (!allUsersList || allUsersList.length === 0 || !allSubList || allSubList.length === 0) {
       try {
-        const { data: bData } = await supabase.rpc('get_system_backup_data', {
-          p_backup_secret: BACKUP_SECRET
-        });
+        const { data: bData } = await supabase.rpc('get_system_backup_data');
         if (bData) {
           if ((!allUsersList || allUsersList.length === 0) && Array.isArray(bData.users) && bData.users.length > 0) {
             allUsersList = bData.users;
