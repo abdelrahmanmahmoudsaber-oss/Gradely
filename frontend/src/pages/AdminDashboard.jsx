@@ -111,13 +111,13 @@ export default function AdminDashboard({ user, onLogout }) {
   };
 
   const allNavItems = [
-    { id: 'overview', label: 'نظرة عامة', icon: <LayoutDashboard size={20} />, superOnly: false },
-    { id: 'subjects', label: 'إدارة المواد', icon: <BookOpen size={20} />, superOnly: true },
-    { id: 'students', label: 'إدارة المستخدمين', icon: <Users size={20} />, superOnly: true },
-    { id: 'attendance', label: 'سجل الغياب', icon: <CheckSquare size={20} />, superOnly: false },
-    { id: 'grades', label: 'الدرجات التفصيلية', icon: <FileText size={20} />, superOnly: false },
-    { id: 'report', label: 'تقرير طالب شامل', icon: <Printer size={20} />, superOnly: false },
-    { id: 'audit', label: 'سجل الرقابة والتغييرات', icon: <History size={20} />, superOnly: true },
+    { id: 'overview', label: 'نظرة عامة', icon: <LayoutDashboard size={21} strokeWidth={2.4} />, superOnly: false },
+    { id: 'subjects', label: 'إدارة المواد', icon: <BookOpen size={21} strokeWidth={2.4} />, superOnly: true },
+    { id: 'students', label: 'إدارة المستخدمين', icon: <Users size={21} strokeWidth={2.4} />, superOnly: true },
+    { id: 'attendance', label: 'سجل الغياب', icon: <CheckSquare size={21} strokeWidth={2.4} />, superOnly: false },
+    { id: 'grades', label: 'الدرجات التفصيلية', icon: <FileText size={21} strokeWidth={2.4} />, superOnly: false },
+    { id: 'report', label: 'تقرير طالب شامل', icon: <Printer size={21} strokeWidth={2.4} />, superOnly: false },
+    { id: 'audit', label: 'سجل الرقابة والتغييرات', icon: <History size={21} strokeWidth={2.4} />, superOnly: true },
   ];
 
   const navItems = allNavItems.filter(item => isSuperAdmin || !item.superOnly);
@@ -190,7 +190,7 @@ export default function AdminDashboard({ user, onLogout }) {
           </div>
         </div>
 
-        <nav style={{padding: '0 0.8rem', display: 'flex', flexDirection: 'column', gap: '0.4rem', flex: 1, overflowY: 'auto'}}>
+        <nav style={{padding: '0 0.8rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, overflowY: 'auto'}}>
           {navItems.map(item => {
             const isActive = activeTab === item.id;
             return (
@@ -198,79 +198,84 @@ export default function AdminDashboard({ user, onLogout }) {
                 key={item.id}
                 onClick={() => { setActiveTab(item.id); setMobileMenuOpen(false); }}
                 style={{
-                  background: isActive ? 'rgba(79, 70, 229, 0.2)' : 'transparent',
-                  color: isActive ? '#ffffff' : '#cbd5e1',
+                  background: isActive ? 'linear-gradient(90deg, rgba(99, 102, 241, 0.25) 0%, rgba(79, 70, 229, 0.12) 100%)' : 'transparent',
+                  color: isActive ? '#ffffff' : '#f8fafc',
                   border: 'none',
-                  borderRight: isActive ? '4px solid var(--primary-hover)' : '4px solid transparent',
-                  borderRadius: '0 8px 8px 0',
-                  padding: '12px 14px',
+                  borderRight: isActive ? '4px solid #6366f1' : '4px solid transparent',
+                  borderRadius: '0 10px 10px 0',
+                  padding: '12px 16px',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '12px',
-                  fontSize: '1rem',
-                  fontWeight: 700,
+                  fontSize: '1.05rem',
+                  fontWeight: 800,
                   fontFamily: "'Cairo', sans-serif",
                   cursor: 'pointer',
                   textAlign: 'right',
                   transition: 'all 0.15s ease',
-                  width: '100%'
+                  width: '100%',
+                  boxShadow: isActive ? 'inset 0 0 15px rgba(99, 102, 241, 0.15)' : 'none'
                 }}
               >
-                <span style={{color: isActive ? 'var(--primary-hover)' : '#94a3b8', display: 'flex', alignItems: 'center'}}>
+                <span style={{color: isActive ? '#818cf8' : '#94a3b8', display: 'flex', alignItems: 'center'}}>
                   {item.icon}
                 </span>
-                <span>{item.label}</span>
+                <span style={{fontWeight: 800, letterSpacing: '0.2px'}}>{item.label}</span>
               </button>
             );
           })}
         </nav>
 
         <div style={{padding: '1.2rem', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '8px'}}>
-          <button 
-            onClick={() => { setShowPasswordModal(true); setPasswordMsg({type:'',text:''}); setMobileMenuOpen(false); }}
-            style={{
-              width: '100%',
-              background: 'rgba(99, 102, 241, 0.08)',
-              border: '1px solid rgba(99, 102, 241, 0.25)',
-              color: '#c7d2fe',
-              padding: '10px 12px',
-              borderRadius: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              fontSize: '0.9rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              transition: 'all 0.2s'
-            }}
-          >
-            <KeyRound size={16} />
-            تغيير كلمة المرور
-          </button>
+          <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px'}}>
+            <button 
+              onClick={() => { setShowPasswordModal(true); setPasswordMsg({type:'',text:''}); setMobileMenuOpen(false); }}
+              title="تغيير كلمة المرور"
+              style={{
+                background: 'rgba(99, 102, 241, 0.08)',
+                border: '1px solid rgba(99, 102, 241, 0.25)',
+                color: '#c7d2fe',
+                padding: '10px 6px',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                fontSize: '0.82rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              <KeyRound size={15} />
+              كلمة المرور
+            </button>
 
-          <button 
-            onClick={() => { setShowSessionsModal(true); setMobileMenuOpen(false); }}
-            style={{
-              width: '100%',
-              background: 'rgba(99, 102, 241, 0.08)',
-              border: '1px solid rgba(99, 102, 241, 0.25)',
-              color: '#c7d2fe',
-              padding: '10px 12px',
-              borderRadius: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              fontSize: '0.9rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              transition: 'all 0.2s'
-            }}
-          >
-            <Smartphone size={16} />
-            الأجهزة المتصلة
-          </button>
+            <button 
+              onClick={() => { setShowSessionsModal(true); setMobileMenuOpen(false); }}
+              title="الأجهزة المتصلة بالحساب"
+              style={{
+                background: 'rgba(99, 102, 241, 0.08)',
+                border: '1px solid rgba(99, 102, 241, 0.25)',
+                color: '#c7d2fe',
+                padding: '10px 6px',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                fontSize: '0.82rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              <Smartphone size={15} />
+              الأجهزة المتصلة
+            </button>
+          </div>
 
           <button 
             onClick={onLogout}
@@ -286,7 +291,7 @@ export default function AdminDashboard({ user, onLogout }) {
               justifyContent: 'center',
               gap: '8px',
               fontSize: '0.95rem',
-              fontWeight: 700,
+              fontWeight: 800,
               cursor: 'pointer',
               transition: 'all 0.2s'
             }}
@@ -335,50 +340,7 @@ export default function AdminDashboard({ user, onLogout }) {
             <h1 style={{margin: 0, fontSize: 'clamp(1.05rem, 2.5vw, 1.4rem)', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{getPageTitle()}</h1>
           </div>
 
-          <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
-            <button 
-              onClick={() => { setShowPasswordModal(true); setPasswordMsg({type:'',text:''}); }}
-              title="تغيير كلمة المرور"
-              style={{
-                background: 'rgba(99, 102, 241, 0.12)',
-                border: '1px solid rgba(99, 102, 241, 0.3)',
-                color: '#a5b4fc',
-                padding: '7px 11px',
-                borderRadius: '8px',
-                fontSize: '0.85rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                transition: 'all 0.2s'
-              }}
-            >
-              <KeyRound size={16} /> <span className="hide-on-mobile">تغيير كلمة المرور</span>
-            </button>
-
-            <button
-              onClick={() => setShowSessionsModal(true)}
-              title="الأجهزة المتصلة بالحساب"
-              style={{
-                background: 'rgba(99, 102, 241, 0.12)',
-                color: '#a5b4fc',
-                border: '1px solid rgba(99, 102, 241, 0.3)',
-                padding: '7px 11px',
-                borderRadius: '8px',
-                fontSize: '0.85rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                transition: 'all 0.2s'
-              }}
-            >
-              <Smartphone size={16} /> <span className="hide-on-mobile">الأجهزة المتصلة</span>
-            </button>
-          </div>
-        </header>
+          </header>
 
         {/* Network Offline Alert Banner */}
         {!isOnline && (

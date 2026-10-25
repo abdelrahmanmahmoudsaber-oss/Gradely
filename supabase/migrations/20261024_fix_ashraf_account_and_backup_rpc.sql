@@ -1,18 +1,18 @@
 -- ==============================================================================
 -- Migration: 20261024_fix_ashraf_account_and_backup_rpc.sql
--- 1. Exact 20 Sections & 6 Subjects Configuration for Ashraf Hussein:
+-- 1. Exact 19 Sections & 6 Subjects Configuration for Ashraf Hussein (19 Hours):
 --    - Mathematics - 0: S1, S2, S3 (3 sections)
 --    - Computer Networks Technology: S1, S2, S3, S4 (4 sections)
 --    - Object Oriented Programming: S1, S2, S3, S4 (4 sections)
 --    - Advanced Computer Networks: S1, S2, S3, S4 (4 sections)
---    - Computer Graphics: S1, S2, S3, S4 (4 sections)
+--    - Computer Graphics: S1, S2, S3 (3 sections only - NO S4)
 --    - Mathematics 3: S1 only (1 section)
---    TOTAL: 3 + 4 + 4 + 4 + 4 + 1 = 20 sections (20 hours) across 6 subjects.
+--    TOTAL: 3 + 4 + 4 + 4 + 3 + 1 = 19 sections (19 hours) across 6 subjects.
 -- 2. Exact Mathematics 3 Section Distribution:
 --    - S1: Ashraf Hussein
 --    - S2, S3, S4: Abdelrahman Mahmoud
 -- 3. Update subjects metadata and clean up all section TA tags.
--- 4. Update get_system_backup_data RPC to securely authorize session tokens.
+-- 4. Update get_system_backup_data RPC to securely authorize session tokens and cron secret.
 -- ==============================================================================
 
 -- ------------------------------------------------------------------------------
@@ -40,7 +40,6 @@ SET name = 'Ashraf Hussein',
       "4f1ec16d-476c-471a-b36b-f6881ee5011e:S1",
       "4f1ec16d-476c-471a-b36b-f6881ee5011e:S2",
       "4f1ec16d-476c-471a-b36b-f6881ee5011e:S3",
-      "4f1ec16d-476c-471a-b36b-f6881ee5011e:S4",
       "a96b19a2-d1f4-4a9c-800d-edaedd75449b:S1"
     ]'::jsonb
 WHERE LOWER(user_id) = 'ahamdy2004';
@@ -92,7 +91,7 @@ WHERE id IN (
   '4f1ec16d-476c-471a-b36b-f6881ee5011e'::uuid  -- CG
 );
 
--- 3b. Update Computer Graphics (4 sections: S1, S2, S3, S4 all Ashraf Hussein)
+-- 3b. Update Computer Graphics (3 sections: S1, S2, S3 all Ashraf Hussein - NO S4)
 UPDATE public.subjects
 SET excluded_students = (
   (
@@ -101,14 +100,23 @@ SET excluded_students = (
     WHERE elem::text NOT LIKE '%CONFIG_SECTION_TAS%'
       AND elem::text NOT LIKE '%TA_S%'
   ) || '[
-    "CONFIG_SECTION_TAS:{\"S1\":\"Ashraf Hussein\",\"S2\":\"Ashraf Hussein\",\"S3\":\"Ashraf Hussein\",\"S4\":\"Ashraf Hussein\"}",
+    "CONFIG_SECTION_TAS:{\"S1\":\"Ashraf Hussein\",\"S2\":\"Ashraf Hussein\",\"S3\":\"Ashraf Hussein\"}",
     "TA_S1:Ashraf Hussein",
     "TA_S2:Ashraf Hussein",
-    "TA_S3:Ashraf Hussein",
-    "TA_S4:Ashraf Hussein"
+    "TA_S3:Ashraf Hussein"
   ]'::jsonb
 )
 WHERE id = '4f1ec16d-476c-471a-b36b-f6881ee5011e'::uuid;
+
+-- Clean up any lingering S4 assignments for Computer Graphics from any user
+UPDATE public.users
+SET assigned_subjects = (
+  SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
+  FROM jsonb_array_elements(assigned_subjects) elem
+  WHERE elem::text NOT LIKE '%4f1ec16d-476c-471a-b36b-f6881ee5011e:S4%'
+)
+WHERE assigned_subjects IS NOT NULL 
+  AND assigned_subjects::text LIKE '%4f1ec16d-476c-471a-b36b-f6881ee5011e:S4%';
 
 -- 3c. Update Mathematics 3 (S1: Ashraf Hussein | S2, S3, S4: Abdelrahman Mahmoud)
 UPDATE public.subjects
