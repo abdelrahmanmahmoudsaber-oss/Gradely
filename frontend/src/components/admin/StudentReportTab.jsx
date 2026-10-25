@@ -406,13 +406,14 @@ export default function StudentReportTab({ user }) {
                               else if (record.status === 'excused') { stLabel = 'عذر'; stColor = '#3b82f6'; stBg = 'rgba(59, 130, 246, 0.1)'; stBorder = 'rgba(59, 130, 246, 0.25)'; }
                             }
 
+                            const isRecorded = record && record.status && record.status !== 'unrecorded';
                             const stuSec = getStudentSubSection(selectedStudent, sub.id);
                             const wDate = getSubjectWeekDate(sub, w, stuSec, record);
                             return (
                               <div key={w} style={{background: stBg, border: '1px solid ' + stBorder, borderRadius: '6px', padding: '6px 4px', textAlign: 'center'}}>
                                 <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>أسبوع {w}</div>
                                 <div style={{fontWeight: 'bold', color: stColor, fontSize: '0.8rem', marginTop: '2px'}}>{stLabel}</div>
-                                {wDate && (
+                                {isRecorded && wDate && (
                                   <div style={{
                                     fontSize:'0.72rem',
                                     color:'#60a5fa',

@@ -337,6 +337,24 @@ export default function AttendanceTab({ user }) {
     };
   }, [getPendingQueue]);
 
+  // Auto-flip date to today day by day whenever current week is active
+  useEffect(() => {
+    const syncTodayDayByDay = () => {
+      const isCurr = Number(week) === Number(getAcademicWeekFromDate());
+      const currentToday = getTodayDateStr();
+      if (isCurr && sessionDate !== currentToday) {
+        setSessionDate(currentToday);
+      }
+    };
+
+    window.addEventListener('focus', syncTodayDayByDay);
+    const timer = setInterval(syncTodayDayByDay, 30000); // Check every 30 seconds
+    return () => {
+      window.removeEventListener('focus', syncTodayDayByDay);
+      clearInterval(timer);
+    };
+  }, [week, sessionDate]);
+
   useEffect(() => {
     if (selectedSubject) {
       fetchAttendance();
@@ -352,11 +370,20 @@ export default function AttendanceTab({ user }) {
     setOfflineNotice('');
 
     // 1. Check in-memory cache
+    const isCurrWeek = Number(week) === Number(getAcademicWeekFromDate());
+    const todayStr = getTodayDateStr();
+
     const cached = cacheManager.get(cacheKey);
     if (cached) {
       setAttendanceRecords(cached.records || {});
       setExcuseReasons(cached.excuses || {});
-      if (cached.date) setSessionDate(cached.date);
+      if (isCurrWeek) {
+        setSessionDate(todayStr);
+      } else if (cached.date) {
+        setSessionDate(cached.date);
+      } else {
+        setSessionDate(getWeekDefaultDate(week));
+      }
       return;
     }
 
@@ -373,7 +400,13 @@ export default function AttendanceTab({ user }) {
       if (localSaved && localSaved.records) {
         setAttendanceRecords(localSaved.records);
         setExcuseReasons(localSaved.excuses || {});
-        if (localSaved.date) setSessionDate(localSaved.date);
+        if (isCurrWeek) {
+          setSessionDate(todayStr);
+        } else if (localSaved.date) {
+          setSessionDate(localSaved.date);
+        } else {
+          setSessionDate(getWeekDefaultDate(week));
+        }
         setOfflineNotice('⚠️ تم تحميل هذا الكشف من النسخة المحفوظة محلياً على هذا الجهاز (وضع عدم الاتصال).');
       } else {
         setAttendanceRecords({});
@@ -435,14 +468,11 @@ export default function AttendanceTab({ user }) {
         }
       }
 
-      // ONLY if NO previous date was found anywhere, initialize to today (for current week) or week default
-      if (!foundDate) {
-        const currWeek = getAcademicWeekFromDate();
-        if (week === currWeek) {
-          foundDate = getTodayDateStr();
-        } else {
-          foundDate = getWeekDefaultDate(week);
-        }
+      // For the current academic week, ALWAYS flip to today's date automatically day by day
+      if (isCurrWeek) {
+        foundDate = todayStr;
+      } else if (!foundDate) {
+        foundDate = getWeekDefaultDate(week);
       }
 
       if (fetchedRows && fetchedRows.length > 0) {
@@ -453,7 +483,7 @@ export default function AttendanceTab({ user }) {
 
       setAttendanceRecords(recs);
       setExcuseReasons(excuses);
-      if (foundDate) setSessionDate(foundDate);
+      setSessionDate(foundDate);
       setOfflineNotice('');
       cacheManager.set(cacheKey, { records: recs, excuses, date: foundDate });
 
@@ -1506,7 +1536,15 @@ export default function AttendanceTab({ user }) {
         {currentSub && (
           <div style={{flex:1.5,minWidth:'180px'}}>
             <label style={{display:'block',marginBottom:'8px',fontSize:'0.9rem',fontWeight:'bold'}}>4. رقم الأسبوع:</label>
-            <select className="input-field" value={week} onChange={e => setWeek(Number(e.target.value))}>
+            <select className="input-field" value={week} onChange={e => {
+              const newW = Number(e.target.value);
+              setWeek(newW);
+              if (newW === getAcademicWeekFromDate()) {
+                setSessionDate(getTodayDateStr());
+              } else {
+                setSessionDate(getWeekDefaultDate(newW));
+              }
+            }}>
               {Array.from({length:currentSub.total_weeks || 12},(_,i)=>i+1).map(w => {
                 const isCurrent = w === getAcademicWeekFromDate();
                 const startStr = formatDisplayDate(getWeekDefaultDate(w));

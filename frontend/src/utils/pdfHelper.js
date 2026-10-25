@@ -185,7 +185,8 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
         let statusClass = 'unrecorded';
         const stuSec = getStudentSubSection(student, sub.id);
         const wDate = getSubjectWeekDate(sub, w, stuSec, record);
-        let dateHint = wDate ? `<div class="w-date" style="color:#2563eb;font-weight:bold;font-size:0.65rem;">${escapeHtml(formatDisplayDate(wDate))}</div>` : '';
+        const isRecorded = record && record.status && normalizeStatus(record.status) !== 'unrecorded';
+        let dateHint = (wDate && isRecorded) ? `<div class="w-date" style="color:#2563eb;font-weight:bold;font-size:0.65rem;">${escapeHtml(formatDisplayDate(wDate))}</div>` : '';
         
         if (record) {
           const norm = normalizeStatus(record.status);
