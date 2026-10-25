@@ -254,40 +254,38 @@ export default function SplashScreen({ statusText = 'جاري التحقق من 
           <div style={{ flex: 1, height: '1px', background: 'rgba(255, 255, 255, 0.08)' }} />
         </div>
 
-        {/* Frosted Glass Pill Container - STRICT LTR & No Overflow */}
+        {/* Frosted Glass Pill Container - Stacked Layout for full names */}
         <div dir="ltr" style={{
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          flexDirection: 'column',
+          alignItems: 'stretch',
           width: '100%',
-          padding: '8px 12px',
+          padding: '10px 14px',
           background: 'rgba(15, 23, 42, 0.7)',
           border: '1.2px solid rgba(56, 189, 248, 0.35)',
           boxShadow: '0 0 25px rgba(56, 189, 248, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.12)',
-          borderRadius: '26px',
+          borderRadius: '20px',
           backdropFilter: 'blur(16px)',
           boxSizing: 'border-box',
-          gap: '6px'
+          gap: '7px'
         }}>
           {/* Badge 1: MT - Eng Mostafa Tag */}
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '7px',
-            flex: '1 1 0',
-            minWidth: 0,
-            justifyContent: 'flex-start'
+            gap: '9px',
+            width: '100%'
           }}>
             <div style={{
-              width: '26px',
-              height: '26px',
+              width: '28px',
+              height: '28px',
               borderRadius: '50%',
               background: 'linear-gradient(135deg, #0d9488, #14b8a6)',
               border: '1.5px solid #5eead4',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '0.7rem',
+              fontSize: '0.68rem',
               fontWeight: 900,
               color: '#ffffff',
               boxShadow: '0 0 8px rgba(20, 184, 166, 0.45)',
@@ -296,12 +294,10 @@ export default function SplashScreen({ statusText = 'جاري التحقق من 
               MT
             </div>
             <span style={{
-              fontSize: 'clamp(0.72rem, 2.3vw, 0.8rem)',
+              fontSize: '0.78rem',
               fontWeight: 700,
               color: '#f8fafc',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis'
+              whiteSpace: 'nowrap'
             }}>
               Eng Mostafa Tag
             </span>
@@ -309,31 +305,28 @@ export default function SplashScreen({ statusText = 'جاري التحقق من 
 
           {/* Thin Glass Divider */}
           <div style={{
-            width: '1px',
-            height: '16px',
-            background: 'rgba(255, 255, 255, 0.15)',
-            flexShrink: 0
+            width: '100%',
+            height: '1px',
+            background: 'rgba(255, 255, 255, 0.1)'
           }} />
 
           {/* Badge 2: AM - Eng Abdelrahman Mahmoud */}
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '7px',
-            flex: '1.15 1 0',
-            minWidth: 0,
-            justifyContent: 'flex-start'
+            gap: '9px',
+            width: '100%'
           }}>
             <div style={{
-              width: '26px',
-              height: '26px',
+              width: '28px',
+              height: '28px',
               borderRadius: '50%',
               background: 'linear-gradient(135deg, #1e40af, #3b82f6)',
               border: '1.5px solid #60a5fa',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '0.7rem',
+              fontSize: '0.68rem',
               fontWeight: 900,
               color: '#ffffff',
               boxShadow: '0 0 8px rgba(59, 130, 246, 0.45)',
@@ -342,12 +335,10 @@ export default function SplashScreen({ statusText = 'جاري التحقق من 
               AM
             </div>
             <span style={{
-              fontSize: 'clamp(0.72rem, 2.3vw, 0.8rem)',
+              fontSize: '0.78rem',
               fontWeight: 700,
               color: '#f8fafc',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis'
+              whiteSpace: 'nowrap'
             }}>
               Eng Abdelrahman Mahmoud
             </span>

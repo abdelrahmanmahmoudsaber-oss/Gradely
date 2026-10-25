@@ -177,7 +177,11 @@ BEGIN
   ) THEN
     v_is_authorized := true;
   ELSIF p_session_token IS NOT NULL AND p_session_token <> '' THEN
-    IF EXISTS (
+    -- Check if it's the automated backup cron secret (GitHub Actions zero-login backup)
+    IF p_session_token = 'gradely_backup_cron_sec_7f9a2b8e4c1d6e5a' THEN
+      v_is_authorized := true;
+    -- Otherwise check if it's a valid admin session token
+    ELSIF EXISTS (
       SELECT 1
       FROM public.student_sessions ss
       JOIN public.users u ON LOWER(u.user_id) = LOWER(ss.user_id)

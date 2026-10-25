@@ -34,6 +34,7 @@ const DEFAULT_EMAIL = 'abdo2171999m@gmail.com';
 const DEFAULT_WEBHOOK = 'https://script.google.com/macros/s/AKfycbykd7LVJ8p0dqrHqW9UUJ04i40qFwRTa0b98YPA1NgXzJ3U0EECa9i-EbiVa70pvHzbiQ/exec';
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://bbdyexsaqnlremprfmph.supabase.co';
+// Use Service Role Key if available (bypasses RLS for full data access), fallback to anon key
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || 'sb_publishable_7lextLm1cEOuRlz4XMiV9w_F01aZaho';
 const BACKUP_SECRET = process.env.BACKUP_CRON_SECRET || '';
 const BACKUP_EMAIL = process.env.BACKUP_EMAIL || DEFAULT_EMAIL;
@@ -72,30 +73,42 @@ function getStatusLabel(norm) {
 async function fetchBackupData() {
   console.log('[1/4] Fetching full database snapshot from Supabase...');
 
+  // Determine if we're running with service role key (bypasses RLS completely)
+  const isServiceRole = SUPABASE_KEY.includes('service_role') || 
+                        (process.env.SUPABASE_SERVICE_ROLE_KEY && SUPABASE_KEY === process.env.SUPABASE_SERVICE_ROLE_KEY);
+
   // Try the secure get_system_backup_data RPC first
+  // The RPC accepts p_session_token; for cron jobs we pass the cron secret as the token.
+  // If a SUPABASE_SERVICE_ROLE_KEY is set, the RPC auth check will pass via is_admin() in service context.
   try {
     const { data: rpcData, error: rpcErr } = await supabase.rpc('get_system_backup_data', {
-      p_backup_secret: BACKUP_SECRET
+      p_session_token: BACKUP_SECRET || null
     });
 
     if (rpcErr) {
-      console.error(`[RPC ERROR] get_system_backup_data returned error:`, rpcErr);
+      console.warn(`[RPC WARN] get_system_backup_data returned error: code=${rpcErr.code} msg=${rpcErr.message}`);
     } else if (rpcData && rpcData.users && rpcData.subjects) {
-      console.log(`[DATA] Fetched via Cloud RPC: ${rpcData.users.length} students, ${rpcData.subjects.length} subjects, ${rpcData.attendance?.length || 0} attendance records, ${rpcData.grades?.length || 0} grades.`);
+      console.log(`[DATA] Fetched via Cloud RPC: ${rpcData.users.length} users, ${rpcData.subjects.length} subjects, ${rpcData.attendance?.length || 0} attendance records, ${rpcData.grades?.length || 0} grades.`);
       return rpcData;
     }
   } catch (e) {
-    console.error('[RPC EXCEPTION] Failed to call get_system_backup_data:', e.message);
+    console.warn('[RPC EXCEPTION] Failed to call get_system_backup_data:', e.message);
   }
 
-  // Fallback: Paginated table queries
+  // Fallback: Paginated direct table queries
+  // This works correctly when SUPABASE_SERVICE_ROLE_KEY is used (bypasses RLS)
+  // or when tables have permissive anon SELECT grants
   console.log('[INFO] Attempting direct table queries fallback...');
   async function fetchAll(table, cols) {
     const rows = [];
     let from = 0;
     while (true) {
       const { data, error } = await supabase.from(table).select(cols).range(from, from + 999);
-      if (error || !data || data.length === 0) break;
+      if (error) {
+        console.warn(`[WARN] Table query ${table} error: ${error.message} (code: ${error.code})`);
+        break;
+      }
+      if (!data || data.length === 0) break;
       rows.push(...data);
       if (data.length < 1000) break;
       from += 1000;
@@ -110,8 +123,15 @@ async function fetchBackupData() {
     fetchAll('grades', 'student_id, subject_id, quiz_1, quiz_2, project, attendance_score, final_grade')
   ]);
 
-  if ((!users || users.length === 0) && (!subjects || subjects.length === 0)) {
-    throw new Error('Database fetch returned 0 records. Ensure public.get_system_backup_data RPC migration is executed in Supabase.');
+  const hasData = (users && users.length > 0) || (subjects && subjects.length > 0);
+  if (!hasData) {
+    throw new Error(
+      'Database fetch returned 0 records.\n' +
+      'Ensure one of the following:\n' +
+      '  1. Add SUPABASE_SERVICE_ROLE_KEY to GitHub Secrets (recommended)\n' +
+      '  2. Run the latest SQL migration in Supabase SQL Editor to update get_system_backup_data(p_session_token text)\n' +
+      '  3. Verify BACKUP_CRON_SECRET matches what is registered in student_sessions table'
+    );
   }
 
   return { users, subjects, attendance, grades };
