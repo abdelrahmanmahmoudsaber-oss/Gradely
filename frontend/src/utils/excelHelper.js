@@ -286,19 +286,25 @@ export const getStudentLectureGroup = (student, subId = null) => {
     if (subGroup) return subGroup.split(':')[2].toUpperCase();
   }
 
-  // 2. Resolve section for this specific subject first
+  // 2. Explicit global group tag on student: 'GROUP:A' or 'GROUP:B'
+  if (Array.isArray(student.assigned_subjects)) {
+    const globalGroup = student.assigned_subjects.find(e => typeof e === 'string' && (e === 'GROUP:A' || e === 'GROUP:B' || e.startsWith('GROUP:')));
+    if (globalGroup) return globalGroup.split(':')[1].toUpperCase();
+  }
+
+  // 3. Resolve section for this specific subject first
   let sec = null;
   if (subId && Array.isArray(student.assigned_subjects)) {
     const match = student.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(subId + ':') && !e.includes(':GROUP:'));
     if (match) sec = match.split(':')[1];
   }
 
-  // 3. Fallback to student base section if not assigned per-subject
+  // 4. Fallback to student base section if not assigned per-subject
   if (!sec) {
     sec = student.section || 'S1';
   }
 
-  // 4. Strict Binary Mapping based on section number:
+  // 5. Strict Binary Mapping based on section number:
   // Sections 1 & 2 -> ALWAYS Group A
   // Sections 3 & 4 -> ALWAYS Group B
   const cleanSec = sec.toString().trim().toUpperCase().replace(/\s+/g, '');

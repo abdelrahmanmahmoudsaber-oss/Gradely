@@ -579,10 +579,7 @@ export default function AttendanceTab({ user }) {
       if (attendanceType === 'lecture') {
         if (selectedGroup === 'all') return true;
         const grp = getStudentLectureGroup(stu, selectedSubject);
-        if (grp === selectedGroup) return true;
-        // Also keep any student from another group if they were recorded as attending (present/late/excused) in this session
-        const st = attendanceRecords[stu.user_id];
-        return st === 'present' || st === 'late' || st === 'excused';
+        return grp === selectedGroup;
       } else {
         if (selectedSection === 'all') return true;
         return getStudentSubSection(stu, selectedSubject) === normalizeSection(selectedSection);
