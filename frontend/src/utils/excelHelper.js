@@ -391,7 +391,96 @@ export async function exportAttendanceTemplateExcel(students, subjectName, total
 }
 
 /**
- * Parses attendance records from an uploaded Excel file (supports Section and Lecture columns & Group).
+ * Normalizes subject names for fuzzy comparison and auto-matching.
+ */
+export const normalizeSubjectNameForMatch = (name) => {
+  if (!name) return '';
+  return String(name)
+    .toLowerCase()
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/[-_–—/\\(),.:;]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+/**
+ * Smart matcher: matches an Excel sheet name to a platform Subject object.
+ * Supports exact names, course codes, standard abbreviations (OOP, CG, CNT, DS, DB...),
+ * and localized variations (e.g. 'Math 0' <-> 'Mathematics - 0', 'Graphics' <-> 'Computer Graphics').
+ */
+export const matchSheetToSubject = (sheetName, subjects = []) => {
+  if (!sheetName || !Array.isArray(subjects) || subjects.length === 0) return null;
+  const rawSheet = String(sheetName).trim();
+  const cleanSheet = normalizeSubjectNameForMatch(rawSheet);
+  const compactSheet = cleanSheet.replace(/\s+/g, '');
+
+  // 1. Direct exact match (name or code)
+  for (const sub of subjects) {
+    if (!sub) continue;
+    const subName = String(sub.name || '').trim();
+    const subCode = String(sub.code || '').trim();
+    if (subName.toLowerCase() === rawSheet.toLowerCase()) return sub;
+    if (subCode && subCode.toLowerCase() === rawSheet.toLowerCase()) return sub;
+  }
+
+  // 2. Normalized match (without symbols/accents)
+  for (const sub of subjects) {
+    if (!sub) continue;
+    const cleanSub = normalizeSubjectNameForMatch(sub.name);
+    const compactSub = cleanSub.replace(/\s+/g, '');
+    if (cleanSub === cleanSheet || compactSub === compactSheet) return sub;
+  }
+
+  // 3. Known subject aliases & abbreviations
+  const aliases = [
+    { keys: ['math 0', 'math0', 'mathematics 0', 'رياضة 0'], subMatches: ['mathematics - 0', 'mathematics 0', 'math 0'] },
+    { keys: ['math 3', 'math3', 'mathematics 3', 'رياضة 3'], subMatches: ['mathematics 3', 'math 3'] },
+    { keys: ['math 1', 'math1', 'mathematics 1', 'رياضة 1'], subMatches: ['mathematics 1', 'math 1'] },
+    { keys: ['math 2', 'math2', 'mathematics 2', 'رياضة 2'], subMatches: ['mathematics 2', 'math 2'] },
+    { keys: ['cg', 'computer graphics', 'graphics', 'رسم بالحاسب', 'جرافيكس'], subMatches: ['computer graphics', 'graphics'] },
+    { keys: ['oop', 'object oriented', 'برمجة كائنية'], subMatches: ['object oriented programming', 'oop'] },
+    { keys: ['cnt', 'computer networks', 'networks', 'شبكات'], subMatches: ['computer networks', 'networks', 'cnt'] },
+    { keys: ['db', 'database', 'قواعد بيانات'], subMatches: ['database systems', 'database', 'db'] },
+    { keys: ['ds', 'data structures', 'هياكل بيانات'], subMatches: ['data structures', 'ds'] },
+    { keys: ['os', 'operating systems', 'نظم تشغيل'], subMatches: ['operating systems', 'os'] },
+    { keys: ['ai', 'artificial intelligence', 'ذكاء اصطناعي'], subMatches: ['artificial intelligence', 'ai'] },
+    { keys: ['logic', 'digital logic', 'لوجيك', 'منطق رقمي'], subMatches: ['digital logic design', 'logic'] },
+  ];
+
+  for (const alias of aliases) {
+    const sheetMatchesAlias = alias.keys.some(k => cleanSheet.includes(k) || compactSheet.includes(k.replace(/\s+/g, '')));
+    if (sheetMatchesAlias) {
+      const foundSub = subjects.find(s => {
+        const cleanS = normalizeSubjectNameForMatch(s.name);
+        return alias.subMatches.some(m => cleanS.includes(m));
+      });
+      if (foundSub) return foundSub;
+    }
+  }
+
+  // 4. Substring & digit-aligned inclusion match
+  for (const sub of subjects) {
+    if (!sub) continue;
+    const cleanSub = normalizeSubjectNameForMatch(sub.name);
+    const sheetDigits = rawSheet.match(/\d+/g);
+    const subDigits = (sub.name || '').match(/\d+/g);
+    const digitsMatch = (!sheetDigits && !subDigits) || 
+      (sheetDigits && subDigits && sheetDigits.join('') === subDigits.join(''));
+
+    if (digitsMatch) {
+      if (cleanSub.includes(cleanSheet) || cleanSheet.includes(cleanSub)) return sub;
+    }
+  }
+
+  return null;
+};
+
+/**
+ * Parses attendance records from an uploaded Excel file.
+ * Supports multi-sheet workbooks (e.g. one sheet per subject: Math 0, OOP, Computer Graphics...).
+ * Employs deep auto-detection for ID columns, names, and week status columns.
  */
 export async function parseAttendanceExcelFile(file) {
   if (!file) throw new Error('No file provided');
@@ -403,124 +492,229 @@ export async function parseAttendanceExcelFile(file) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(arrayBuffer);
 
-  const worksheet = workbook.worksheets[0];
-  if (!worksheet) return [];
-
-  // Find exact header row by scanning for cells strictly matching 'id', 'no.', 'الرقم الأكاديمي', etc.
-  let headerRowIdx = 1;
-  for (let r = 1; r <= Math.min(5, worksheet.rowCount); r++) {
-    const row = worksheet.getRow(r);
-    let cellTexts = [];
-    row.eachCell({ includeEmpty: false }, cell => {
-      if (cell.value) cellTexts.push(String(cell.value).trim().toLowerCase());
-    });
-    
-    const hasExactId = cellTexts.some(v => v === 'id' || v === 'no.' || v === 'الرقم الأكاديمي' || v === 'الكود' || v === 'رقم الطالب');
-    const hasNameOrSec = cellTexts.some(v => v === 'name' || v === 'section' || v === 'الاسم' || v === 'السكشن' || v.includes('section 1') || v.includes('lecture 1') || v.includes('أسبوع 1') || v.includes('محاضرة 1'));
-
-    if (hasExactId && hasNameOrSec) {
-      headerRowIdx = r;
-      break;
-    }
-  }
-
-  const headerRow = worksheet.getRow(headerRowIdx);
-  const colMap = {};
-  headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-    if (cell.value !== null && cell.value !== undefined) {
-      colMap[colNumber] = String(cell.value).trim();
-    }
-  });
-
-  let idColIdx = null;
-  let nameColIdx = null;
-  let sectionColIdx = null;
-  let groupColIdx = null;
-  const weekColMap = {};
-
-  Object.keys(colMap).forEach(colIdxStr => {
-    const colNumber = parseInt(colIdxStr, 10);
-    const header = colMap[colNumber];
-    const lower = header.toLowerCase();
-
-    if (lower === 'id' || lower.includes('الرقم الأكاديمي') || lower.includes('رقم الجلوس') || lower.includes('الكود') || lower.includes('رقم الطالب')) {
-      idColIdx = colNumber;
-    } else if (lower.includes('name') || lower.includes('الاسم') || lower.includes('اسم الطالب')) {
-      nameColIdx = colNumber;
-    } else if (lower === 'section' || lower === 'السكشن' || lower === 'فرقة') {
-      sectionColIdx = colNumber;
-    } else if (lower === 'group' || lower.includes('الجروب') || lower.includes('المجموعة') || lower.includes('مجموعة')) {
-      groupColIdx = colNumber;
-    } else {
-      const match = header.match(/(\d+)/);
-      if (match && (
-        lower.includes('sec') || lower.includes('week') || lower.includes('lec') || 
-        lower.includes('محاضرة') || lower.includes('أسبوع') || lower.includes('سكشن') || 
-        lower.includes('w') || lower.includes('s') || lower.includes('l') || /^\d+$/.test(header)
-      )) {
-        const weekNum = parseInt(match[1], 10);
-        if (weekNum >= 1 && weekNum <= 30) {
-          weekColMap[colNumber] = weekNum;
-        }
-      }
-    }
-  });
-
-  if (!idColIdx) {
-    // Check column C or D
-    idColIdx = colMap[3]?.toLowerCase().includes('id') ? 3 : (colMap[4]?.toLowerCase().includes('id') ? 4 : 3);
+  const activeWorksheets = (workbook.worksheets || []).filter(ws => ws && ws.rowCount > 0);
+  if (activeWorksheets.length === 0) {
+    const emptyRes = [];
+    emptyRes.sheets = [];
+    return emptyRes;
   }
 
   const cleanVal = (val) => {
     if (val === null || val === undefined) return '';
-    if (typeof val === 'object' && val.result !== undefined) val = val.result;
-    let str = String(val).trim();
-    return str.replace(/\.0+$/, '');
+    if (typeof val === 'object') {
+      if (val.result !== undefined && val.result !== null) return String(val.result).trim().replace(/\.0+$/, '');
+      if (val.text !== undefined && val.text !== null) return String(val.text).trim().replace(/\.0+$/, '');
+      if (Array.isArray(val.richText)) {
+        return val.richText.map(t => t.text || '').join('').trim().replace(/\.0+$/, '');
+      }
+      if (val instanceof Date) return val.toISOString().slice(0, 10);
+      return String(val).trim().replace(/\.0+$/, '');
+    }
+    return String(val).trim().replace(/\.0+$/, '');
   };
 
-  const parsedRecords = [];
+  const parsedSheets = [];
 
-  worksheet.eachRow((row, rowNumber) => {
-    if (rowNumber <= headerRowIdx) return;
+  for (let sIdx = 0; sIdx < activeWorksheets.length; sIdx++) {
+    const worksheet = activeWorksheets[sIdx];
+    const sheetName = worksheet.name || `Sheet${sIdx + 1}`;
 
-    const studentId = cleanVal(idColIdx ? row.getCell(idColIdx).value : null);
-    const studentName = cleanVal(nameColIdx ? row.getCell(nameColIdx).value : null);
-    const section = cleanVal(sectionColIdx ? row.getCell(sectionColIdx).value : null);
-    let group = cleanVal(groupColIdx ? row.getCell(groupColIdx).value : null);
-    if (group) {
-      group = group.toUpperCase().replace('GROUP', '').replace('مجموعة', '').replace('جروب', '').trim();
+    // Scan first 15 rows to find the best header row
+    let headerRowIdx = 1;
+    let bestHeaderScore = -1;
+    let detectedColMap = {};
+
+    const scanLimit = Math.min(15, worksheet.rowCount);
+    for (let r = 1; r <= scanLimit; r++) {
+      const row = worksheet.getRow(r);
+      let score = 0;
+      let tempColMap = {};
+      let hasIdKeyword = false;
+      let hasWeekKeyword = false;
+      let hasNameKeyword = false;
+
+      row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+        const strVal = cleanVal(cell.value).toLowerCase();
+        if (!strVal) return;
+        tempColMap[colNumber] = cleanVal(cell.value);
+
+        if (strVal === 'id' || strVal === 'no.' || strVal === 'كود' || strVal === 'رقم' || 
+            strVal.includes('الرقم الأكاديمي') || strVal.includes('كود الطالب') || 
+            strVal.includes('رقم الطالب') || strVal.includes('رقم الجلوس') || 
+            strVal.includes('student id') || strVal.includes('academic id')) {
+          score += 15;
+          hasIdKeyword = true;
+        } else if (strVal.includes('name') || strVal.includes('الاسم') || strVal.includes('اسم الطالب')) {
+          score += 8;
+          hasNameKeyword = true;
+        } else if (strVal.includes('section') || strVal.includes('السكشن') || strVal.includes('sec')) {
+          score += 5;
+        } else if (strVal.includes('group') || strVal.includes('المجموعة') || strVal.includes('الجروب')) {
+          score += 4;
+        }
+
+        const match = strVal.match(/(\d+)/);
+        if (match && (
+          strVal.includes('sec') || strVal.includes('week') || strVal.includes('lec') || 
+          strVal.includes('محاضرة') || strVal.includes('أسبوع') || strVal.includes('سكشن') || 
+          strVal.includes('w') || strVal.includes('s') || strVal.includes('l') || /^\d+$/.test(strVal)
+        )) {
+          score += 3;
+          hasWeekKeyword = true;
+        }
+      });
+
+      if (hasIdKeyword && (hasWeekKeyword || hasNameKeyword)) {
+        score += 20;
+      }
+
+      if (score > bestHeaderScore && score >= 8) {
+        bestHeaderScore = score;
+        headerRowIdx = r;
+        detectedColMap = tempColMap;
+      }
     }
 
-    if (!studentId && !studentName) return;
+    // Fallback if no scored header found
+    if (Object.keys(detectedColMap).length === 0) {
+      headerRowIdx = 1;
+      const row1 = worksheet.getRow(1);
+      row1.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+        const val = cleanVal(cell.value);
+        if (val) detectedColMap[colNumber] = val;
+      });
+    }
 
-    const weekStatuses = {};
+    let idColIdx = null;
+    let nameColIdx = null;
+    let sectionColIdx = null;
+    let groupColIdx = null;
+    const weekColMap = {};
 
-    Object.keys(weekColMap).forEach(colIdxStr => {
+    Object.keys(detectedColMap).forEach(colIdxStr => {
       const colNumber = parseInt(colIdxStr, 10);
-      const weekNum = weekColMap[colNumber];
-      const cellVal = row.getCell(colNumber).value;
+      const header = detectedColMap[colNumber];
+      const lower = header.toLowerCase();
 
-      let strVal = cleanVal(cellVal).toLowerCase();
-
-      if (strVal === '1' || strVal === 'حاضر' || strVal === 'present' || strVal === 'p' || strVal === 'ح') {
-        weekStatuses[weekNum] = 'present';
-      } else if (strVal === '0' || strVal === 'غائب' || strVal === 'absent' || strVal === 'a' || strVal === 'غ') {
-        weekStatuses[weekNum] = 'absent';
-      } else if (strVal === '2' || strVal === 'تأخير' || strVal === 'late' || strVal === 'l' || strVal === 'ت') {
-        weekStatuses[weekNum] = 'late';
-      } else if (strVal === 'e' || strVal === 'عذر' || strVal === 'excused' || strVal === 'ع') {
-        weekStatuses[weekNum] = 'excused';
+      if (lower === 'id' || lower.includes('الرقم الأكاديمي') || lower.includes('رقم الجلوس') || 
+          lower.includes('الكود') || lower.includes('كود الطالب') || lower.includes('رقم الطالب') ||
+          lower.includes('student id') || lower.includes('academic id') || lower === 'no.') {
+        idColIdx = colNumber;
+      } else if (lower.includes('name') || lower.includes('الاسم') || lower.includes('اسم الطالب')) {
+        nameColIdx = colNumber;
+      } else if (lower === 'section' || lower === 'السكشن' || lower === 'sec' || lower === 'فرقة' || lower === 'الفرقة') {
+        sectionColIdx = colNumber;
+      } else if (lower === 'group' || lower.includes('الجروب') || lower.includes('المجموعة') || lower.includes('مجموعة')) {
+        groupColIdx = colNumber;
+      } else {
+        const match = header.match(/(\d+)/);
+        if (match && (
+          lower.includes('sec') || lower.includes('week') || lower.includes('lec') || 
+          lower.includes('محاضرة') || lower.includes('أسبوع') || lower.includes('سكشن') || 
+          lower.includes('w') || lower.includes('s') || lower.includes('l') || /^\d+$/.test(header.trim())
+        )) {
+          const weekNum = parseInt(match[1], 10);
+          if (weekNum >= 1 && weekNum <= 30) {
+            weekColMap[colNumber] = weekNum;
+          }
+        }
       }
     });
 
-    parsedRecords.push({
-      studentId,
-      studentName,
-      section,
-      group,
-      weekStatuses
-    });
-  });
+    // Deep column fallback for ID: scan sample rows to detect student number column (>=4 digits)
+    if (!idColIdx) {
+      const colDigitCounts = {};
+      const sampleLimit = Math.min(headerRowIdx + 12, worksheet.rowCount);
+      for (let r = headerRowIdx + 1; r <= sampleLimit; r++) {
+        const row = worksheet.getRow(r);
+        row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+          const str = cleanVal(cell.value);
+          if (/^\d{4,10}$/.test(str)) {
+            colDigitCounts[colNumber] = (colDigitCounts[colNumber] || 0) + 1;
+          }
+        });
+      }
+      let maxDigitsCol = null;
+      let maxCount = 0;
+      Object.entries(colDigitCounts).forEach(([col, count]) => {
+        if (count > maxCount) {
+          maxCount = count;
+          maxDigitsCol = parseInt(col, 10);
+        }
+      });
+      if (maxDigitsCol) {
+        idColIdx = maxDigitsCol;
+      } else {
+        idColIdx = 2; // Default to Column B
+      }
+    }
 
-  return parsedRecords;
+    if (!nameColIdx) {
+      nameColIdx = idColIdx === 2 ? 3 : (idColIdx === 1 ? 2 : 1);
+    }
+
+    const sheetRecords = [];
+
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber <= headerRowIdx) return;
+
+      const studentId = cleanVal(idColIdx ? row.getCell(idColIdx).value : null);
+      const studentName = cleanVal(nameColIdx ? row.getCell(nameColIdx).value : null);
+      const section = cleanVal(sectionColIdx ? row.getCell(sectionColIdx).value : null);
+      let group = cleanVal(groupColIdx ? row.getCell(groupColIdx).value : null);
+      if (group) {
+        group = group.toUpperCase().replace('GROUP', '').replace('مجموعة', '').replace('جروب', '').trim();
+      }
+
+      // Ignore summary, total or completely empty rows
+      if (!studentId && !studentName) return;
+      if (studentId.toLowerCase().includes('total') || studentId.toLowerCase().includes('اجمالي') || studentName.includes('المجموع')) return;
+
+      const weekStatuses = {};
+
+      Object.keys(weekColMap).forEach(colIdxStr => {
+        const colNumber = parseInt(colIdxStr, 10);
+        const weekNum = weekColMap[colNumber];
+        const cellVal = row.getCell(colNumber).value;
+
+        let strVal = cleanVal(cellVal).toLowerCase();
+
+        if (strVal === '1' || strVal === '1.0' || strVal === 'حاضر' || strVal === 'present' || strVal === 'p' || strVal === 'ح' || strVal === 'true' || strVal === 'yes' || strVal === '✓' || strVal === '✔') {
+          weekStatuses[weekNum] = 'present';
+        } else if (strVal === '0' || strVal === '0.0' || strVal === 'غائب' || strVal === 'absent' || strVal === 'a' || strVal === 'غ' || strVal === 'false' || strVal === 'no' || strVal === '✗' || strVal === '❌') {
+          weekStatuses[weekNum] = 'absent';
+        } else if (strVal === '2' || strVal === '2.0' || strVal === 'تأخير' || strVal === 'late' || strVal === 'l' || strVal === 'ت') {
+          weekStatuses[weekNum] = 'late';
+        } else if (strVal === 'e' || strVal === 'عذر' || strVal === 'excused' || strVal === 'ع' || strVal === 'ex') {
+          weekStatuses[weekNum] = 'excused';
+        }
+      });
+
+      sheetRecords.push({
+        studentId,
+        studentName,
+        section,
+        group,
+        weekStatuses,
+        sheetName
+      });
+    });
+
+    if (sheetRecords.length > 0) {
+      parsedSheets.push({
+        sheetIndex: sIdx,
+        sheetName,
+        headerRow: headerRowIdx,
+        idCol: idColIdx,
+        nameCol: nameColIdx,
+        weeksDetected: Object.values(weekColMap).sort((a, b) => a - b),
+        records: sheetRecords
+      });
+    }
+  }
+
+  // Create flat records array with .sheets attached for full backwards compatibility
+  const flatRecords = parsedSheets.flatMap(s => s.records);
+  flatRecords.sheets = parsedSheets;
+  return flatRecords;
 }

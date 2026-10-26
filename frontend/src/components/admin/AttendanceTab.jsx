@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../supabaseClient';
-import { exportExcelFile, parseAttendanceExcelFile, exportAttendanceTemplateExcel, getStudentLectureGroup } from '../../utils/excelHelper';
+import { exportExcelFile, parseAttendanceExcelFile, exportAttendanceTemplateExcel, getStudentLectureGroup, matchSheetToSubject } from '../../utils/excelHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { 
   Download, Users, UserPlus, UserMinus, UserCheck, CheckSquare, 
   FileText, Filter, Calendar, Save, Search, CheckCircle2, XCircle, 
   Clock, AlertCircle, LayoutGrid, List, RotateCcw, Copy, Check, MessageSquare, X, FileSpreadsheet,
-  WifiOff, Wifi, RefreshCw, Printer
+  WifiOff, Wifi, RefreshCw, Printer, Layers
 } from 'lucide-react';
 import { getSectionInstructorName as resolveSectionTA } from '../../utils/sectionHelper';
 import { printWeekAttendancePDF } from '../../utils/pdfHelper';
@@ -111,6 +111,9 @@ export default function AttendanceTab({ user }) {
   const [importAttendanceFile, setImportAttendanceFile] = useState(null);
   const [importAttendanceStatus, setImportAttendanceStatus] = useState('');
   const [importingAttendance, setImportingAttendance] = useState(false);
+  const [importDetectedSheets, setImportDetectedSheets] = useState([]);
+  const [importAllSheetsMode, setImportAllSheetsMode] = useState(true);
+  const [selectedImportSheetIndex, setSelectedImportSheetIndex] = useState(0);
 
   // ─── Smart Attendance Clone State ───────────────────────────────────────────
   const [showCloneModal, setShowCloneModal] = useState(false);
@@ -1236,130 +1239,226 @@ export default function AttendanceTab({ user }) {
     await exportAttendanceTemplateExcel(targetStudents, currentSub.name, currentSub.total_weeks || 12, attendanceType, selectedGroup);
   };
 
-  const handleProcessAttendanceImport = async () => {
-    if (!importAttendanceFile || !selectedSubject) return;
-    try {
-      setImportingAttendance(true);
-      setImportAttendanceStatus('جاري قراءة ومعالجة شيت الإكسيل...');
+  const handleAttendanceFileSelect = async (file) => {
+    setImportAttendanceFile(file);
+    if (!file) {
+      setImportDetectedSheets([]);
+      setImportAttendanceStatus('');
+      return;
+    }
 
-      const parsedRows = await parseAttendanceExcelFile(importAttendanceFile);
-      if (!parsedRows || parsedRows.length === 0) {
-        throw new Error('لم يتم العثور على بيانات صالحة في ملف الإكسيل.');
+    try {
+      setImportAttendanceStatus('جاري فحص وقراءة أوراق العمل (Sheets) في الملف...');
+      const parsedRows = await parseAttendanceExcelFile(file);
+      const sheets = parsedRows.sheets || [];
+
+      if (!sheets || sheets.length === 0) {
+        setImportDetectedSheets([]);
+        setImportAttendanceStatus('❌ لم يتم العثور على أي شيت أو بيانات صالحة في هذا الملف.');
+        return;
       }
 
-      const rowsMap = new Map();
-      let matchedStudentsCount = 0;
-      const targetSub = subjects.find(s => s.id === selectedSubject);
-      const maxWeeks = targetSub?.total_weeks || 12;
+      const availableSubs = allSystemSubjects.length > 0 ? allSystemSubjects : subjects;
+
+      const preparedSheets = sheets.map((sh, idx) => {
+        const matched = matchSheetToSubject(sh.sheetName, availableSubs);
+        const targetSubId = matched ? matched.id : (selectedSubject || availableSubs[0]?.id || '');
+        const targetSubName = (availableSubs.find(s => s.id === targetSubId)?.name) || sh.sheetName;
+        return {
+          ...sh,
+          sheetIndex: idx,
+          targetSubjectId: targetSubId,
+          targetSubjectName: targetSubName,
+          isAutoMatched: Boolean(matched)
+        };
+      });
+
+      setImportDetectedSheets(preparedSheets);
+      setImportAllSheetsMode(preparedSheets.length > 1);
+      setSelectedImportSheetIndex(0);
+      setImportAttendanceStatus('');
+    } catch (err) {
+      console.error('File inspection error:', err);
+      setImportDetectedSheets([]);
+      setImportAttendanceStatus('❌ فشل فحص الملف: ' + (err.message || 'خطأ غير معروف'));
+    }
+  };
+
+  const handleUpdateSheetSubject = (sheetIndex, newSubId) => {
+    const availableSubs = allSystemSubjects.length > 0 ? allSystemSubjects : subjects;
+    const subObj = availableSubs.find(s => s.id === newSubId);
+    setImportDetectedSheets(prev => prev.map((sh, idx) => {
+      if (idx !== sheetIndex) return sh;
+      return {
+        ...sh,
+        targetSubjectId: newSubId,
+        targetSubjectName: subObj?.name || sh.sheetName,
+        isAutoMatched: true
+      };
+    }));
+  };
+
+  const handleProcessAttendanceImport = async () => {
+    if (!importAttendanceFile) return;
+    try {
+      setImportingAttendance(true);
+      setImportAttendanceStatus('جاري معالجة شيتات الإكسيل ورصد السجلات...');
+
+      const availableSubs = allSystemSubjects.length > 0 ? allSystemSubjects : subjects;
+      let sheetsToProcess = [];
+
+      if (importDetectedSheets.length > 0) {
+        if (importAllSheetsMode && importDetectedSheets.length > 1) {
+          sheetsToProcess = importDetectedSheets;
+        } else {
+          const idx = (selectedImportSheetIndex >= 0 && selectedImportSheetIndex < importDetectedSheets.length) ? selectedImportSheetIndex : 0;
+          sheetsToProcess = [importDetectedSheets[idx]];
+        }
+      } else {
+        const parsedRows = await parseAttendanceExcelFile(importAttendanceFile);
+        const sheets = parsedRows.sheets || [];
+        if (sheets.length === 0) {
+          throw new Error('لم يتم العثور على أوراق عمل صالحة في ملف الإكسيل.');
+        }
+        sheetsToProcess = sheets.map((sh, idx) => {
+          const matched = matchSheetToSubject(sh.sheetName, availableSubs);
+          return {
+            ...sh,
+            sheetIndex: idx,
+            targetSubjectId: matched ? matched.id : (selectedSubject || availableSubs[0]?.id || ''),
+            targetSubjectName: matched ? matched.name : sh.sheetName
+          };
+        });
+      }
+
+      if (sheetsToProcess.length === 0) {
+        throw new Error('لم يتم العثور على بيانات صالحة للرصد في الملف.');
+      }
+
+      // Ensure global student pool is loaded; fallback to DB if empty
+      let studentPool = allStudents;
+      if (!studentPool || studentPool.length === 0) {
+        const { data: dbStudents } = await supabase.from('users').select('id, user_id, name, year_level, section, assigned_subjects').eq('role', 'student');
+        if (dbStudents && dbStudents.length > 0) {
+          studentPool = dbStudents;
+          setAllStudents(dbStudents);
+        } else {
+          studentPool = enrolledStudents;
+        }
+      }
 
       const norm = (v) => String(v || '').replace(/\.0+$/, '').trim().toLowerCase();
       const digitsOnly = (v) => String(v || '').replace(/\D/g, '');
 
-      // Student pool for matching
-      const pool = allStudents.length > 0 ? allStudents : enrolledStudents;
+      let totalSavedRecords = 0;
+      let totalMatchedStudents = 0;
+      const processedSubjectNames = [];
 
-      parsedRows.forEach(rec => {
-        const matchedStudent = pool.find(s => {
-          const sId = norm(s.user_id);
-          const rId = norm(rec.studentId);
-          const sDigits = digitsOnly(s.user_id);
-          const rDigits = digitsOnly(rec.studentId);
+      for (let sIdx = 0; sIdx < sheetsToProcess.length; sIdx++) {
+        const currentSheet = sheetsToProcess[sIdx];
+        const subId = String(currentSheet.targetSubjectId || selectedSubject).trim();
+        const targetSub = availableSubs.find(s => s.id === subId) || subjects.find(s => s.id === subId) || allSystemSubjects.find(s => s.id === subId);
+        const subName = targetSub?.name || currentSheet.sheetName;
+        const maxWeeks = targetSub?.total_weeks || 15;
 
-          const idMatches = (sId && rId && sId === rId) || (sDigits && rDigits && sDigits === rDigits && sDigits.length >= 3);
-          const nameMatches = s.name && rec.studentName && s.name.trim().toLowerCase() === rec.studentName.trim().toLowerCase();
+        setImportAttendanceStatus(`جاري رصد مادة [${subName}] (شيت ${currentSheet.sheetName})... (${sIdx + 1}/${sheetsToProcess.length})`);
 
-          return idMatches || nameMatches;
+        const rowsMap = new Map();
+        let sheetMatchedCount = 0;
+
+        currentSheet.records.forEach(rec => {
+          const matchedStudent = studentPool.find(s => {
+            const sId = norm(s.user_id);
+            const rId = norm(rec.studentId);
+            const sDigits = digitsOnly(s.user_id);
+            const rDigits = digitsOnly(rec.studentId);
+
+            const idMatches = (sId && rId && sId === rId) || (sDigits && rDigits && sDigits === rDigits && sDigits.length >= 3);
+            const nameMatches = s.name && rec.studentName && s.name.trim().toLowerCase() === rec.studentName.trim().toLowerCase();
+
+            return idMatches || nameMatches;
+          });
+
+          if (matchedStudent) {
+            sheetMatchedCount++;
+            Object.keys(rec.weekStatuses).forEach(wStr => {
+              const wNum = parseInt(wStr, 10);
+              if (wNum >= 1 && wNum <= maxWeeks) {
+                const rawSt = rec.weekStatuses[wStr];
+                let cleanStatus = 'present';
+                if (rawSt === 'absent') cleanStatus = 'absent';
+                else if (rawSt === 'late') cleanStatus = 'late';
+                else if (rawSt === 'excused') cleanStatus = 'excused';
+                else cleanStatus = 'present';
+
+                const stuId = String(matchedStudent.user_id).trim();
+                const dbWeekNum = attendanceType === 'lecture' ? 100 + wNum : wNum;
+                const key = stuId + '_' + subId + '_' + dbWeekNum;
+
+                rowsMap.set(key, {
+                  student_id: stuId,
+                  subject_id: subId,
+                  week_number: dbWeekNum,
+                  status: cleanStatus
+                });
+              }
+            });
+          }
         });
 
-        if (matchedStudent) {
-          matchedStudentsCount++;
-          Object.keys(rec.weekStatuses).forEach(wStr => {
-            const wNum = parseInt(wStr, 10);
-            if (wNum >= 1 && wNum <= maxWeeks) {
-              const rawSt = rec.weekStatuses[wStr];
-              let cleanStatus = 'present';
-              if (rawSt === 'absent' || rawSt === '0' || rawSt === 'غائب' || rawSt === 'غ') cleanStatus = 'absent';
-              else if (rawSt === 'late' || rawSt === '2' || rawSt === 'تأخير') cleanStatus = 'late';
-              else if (rawSt === 'excused' || rawSt === 'e' || rawSt === 'عذر' || rawSt === 'ع') cleanStatus = 'excused';
-              else if (rawSt === 'present' || rawSt === '1' || rawSt === 'حاضر' || rawSt === 'ح') cleanStatus = 'present';
-              else cleanStatus = 'present';
+        const uniqueRows = Array.from(rowsMap.values());
+        if (uniqueRows.length > 0) {
+          totalMatchedStudents += sheetMatchedCount;
+          processedSubjectNames.push(subName);
 
-              const stuId = String(matchedStudent.user_id).trim();
-              const subId = String(selectedSubject).trim();
-              const dbWeekNum = attendanceType === 'lecture' ? 100 + wNum : wNum;
-              const key = stuId + '_' + subId + '_' + dbWeekNum;
+          // Save active week date for this subject
+          try {
+            await saveSubjectWeekDate(subId, week, sessionDate);
+          } catch (e) {
+            console.warn('saveSubjectWeekDate warning:', e);
+          }
 
-              rowsMap.set(key, {
-                student_id: stuId,
-                subject_id: subId,
-                week_number: dbWeekNum,
-                status: cleanStatus
-              });
-            }
-          });
-        }
-      });
-
-      const uniqueRows = Array.from(rowsMap.values());
-
-      if (uniqueRows.length === 0) {
-        throw new Error('لم يتم العثور على طُلاب مطابقين بالأرقام الأكاديمية (ID) المسجلة في المادة، أو لم يتم وضع قيم حضور/غياب في أعمدة الأسابيع.');
-      }
-
-      setImportAttendanceStatus(`جاري رصد ${uniqueRows.length} سجل حضور وغياب لعدد ${matchedStudentsCount} طالب...`);
-
-      // Save week date for the active week
-      try {
-        await saveSubjectWeekDate(selectedSubject, week, sessionDate);
-      } catch (e) {
-        console.warn('saveSubjectWeekDate warning:', e);
-      }
-
-      // Safe Chunked Upsert (15 rows per chunk) with Row-by-Row Fallback
-      let savedSuccessCount = 0;
-      const chunkSize = 15;
-
-      for (let i = 0; i < uniqueRows.length; i += chunkSize) {
-        const chunk = uniqueRows.slice(i, i + chunkSize);
-        try {
-          const { error } = await supabase.from('attendance').upsert(chunk, { onConflict: 'student_id,subject_id,week_number' });
-          if (!error) {
-            savedSuccessCount += chunk.length;
-          } else {
-            // Row-by-row fallback
-            for (const singleRow of chunk) {
-              try {
-                const { error: singleErr } = await supabase.from('attendance').upsert(singleRow, { onConflict: 'student_id,subject_id,week_number' });
-                if (!singleErr) savedSuccessCount++;
-              } catch (errRow) {
-                console.warn('Single row upsert error:', errRow);
+          // Chunked Upsert (20 rows per chunk) with individual row fallback
+          const chunkSize = 20;
+          for (let i = 0; i < uniqueRows.length; i += chunkSize) {
+            const chunk = uniqueRows.slice(i, i + chunkSize);
+            try {
+              const { error } = await supabase.from('attendance').upsert(chunk, { onConflict: 'student_id,subject_id,week_number' });
+              if (!error) {
+                totalSavedRecords += chunk.length;
+              } else {
+                for (const singleRow of chunk) {
+                  try {
+                    const { error: sErr } = await supabase.from('attendance').upsert(singleRow, { onConflict: 'student_id,subject_id,week_number' });
+                    if (!sErr) totalSavedRecords++;
+                  } catch (e) {}
+                }
+              }
+            } catch (err) {
+              for (const singleRow of chunk) {
+                try {
+                  const { error: sErr } = await supabase.from('attendance').upsert(singleRow, { onConflict: 'student_id,subject_id,week_number' });
+                  if (!sErr) totalSavedRecords++;
+                } catch (e) {}
               }
             }
           }
-        } catch (chunkErr) {
-          // Row-by-row fallback
-          for (const singleRow of chunk) {
-            try {
-              const { error: singleErr } = await supabase.from('attendance').upsert(singleRow, { onConflict: 'student_id,subject_id,week_number' });
-              if (!singleErr) savedSuccessCount++;
-            } catch (errRow) {
-              console.warn('Single row upsert error:', errRow);
-            }
-          }
         }
       }
 
-      if (savedSuccessCount === 0) {
-        throw new Error('تعذر حفظ السجلات في قاعدة البيانات. يرجى التأكد من اتصال الإنترنت وصلاحيات المعيد.');
+      if (totalSavedRecords === 0) {
+        throw new Error('لم يتم العثور على طُلاب مطابقين بالأرقام الأكاديمية (ID) المسجلة في المواد، أو لم يتم وضع قيم حضور/غياب في أعمدة الأسابيع.');
       }
 
       cacheManager.clear();
       await fetchAttendance();
 
-      setMessage(`✅ تم استيراد ورصد ${savedSuccessCount} سجل غياب بنجاح لـ ${matchedStudentsCount} طالب وتسميعها فوراً لجميع المعيدين والطلاب والتقرير الشامل!`);
-      setTimeout(() => setMessage(''), 5000);
+      const uniqueSubjectNames = [...new Set(processedSubjectNames)];
+      setMessage(`✅ تم استيراد ورصد ${totalSavedRecords} سجل غياب بنجاح لـ ${totalMatchedStudents} طالب عبر ${uniqueSubjectNames.length} مادة (${uniqueSubjectNames.join('، ')}) وتسميعها فوراً لجميع المعيدين والطلاب والتقرير الشامل!`);
+      setTimeout(() => setMessage(''), 6000);
       setShowImportAttendanceModal(false);
       setImportAttendanceFile(null);
+      setImportDetectedSheets([]);
       setImportAttendanceStatus('');
 
     } catch (err) {
@@ -2629,16 +2728,110 @@ export default function AttendanceTab({ user }) {
               </button>
             </div>
 
-            <div style={{marginBottom:'1.5rem'}}>
+            <div style={{marginBottom:'1.2rem'}}>
               <label style={{display:'block',marginBottom:'8px',fontWeight:700,fontSize:'0.9rem'}}>اختر ملف الإكسيل (.xlsx / .xls):</label>
               <input 
                 type="file" 
                 accept=".xlsx, .xls"
-                onChange={e => setImportAttendanceFile(e.target.files[0] || null)}
+                onChange={e => handleAttendanceFileSelect(e.target.files[0] || null)}
                 className="input-field" 
                 style={{padding:'8px'}}
               />
             </div>
+
+            {/* Multi-Sheet Detection & Preview */}
+            {importDetectedSheets.length > 0 && (
+              <div style={{background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:'12px',padding:'14px',marginBottom:'1.3rem'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'10px'}}>
+                  <span style={{fontWeight:700,fontSize:'0.92rem',display:'flex',alignItems:'center',gap:'6px',color:'var(--primary-hover)'}}>
+                    <Layers size={18} />
+                    {importDetectedSheets.length > 1 
+                      ? `تم اكتشاف ملف متعدد المواد (${importDetectedSheets.length} شيتات):`
+                      : 'تم فحص الشيت بنجاح:'}
+                  </span>
+                  <span style={{fontSize:'0.8rem',color:'var(--text-muted)'}}>
+                    إجمالي {importDetectedSheets.reduce((acc, sh) => acc + (sh.records?.length || 0), 0)} طالب
+                  </span>
+                </div>
+
+                {importDetectedSheets.length > 1 && (
+                  <div style={{display:'flex',flexWrap:'wrap',gap:'15px',marginBottom:'12px',background:'var(--bg)',padding:'10px 14px',borderRadius:'8px',border:'1px solid var(--border)'}}>
+                    <label style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'0.85rem',fontWeight:700,cursor:'pointer',color:importAllSheetsMode ? 'var(--primary-hover)' : 'var(--text-main)'}}>
+                      <input 
+                        type="radio" 
+                        name="importMode" 
+                        checked={importAllSheetsMode} 
+                        onChange={() => setImportAllSheetsMode(true)} 
+                      />
+                      ⚡ استيراد جميع الشيتات والمواد دفعة واحدة (تلقائي)
+                    </label>
+                    <label style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'0.85rem',fontWeight:700,cursor:'pointer',color:!importAllSheetsMode ? 'var(--primary-hover)' : 'var(--text-main)'}}>
+                      <input 
+                        type="radio" 
+                        name="importMode" 
+                        checked={!importAllSheetsMode} 
+                        onChange={() => setImportAllSheetsMode(false)} 
+                      />
+                      📄 استيراد شيت واحد فقط
+                    </label>
+                  </div>
+                )}
+
+                <div style={{display:'flex',flexDirection:'column',gap:'8px',maxHeight:'220px',overflowY:'auto',paddingRight:'4px'}}>
+                  {importDetectedSheets.map((sh, sIdx) => {
+                    const isSelected = importAllSheetsMode || selectedImportSheetIndex === sIdx;
+                    return (
+                      <div 
+                        key={sIdx}
+                        onClick={() => { if (!importAllSheetsMode) setSelectedImportSheetIndex(sIdx); }}
+                        style={{
+                          display:'flex',
+                          flexWrap:'wrap',
+                          alignItems:'center',
+                          justifyContent:'space-between',
+                          gap:'10px',
+                          padding:'8px 12px',
+                          borderRadius:'8px',
+                          background: isSelected ? 'rgba(79, 70, 229, 0.08)' : 'var(--bg)',
+                          border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border)',
+                          cursor: !importAllSheetsMode ? 'pointer' : 'default',
+                          transition:'all 0.2s'
+                        }}
+                      >
+                        <div style={{display:'flex',alignItems:'center',gap:'8px',minWidth:'140px'}}>
+                          <span style={{fontWeight:700,fontSize:'0.88rem',color:'var(--text-main)'}}>
+                            📄 {sh.sheetName}
+                          </span>
+                          <span style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
+                            ({sh.records.length} طالب • {sh.weeksDetected.length} أسابيع)
+                          </span>
+                        </div>
+
+                        <div style={{display:'flex',alignItems:'center',gap:'6px',flex:1,justifyContent:'flex-end'}}>
+                          <span style={{fontSize:'0.8rem',color:'var(--text-muted)'}}>المادة:</span>
+                          <select 
+                            value={sh.targetSubjectId}
+                            onChange={(e) => handleUpdateSheetSubject(sIdx, e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="input-field"
+                            style={{padding:'4px 8px',fontSize:'0.82rem',maxWidth:'240px'}}
+                          >
+                            {(allSystemSubjects.length > 0 ? allSystemSubjects : subjects).map(sub => (
+                              <option key={sub.id} value={sub.id}>
+                                {sub.name}
+                              </option>
+                            ))}
+                          </select>
+                          {sh.isAutoMatched && (
+                            <span title="تم التعرف على المادة تلقائياً" style={{color:'var(--success)',fontSize:'0.9rem',fontWeight:'bold'}}>✓</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {importAttendanceStatus && (
               <div style={{
@@ -2652,7 +2845,16 @@ export default function AttendanceTab({ user }) {
             )}
 
             <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
-              <button className="btn-secondary" onClick={() => setShowImportAttendanceModal(false)} disabled={importingAttendance}>
+              <button 
+                className="btn-secondary" 
+                onClick={() => {
+                  setShowImportAttendanceModal(false);
+                  setImportAttendanceFile(null);
+                  setImportDetectedSheets([]);
+                  setImportAttendanceStatus('');
+                }} 
+                disabled={importingAttendance}
+              >
                 إلغاء
               </button>
               <button 
