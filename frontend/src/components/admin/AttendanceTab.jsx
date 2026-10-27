@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { supabase } from '../../supabaseClient';
 import { exportExcelFile, parseAttendanceExcelFile, exportAttendanceTemplateExcel, getStudentLectureGroup, matchSheetToSubject } from '../../utils/excelHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
@@ -125,6 +126,19 @@ export default function AttendanceTab({ user }) {
   const [cloneDefaultForExtra, setCloneDefaultForExtra] = useState('absent'); // 'absent' | 'present' | 'manual'
   const [cloneManualExtra, setCloneManualExtra] = useState({}); // { [student_id]: 'absent'|'present'|'late' }
   const [cloneApplying, setCloneApplying] = useState(false);
+
+  // Prevent background scrolling and viewport jumping when any modal is open
+  useEffect(() => {
+    const isModalOpen = Boolean(showExportModal || showImportAttendanceModal || showCloneModal || excuseModalStudent || bulkActionConfirm || pdfExportLoading);
+    if (isModalOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [showExportModal, showImportAttendanceModal, showCloneModal, excuseModalStudent, bulkActionConfirm, pdfExportLoading]);
 
 
   const saveSubjectWeekDate = async (subId, weekNum, dateStr) => {
@@ -574,10 +588,17 @@ export default function AttendanceTab({ user }) {
   const groupACount = enrolledStudents.filter(stu => getStudentLectureGroup(stu, selectedSubject) === 'A').length;
   const groupBCount = enrolledStudents.filter(stu => getStudentLectureGroup(stu, selectedSubject) === 'B').length;
 
-  const baseEnrolledStudents = enrolledStudents
+  const isActivelySearching = studentSearch.trim().length >= 1;
+
+  // When searching, allow searching across all subject students (or full academic year)
+  const candidatePool = isActivelySearching
+    ? (allStudents.length > 0 ? allStudents.filter(stu => normalizeYear(stu.year_level) === normalizeYear(currentSub?.year_level)) : enrolledStudents)
+    : enrolledStudents;
+
+  const baseEnrolledStudents = candidatePool
     .filter(stu => {
-      // If user is actively searching by ID or name (>= 2 chars), search across all groups
-      if (studentSearch.trim().length >= 2) return true;
+      // If user is actively searching by ID or name, search across all groups and sections!
+      if (isActivelySearching) return true;
 
       if (attendanceType === 'lecture') {
         if (selectedGroup === 'all') return true;
@@ -589,9 +610,9 @@ export default function AttendanceTab({ user }) {
       }
     })
     .filter(stu => {
-      if (!studentSearch.trim()) return true;
+      if (!isActivelySearching) return true;
       const q = studentSearch.toLowerCase().trim();
-      return stu.name.toLowerCase().includes(q) || stu.user_id.toLowerCase().includes(q);
+      return (stu.name && stu.name.toLowerCase().includes(q)) || (stu.user_id && stu.user_id.toLowerCase().includes(q));
     });
 
   const displayedEnrolledStudents = baseEnrolledStudents.filter(stu => {
@@ -2238,6 +2259,16 @@ export default function AttendanceTab({ user }) {
                         <span className="badge" style={{background:'rgba(79, 70, 229, 0.08)',color:'var(--primary-hover)',border:'1px solid rgba(79, 70, 229, 0.2)',fontSize:'0.75rem'}}>
                           فرقة {normalizeYear(s.year_level)}
                         </span>
+                        {attendanceType === 'lecture' && selectedGroup !== 'all' && getStudentLectureGroup(s, selectedSubject) !== selectedGroup && (
+                          <span className="badge" style={{background:'rgba(245, 158, 11, 0.15)',color:'#fbbf24',border:'1px solid rgba(245, 158, 11, 0.35)',fontSize:'0.75rem',fontWeight:700}}>
+                            ⚡ طالب من مجموعة {getStudentLectureGroup(s, selectedSubject)} (حاضر استثنائي)
+                          </span>
+                        )}
+                        {attendanceType === 'section' && selectedSection !== 'all' && getStudentSubSection(s, selectedSubject) !== normalizeSection(selectedSection) && (
+                          <span className="badge" style={{background:'rgba(245, 158, 11, 0.15)',color:'#fbbf24',border:'1px solid rgba(245, 158, 11, 0.35)',fontSize:'0.75rem',fontWeight:700}}>
+                            ⚡ طالب من {getStudentSubSection(s, selectedSubject)} (حاضر استثنائي)
+                          </span>
+                        )}
                       </div>
                       {status === 'excused' && excuse && (
                         <div style={{marginTop:'6px',fontSize:'0.8rem',color:'#3b82f6',display:'flex',alignItems:'center',gap:'4px'}}>
@@ -2385,6 +2416,16 @@ export default function AttendanceTab({ user }) {
                     <td style={{padding:'12px 16px',fontWeight:'bold',fontFamily:'monospace'}}>{s.user_id}</td>
                     <td style={{padding:'12px 16px',fontWeight:700,fontSize:'1rem'}}>
                       {s.name}
+                      {attendanceType === 'lecture' && selectedGroup !== 'all' && getStudentLectureGroup(s, selectedSubject) !== selectedGroup && (
+                        <span className="badge" style={{background:'rgba(245, 158, 11, 0.15)',color:'#fbbf24',marginRight:'8px',fontSize:'0.75rem',fontWeight:700}}>
+                          ⚡ مجموعة {getStudentLectureGroup(s, selectedSubject)} (استثنائي)
+                        </span>
+                      )}
+                      {attendanceType === 'section' && selectedSection !== 'all' && getStudentSubSection(s, selectedSubject) !== normalizeSection(selectedSection) && (
+                        <span className="badge" style={{background:'rgba(245, 158, 11, 0.15)',color:'#fbbf24',marginRight:'8px',fontSize:'0.75rem',fontWeight:700}}>
+                          ⚡ {getStudentSubSection(s, selectedSubject)} (استثنائي)
+                        </span>
+                      )}
                       {status === 'excused' && excuse && <span style={{fontSize:'0.75rem',color:'#3b82f6',display:'block'}}>عذر: {excuse}</span>}
                     </td>
                     <td style={{padding:'12px 16px'}}>
@@ -2416,11 +2457,11 @@ export default function AttendanceTab({ user }) {
       )}
 
       {/* CUSTOM EXPORT MODAL (.TXT or .XLSX) */}
-      {showExportModal && (
+      {showExportModal && createPortal(
         <div 
           style={{
             position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999999, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
           }}
           onClick={e => { if (e.target === e.currentTarget) setShowExportModal(false); }}
         >
@@ -2492,11 +2533,12 @@ export default function AttendanceTab({ user }) {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* PDF EXPORT LOADING MODAL */}
-      {pdfExportLoading && (
+      {pdfExportLoading && createPortal(
         <div style={{
           position: 'fixed',
           inset: 0,
@@ -2538,11 +2580,12 @@ export default function AttendanceTab({ user }) {
               لحظات وسيبدأ التنزيل تلقائياً على جهازك بنفس التنسيق المعتمد
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* FLOATING PDF DOWNLOAD NOTIFICATION & 1-CLICK PREVIEW */}
-      {downloadedPdfInfo && (
+      {downloadedPdfInfo && createPortal(
         <div style={{
           position: 'fixed',
           bottom: '24px',
@@ -2641,15 +2684,16 @@ export default function AttendanceTab({ user }) {
               </button>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* EXCUSE REASON MODAL */}
-      {excuseModalStudent && (
+      {excuseModalStudent && createPortal(
         <div 
           style={{
             position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999999, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
           }}
           onClick={e => { if (e.target === e.currentTarget) setExcuseModalStudent(null); }}
         >
@@ -2678,16 +2722,17 @@ export default function AttendanceTab({ user }) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
 
       {/* Attendance Excel Import Modal */}
-      {showImportAttendanceModal && (
+      {showImportAttendanceModal && createPortal(
         <div 
           style={{
             position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
-            zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
+            zIndex: 999999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
           }}
           onClick={e => { if (e.target === e.currentTarget) setShowImportAttendanceModal(false); }}
         >
@@ -2867,18 +2912,19 @@ export default function AttendanceTab({ user }) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ─── SMART ATTENDANCE CLONE MODAL ──────────────────────────────────────── */}
-      {showCloneModal && (
+      {showCloneModal && createPortal(
         <div
           style={{
             position: 'fixed', inset: 0,
             background: 'rgba(15, 23, 42, 0.88)',
             backdropFilter: 'blur(10px)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            zIndex: 9999, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
+            zIndex: 999999, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
           }}
           onClick={e => { if (e.target === e.currentTarget) setShowCloneModal(false); }}
         >
@@ -3210,11 +3256,12 @@ export default function AttendanceTab({ user }) {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* BULK ACTION CONFIRMATION MODAL */}
-      {bulkActionConfirm && (
+      {bulkActionConfirm && createPortal(
         <div style={{
           position: 'fixed',
           top: 0,
@@ -3226,7 +3273,7 @@ export default function AttendanceTab({ user }) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 99999,
+          zIndex: 999999,
           padding: '20px'
         }}>
           <div style={{
@@ -3309,7 +3356,8 @@ export default function AttendanceTab({ user }) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
