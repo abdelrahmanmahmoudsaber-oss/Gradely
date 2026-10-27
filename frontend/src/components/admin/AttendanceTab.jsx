@@ -79,6 +79,9 @@ export default function AttendanceTab({ user }) {
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportFormat, setExportFormat] = useState('txt'); // 'txt' or 'xlsx'
   const [exportFilter, setExportFilter] = useState('all'); // 'all', 'present', 'absent', 'excused', 'late'
+  const [exportExtraStudents, setExportExtraStudents] = useState([]);
+  const [extraStudentSearch, setExtraStudentSearch] = useState('');
+  const [saveExtraAttendanceToDb, setSaveExtraAttendanceToDb] = useState(true);
 
   // PDF Export Feedback and Preview States
   const [downloadedPdfInfo, setDownloadedPdfInfo] = useState(null); // { filename, blobUrl, blob }
@@ -1111,6 +1114,45 @@ export default function AttendanceTab({ user }) {
     }
   };
 
+  const handleOpenExportModal = () => {
+    setExportExtraStudents([]);
+    setExtraStudentSearch('');
+    setShowExportModal(true);
+  };
+
+  const availableExtraCandidates = allStudents.filter(stu => {
+    if (normalizeYear(stu.year_level) !== normalizeYear(currentSub?.year_level)) return false;
+    if (baseEnrolledStudents.some(s => String(s.user_id).trim() === String(stu.user_id).trim())) return false;
+    if (exportExtraStudents.some(s => String(s.user_id).trim() === String(stu.user_id).trim())) return false;
+    if (!extraStudentSearch.trim()) return false;
+    const q = extraStudentSearch.toLowerCase().trim();
+    return (stu.name && stu.name.toLowerCase().includes(q)) || (stu.user_id && stu.user_id.toLowerCase().includes(q));
+  });
+
+  const handleAddExtraStudent = (stu) => {
+    const nativeGrp = getStudentLectureGroup(stu, selectedSubject);
+    const nativeSec = getStudentSubSection(stu, selectedSubject);
+    setExportExtraStudents(prev => [
+      ...prev,
+      {
+        ...stu,
+        status: 'present',
+        nativeGroup: nativeGrp,
+        nativeSection: nativeSec,
+        isExtra: true
+      }
+    ]);
+    setExtraStudentSearch('');
+  };
+
+  const handleRemoveExtraStudent = (userId) => {
+    setExportExtraStudents(prev => prev.filter(s => s.user_id !== userId));
+  };
+
+  const handleUpdateExtraStatus = (userId, status) => {
+    setExportExtraStudents(prev => prev.map(s => s.user_id === userId ? { ...s, status } : s));
+  };
+
   // ADVANCED CUSTOM EXPORT (.TXT or .XLSX) BASED ON SELECTION
   const handleExecuteCustomExport = async () => {
     setShowExportModal(false);
@@ -1142,9 +1184,39 @@ export default function AttendanceTab({ user }) {
       targetStudents = targetStudents.filter(s => attendanceRecords[s.user_id] === 'excused');
     }
 
+    // Combine with any extra students explicitly added for this export
+    const effectiveExportRecords = { ...attendanceRecords };
+    const finalExportStudents = [...targetStudents];
+
+    exportExtraStudents.forEach(extra => {
+      effectiveExportRecords[extra.user_id] = extra.status || 'present';
+      const matchesFilter =
+        exportFilter === 'all' ||
+        exportFilter === 'recorded' ||
+        exportFilter === (extra.status || 'present');
+
+      if (matchesFilter && !finalExportStudents.some(s => String(s.user_id).trim() === String(extra.user_id).trim())) {
+        finalExportStudents.push(extra);
+      }
+    });
+
+    // Optionally save extra attendance to Supabase
+    if (saveExtraAttendanceToDb && exportExtraStudents.length > 0) {
+      try {
+        const effWeek = getEffectiveWeekNum();
+        const upsertRows = exportExtraStudents.map(extra => ({
+          student_id: extra.user_id,
+          subject_id: selectedSubject,
+          week_number: effWeek,
+          status: extra.status || 'present'
+        }));
+        supabase.from('attendance').upsert(upsertRows, { onConflict: 'student_id,subject_id,week_number' }).catch(() => {});
+      } catch (err) {}
+    }
+
     if (exportFormat === 'txt') {
       // Output clean, raw IDs line-by-line without brackets or extra text for direct 1-click copy/paste
-      const idLines = targetStudents.map(s => s.user_id.trim()).filter(Boolean);
+      const idLines = finalExportStudents.map(s => s.user_id.trim()).filter(Boolean);
       const txt = idLines.join('\r\n');
 
       const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
@@ -1178,11 +1250,11 @@ export default function AttendanceTab({ user }) {
           instructorName: activeInst,
           attendanceType: attendanceType,
           filterType: exportFilter,
-          students: targetStudents,
-          attendanceRecords: attendanceRecords,
+          students: finalExportStudents,
+          attendanceRecords: effectiveExportRecords,
           excuseReasons: excuseReasons,
-          getStudentSubSection: (s) => getStudentSubSection(s, selectedSubject),
-          getStudentLectureGroup: (s) => getStudentLectureGroup(s, selectedSubject),
+          getStudentSubSection: (s) => s.nativeSection || getStudentSubSection(s, selectedSubject),
+          getStudentLectureGroup: (s) => s.nativeGroup || getStudentLectureGroup(s, selectedSubject),
           filename: `${filename}.pdf`,
           onProgress: (cur, tot) => {
             setPdfProgressText(`جاري تجهيز صفحة ${cur} من ${tot}...`);
@@ -1204,19 +1276,23 @@ export default function AttendanceTab({ user }) {
       }
     } else {
       // Excel Export
-      const excelRows = targetStudents.map((s, idx) => {
-        const st = attendanceRecords[s.user_id] || 'لم يرصد';
+      const excelRows = finalExportStudents.map((s, idx) => {
+        const st = effectiveExportRecords[s.user_id] || 'لم يرصد';
         const stLabel = st === 'present' ? 'حاضر' : st === 'absent' ? 'غائب' : st === 'late' ? 'تأخير' : st === 'excused' ? 'عذر' : 'لم يرصد';
+        const nativeGrp = s.nativeGroup || getStudentLectureGroup(s, selectedSubject);
+        const isFromOtherGroup = s.isExtra || (attendanceType === 'lecture' && selectedGroup !== 'all' && nativeGrp !== selectedGroup);
+        const groupDisplay = isFromOtherGroup ? `${nativeGrp} (حاضر مع ${selectedGroup})` : nativeGrp;
         return {
           'م': idx + 1,
           'الرقم الأكاديمي': s.user_id,
           'اسم الطالب': s.name,
           'الفرقة': normalizeYear(s.year_level),
-          'السكشن': getStudentSubSection(s, selectedSubject),
-          'الجروب': getStudentLectureGroup(s, selectedSubject),
+          'السكشن': s.nativeSection || getStudentSubSection(s, selectedSubject),
+          'الجروب': groupDisplay,
           'الأسبوع': `الأسبوع ${week}`,
           'تاريخ المحاضرة': sessionDate,
           'الحالة': stLabel,
+          'ملاحظات': isFromOtherGroup ? 'طالب من مجموعة أخرى' : '',
           'سبب العذر': excuseReasons[s.user_id] || ''
         };
       });
@@ -1528,7 +1604,7 @@ export default function AttendanceTab({ user }) {
           </button>
           <button 
             className="btn-primary" 
-            onClick={() => setShowExportModal(true)} 
+            onClick={handleOpenExportModal} 
             disabled={!selectedSubject || displayedEnrolledStudents.length === 0}
             style={{background:'var(--primary)',display:'flex',alignItems:'center',gap:'8px',padding:'9px 16px',fontSize:'0.9rem'}}
             title="تصدير كشف الحضور أو الغياب كملف TXT أو Excel"
@@ -2499,6 +2575,132 @@ export default function AttendanceTab({ user }) {
                   <option value="late">🟡 المتأخرون فقط ({countLate} طالب)</option>
                   <option value="excused">🔵 أصحاب الأعذار فقط ({countExcused} طالب)</option>
                 </select>
+              </div>
+
+              <div style={{borderTop:'1px solid var(--border)',paddingTop:'1rem'}}>
+                <label style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'6px',fontSize:'0.9rem',fontWeight:700}}>
+                  <span>3. إضافة طالب من مجموعة أخرى لهذا الكشف (اختياري):</span>
+                  {exportExtraStudents.length > 0 && (
+                    <span className="badge" style={{background:'rgba(16, 185, 129, 0.15)',color:'var(--success)',fontSize:'0.75rem'}}>
+                      تمت إضافة {exportExtraStudents.length} طالب
+                    </span>
+                  )}
+                </label>
+                <p style={{margin:'0 0 8px 0',fontSize:'0.8rem',color:'var(--text-muted)'}}>
+                  إذا حضر طالب من المجموعة الأخرى اليوم، ابحث عنه هنا لإدراجه كـ (حاضر) في هذا الملف المُصدّر فقط دون التأثير على القوائم الرئيسية.
+                </p>
+
+                {/* Search Box */}
+                <div style={{position:'relative',marginBottom:'8px'}}>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="ابحث بالاسم أو الرقم الأكاديمي لإضافته للكشف..."
+                    value={extraStudentSearch}
+                    onChange={e => setExtraStudentSearch(e.target.value)}
+                    style={{width:'100%',padding:'8px 12px',fontSize:'0.85rem'}}
+                  />
+                  {extraStudentSearch.trim().length >= 2 && (
+                    <div style={{
+                      position:'absolute',
+                      top:'100%',
+                      left:0,
+                      right:0,
+                      background:'var(--bg)',
+                      border:'1px solid var(--primary)',
+                      borderRadius:'8px',
+                      maxHeight:'160px',
+                      overflowY:'auto',
+                      zIndex:1000,
+                      boxShadow:'0 8px 24px rgba(0,0,0,0.6)'
+                    }}>
+                      {availableExtraCandidates.slice(0, 8).map(stu => (
+                        <div
+                          key={stu.user_id}
+                          onClick={() => handleAddExtraStudent(stu)}
+                          style={{
+                            padding:'8px 12px',
+                            borderBottom:'1px solid var(--border)',
+                            cursor:'pointer',
+                            display:'flex',
+                            justifyContent:'space-between',
+                            alignItems:'center',
+                            fontSize:'0.85rem'
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'rgba(79, 70, 229, 0.15)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                        >
+                          <div>
+                            <strong>{stu.name}</strong>
+                            <span style={{color:'var(--text-muted)',fontSize:'0.75rem',marginRight:'6px'}}>({stu.user_id})</span>
+                          </div>
+                          <span className="badge" style={{fontSize:'0.72rem'}}>
+                            {attendanceType === 'lecture' ? `مجموعة ${getStudentLectureGroup(stu, selectedSubject)}` : getStudentSubSection(stu, selectedSubject)}
+                          </span>
+                        </div>
+                      ))}
+                      {availableExtraCandidates.length === 0 && (
+                        <div style={{padding:'10px',textAlign:'center',color:'var(--text-muted)',fontSize:'0.85rem'}}>
+                          لم يتم العثور على طالب مطابق
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* List of Extra Students Added */}
+                {exportExtraStudents.length > 0 && (
+                  <div style={{display:'flex',flexDirection:'column',gap:'6px',marginBottom:'10px'}}>
+                    {exportExtraStudents.map(stu => (
+                      <div key={stu.user_id} style={{
+                        display:'flex',
+                        alignItems:'center',
+                        justifyContent:'space-between',
+                        background:'rgba(79, 70, 229, 0.08)',
+                        border:'1px solid rgba(79, 70, 229, 0.25)',
+                        padding:'6px 10px',
+                        borderRadius:'6px',
+                        fontSize:'0.85rem'
+                      }}>
+                        <div style={{display:'flex',alignItems:'center',gap:'6px',overflow:'hidden'}}>
+                          <span style={{fontWeight:700,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:'160px'}}>{stu.name}</span>
+                          <span className="badge" style={{fontSize:'0.7rem',background:'rgba(245, 158, 11, 0.15)',color:'#fbbf24'}}>
+                            {stu.nativeGroup ? `مجموعة ${stu.nativeGroup}` : stu.nativeSection}
+                          </span>
+                        </div>
+                        <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                          <select
+                            className="input-field"
+                            value={stu.status}
+                            onChange={e => handleUpdateExtraStatus(stu.user_id, e.target.value)}
+                            style={{padding:'3px 8px',fontSize:'0.8rem'}}
+                          >
+                            <option value="present">حاضر ✓</option>
+                            <option value="late">تأخير 🟡</option>
+                            <option value="excused">عذر 🔵</option>
+                            <option value="absent">غائب 🔴</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveExtraStudent(stu.user_id)}
+                            style={{background:'none',border:'none',color:'var(--danger)',cursor:'pointer',padding:'2px'}}
+                            title="إلغاء الإضافة من الكشف"
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'0.8rem',color:'var(--text-muted)',cursor:'pointer',marginTop:'4px'}}>
+                      <input
+                        type="checkbox"
+                        checked={saveExtraAttendanceToDb}
+                        onChange={e => setSaveExtraAttendanceToDb(e.target.checked)}
+                      />
+                      <span>حفظ حضورهم أيضاً في قاعدة بيانات المنصة لهذا الأسبوع</span>
+                    </label>
+                  </div>
+                )}
               </div>
 
               <div style={{display:'flex',gap:'10px',marginTop:'0.5rem'}}>

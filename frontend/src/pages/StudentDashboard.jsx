@@ -549,7 +549,7 @@ export default function StudentDashboard({ user, onLogout }) {
   const totalRecordedSessions = attendance.length;
   const totalAttendedSessions = attendance.filter(a => {
     const s = normalizeStatus(a.status);
-    return s === 'present' || s === 'late';
+    return s === 'present' || s === 'late' || s === 'excused';
   }).length;
   const totalAbsences = attendance.filter(a => normalizeStatus(a.status) === 'absent').length;
   const attendanceRate = totalRecordedSessions > 0 ? Math.round((totalAttendedSessions / totalRecordedSessions) * 100) : 100;
@@ -566,7 +566,7 @@ export default function StudentDashboard({ user, onLogout }) {
     const subAtt = attendance.filter(a => a.subject_id === sub.id);
     const attendedCount = subAtt.filter(a => {
       const s = normalizeStatus(a.status);
-      return s === 'present' || s === 'late';
+      return s === 'present' || s === 'late' || s === 'excused';
     }).length;
     const absSubCount = subAtt.filter(a => normalizeStatus(a.status) === 'absent').length;
     const subRate = subAtt.length > 0 ? Math.round((attendedCount / subAtt.length) * 100) : 100;
