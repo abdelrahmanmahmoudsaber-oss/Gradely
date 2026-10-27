@@ -1070,20 +1070,23 @@ export async function printWeekAttendancePDF({
         <div>
           <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #0f172a;padding-bottom:6px;margin-bottom:8px;">
             <div>
-              <h1 style="margin:0;font-size:18px;font-weight:800;color:#1e1b4b;">كشف حضور وغياب الطلاب (${escapeHtml(typeLabel)})</h1>
+              <h1 style="margin:0;font-size:18px;font-weight:800;color:#1e1b4b;display:flex;align-items:center;gap:8px;">
+                <span>كشف حضور وغياب الطلاب</span>
+                <span style="font-size:13px;background:#e0e7ff;color:#3730a3;padding:2px 10px;border-radius:6px;border:1px solid #c7d2fe;font-weight:700;">${escapeHtml(typeLabel)}</span>
+              </h1>
             </div>
             <div style="text-align:left;font-size:11px;color:#64748b;">
-              <div>تاريخ الطباعة: ${escapeHtml(new Date().toLocaleDateString('ar-EG'))}</div>
+              <div>تاريخ الطباعة: <span dir="ltr" style="display:inline-block;font-weight:600;">${escapeHtml(new Date().toLocaleDateString('en-GB'))}</span></div>
               <div style="font-weight:700;color:#0f172a;margin-top:2px;">الأسبوع ${escapeHtml(weekNum)}</div>
             </div>
           </div>
 
           <div style="background:#f8fafc;border:1px solid #cbd5e1;padding:8px 12px;margin-bottom:8px;display:grid;grid-template-columns:repeat(3, 1fr);gap:6px;font-size:12px;">
-            <div><span style="color:#64748b;font-weight:600;">المادة:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(subjectName)}</span></div>
+            <div><span style="color:#64748b;font-weight:600;">المادة:</span> <span style="color:#0f172a;font-weight:700;">${formatStudentNameForPdf(subjectName)}</span></div>
             <div><span style="color:#64748b;font-weight:600;">الفرقة:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(yearLevel ? 'الفرقة ' + yearLevel : '—')}</span></div>
-            <div><span style="color:#64748b;font-weight:600;">المجموعة:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(groupName || sectionName || 'A / B')}</span></div>
-            <div><span style="color:#64748b;font-weight:600;">تاريخ الجلسة:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(sessionDate || '—')}</span></div>
-            <div><span style="color:#64748b;font-weight:600;">المعيد:</span> <span style="color:#0f172a;font-weight:700;">${escapeHtml(instructorName || '—')}</span></div>
+            <div><span style="color:#64748b;font-weight:600;">المجموعة:</span> <span style="color:#0f172a;font-weight:700;">${formatStudentNameForPdf(groupName || sectionName || 'A / B')}</span></div>
+            <div><span style="color:#64748b;font-weight:600;">تاريخ الجلسة:</span> <span style="color:#0f172a;font-weight:700;" dir="ltr">${escapeHtml(sessionDate || '—')}</span></div>
+            <div><span style="color:#64748b;font-weight:600;">المعيد:</span> <span style="color:#0f172a;font-weight:700;">${formatStudentNameForPdf(instructorName || '—')}</span></div>
           </div>
 
           <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;font-size:11px;">
@@ -1096,8 +1099,8 @@ export async function printWeekAttendancePDF({
         </div>
       ` : `
         <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1.5px solid #0f172a;padding-bottom:5px;margin-bottom:8px;font-size:11px;color:#64748b;">
-          <div><span style="font-weight:700;color:#0f172a;">متابعة كشف الحضور:</span> ${escapeHtml(subjectName)} — الأسبوع ${escapeHtml(weekNum)}</div>
-          <div style="font-weight:600;color:#334155;">${escapeHtml(groupName || sectionName || 'A / B')}</div>
+          <div><span style="font-weight:700;color:#0f172a;">متابعة كشف الحضور:</span> ${formatStudentNameForPdf(subjectName)} — الأسبوع ${escapeHtml(weekNum)}</div>
+          <div style="font-weight:600;color:#334155;">${formatStudentNameForPdf(groupName || sectionName || 'A / B')}</div>
         </div>
       `;
 
