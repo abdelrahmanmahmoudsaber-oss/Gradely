@@ -18,6 +18,21 @@ const escapeHtml = (str) => {
     .replace(/'/g, '&#39;');
 };
 
+// Formats student names and English labels for html2canvas so Latin spaces NEVER collapse in RTL tables
+const formatStudentNameForPdf = (rawName) => {
+  if (!rawName) return '—';
+  const clean = String(rawName).trim().replace(/\s+/g, ' ');
+  const isArabic = /[\u0600-\u06FF]/.test(clean);
+  // Replace spaces with non-breaking spaces (&nbsp;) for Latin text so html2canvas never drops spaces between words!
+  const safeName = isArabic ? escapeHtml(clean) : escapeHtml(clean).replace(/ /g, '&nbsp;');
+  const fontFamily = isArabic 
+    ? "'Cairo', 'Segoe UI', Tahoma, sans-serif" 
+    : "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans', Arial, sans-serif";
+  const dirAttr = isArabic ? 'rtl' : 'ltr';
+  
+  return `<span style="font-family:${fontFamily};direction:${dirAttr};unicode-bidi:isolate;display:inline-block;letter-spacing:0.25px;word-spacing:3px;">${safeName}</span>`;
+};
+
 export function printStudentReportPDF({ student, subjects, grades, attendance, options }) {
   const {
     includeAttendanceDetails = true,
@@ -965,7 +980,7 @@ export async function printWeekAttendancePDF({
       <tr style="border-bottom: 1px solid #cbd5e1; background-color: ${globalIdx % 2 === 0 ? '#ffffff' : '#f8fafc'}; height: 26px;">
         <td style="text-align:center;font-weight:700;color:#64748b;padding:4px 3px;border:1px solid #cbd5e1;font-size:11px;">${globalIdx + 1}</td>
         <td style="text-align:center;font-family:monospace;font-weight:700;padding:4px 4px;border:1px solid #cbd5e1;color:#1e293b;font-size:11.5px;">${escapeHtml(s.user_id)}</td>
-        <td style="font-weight:700;padding:4px 8px;border:1px solid #cbd5e1;color:#0f172a;text-align:right;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(s.name)}</td>
+        <td style="font-weight:700;padding:4px 8px;border:1px solid #cbd5e1;color:#0f172a;text-align:right;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${formatStudentNameForPdf(s.name)}</td>
         <td style="text-align:center;padding:4px 3px;border:1px solid #cbd5e1;color:#334155;font-size:11px;">${escapeHtml(sec)}</td>
         <td style="text-align:center;padding:4px 3px;border:1px solid #cbd5e1;">
           <span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:10.5px;font-weight:800;background-color:${isGrpA ? '#e0e7ff' : '#fae8ff'};color:${isGrpA ? '#3730a3' : '#86198f'};border:1px solid ${isGrpA ? '#c7d2fe' : '#f5d0fe'};">
@@ -1136,10 +1151,10 @@ export async function printWeekAttendancePDF({
 
       document.body.appendChild(pageContainer);
 
-      await new Promise(r => setTimeout(r, 60));
+      await new Promise(r => setTimeout(r, 120));
 
       const canvas = await html2canvas(pageContainer, {
-        scale: 1.5,
+        scale: 2,
         useCORS: true,
         logging: false,
         backgroundColor: '#ffffff',
