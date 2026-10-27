@@ -588,49 +588,26 @@ export default function AttendanceTab({ user }) {
   const groupACount = enrolledStudents.filter(stu => getStudentLectureGroup(stu, selectedSubject) === 'A').length;
   const groupBCount = enrolledStudents.filter(stu => getStudentLectureGroup(stu, selectedSubject) === 'B').length;
 
-  const isActivelySearching = studentSearch.trim().length >= 1;
-
-  // Candidate pool: when searching, search across whole academic year.
-  // Otherwise, include all enrolled students + any student who already has recorded attendance in this session!
-  const candidatePool = isActivelySearching
-    ? (allStudents.length > 0 ? allStudents.filter(stu => normalizeYear(stu.year_level) === normalizeYear(currentSub?.year_level)) : enrolledStudents)
-    : (allStudents.length > 0 ? allStudents.filter(stu => {
-        const inYear = normalizeYear(stu.year_level) === normalizeYear(currentSub?.year_level);
-        if (!inYear) return false;
-        const isEnrolled = enrolledStudents.some(e => String(e.user_id).trim() === String(stu.user_id).trim());
-        const hasActiveAtt = !!attendanceRecords[stu.user_id];
-        return isEnrolled || hasActiveAtt;
-      }) : enrolledStudents);
+  const candidatePool = enrolledStudents;
 
   const baseEnrolledStudents = candidatePool
     .filter(stu => {
-      // If user is actively searching by ID or name, search across all groups and sections!
-      if (isActivelySearching) return true;
-
-      // Retain any student who already has an attendance record (present, late, excused) in THIS session!
-      const hasActiveAttendance = !!attendanceRecords[stu.user_id];
-
       if (attendanceType === 'lecture') {
         if (selectedGroup === 'all') return true;
         const grp = getStudentLectureGroup(stu, selectedSubject);
-        return grp === selectedGroup || hasActiveAttendance;
+        return grp === selectedGroup;
       } else {
         if (selectedSection === 'all') return true;
-        const sec = getStudentSubSection(stu, selectedSubject);
-        return sec === normalizeSection(selectedSection) || hasActiveAttendance;
+        return getStudentSubSection(stu, selectedSubject) === normalizeSection(selectedSection);
       }
     })
     .filter(stu => {
-      if (!isActivelySearching) return true;
+      if (!studentSearch.trim()) return true;
       const q = studentSearch.toLowerCase().trim();
       return (stu.name && stu.name.toLowerCase().includes(q)) || (stu.user_id && stu.user_id.toLowerCase().includes(q));
     });
 
-  // Sort: Native group students first, then cross-group exceptional attendees
   baseEnrolledStudents.sort((a, b) => {
-    const isAExtra = attendanceType === 'lecture' && selectedGroup !== 'all' && getStudentLectureGroup(a, selectedSubject) !== selectedGroup;
-    const isBExtra = attendanceType === 'lecture' && selectedGroup !== 'all' && getStudentLectureGroup(b, selectedSubject) !== selectedGroup;
-    if (isAExtra !== isBExtra) return isAExtra ? 1 : -1;
     const secA = (a.section || '').localeCompare(b.section || '');
     if (secA !== 0) return secA;
     return String(a.user_id).localeCompare(String(b.user_id));
@@ -1150,11 +1127,7 @@ export default function AttendanceTab({ user }) {
 
     let targetStudents = baseEnrolledStudents;
     if (attendanceType === 'lecture' && selectedGroup !== 'all') {
-      targetStudents = targetStudents.filter(s => {
-        const grp = getStudentLectureGroup(s, selectedSubject);
-        const hasActiveAtt = !!attendanceRecords[s.user_id];
-        return grp === selectedGroup || hasActiveAtt;
-      });
+      targetStudents = targetStudents.filter(s => getStudentLectureGroup(s, selectedSubject) === selectedGroup);
     }
 
     if (exportFilter === 'recorded') {
@@ -1234,20 +1207,16 @@ export default function AttendanceTab({ user }) {
       const excelRows = targetStudents.map((s, idx) => {
         const st = attendanceRecords[s.user_id] || 'لم يرصد';
         const stLabel = st === 'present' ? 'حاضر' : st === 'absent' ? 'غائب' : st === 'late' ? 'تأخير' : st === 'excused' ? 'عذر' : 'لم يرصد';
-        const nativeGrp = getStudentLectureGroup(s, selectedSubject);
-        const isCrossGroup = attendanceType === 'lecture' && selectedGroup !== 'all' && nativeGrp !== selectedGroup;
-        const groupDisplay = isCrossGroup ? `${nativeGrp} (حاضر استثنائي مع ${selectedGroup})` : nativeGrp;
         return {
           'م': idx + 1,
           'الرقم الأكاديمي': s.user_id,
           'اسم الطالب': s.name,
           'الفرقة': normalizeYear(s.year_level),
           'السكشن': getStudentSubSection(s, selectedSubject),
-          'الجروب': groupDisplay,
+          'الجروب': getStudentLectureGroup(s, selectedSubject),
           'الأسبوع': `الأسبوع ${week}`,
           'تاريخ المحاضرة': sessionDate,
           'الحالة': stLabel,
-          'ملاحظات': isCrossGroup ? 'طالب استثنائي من مجموعة أخرى' : '',
           'سبب العذر': excuseReasons[s.user_id] || ''
         };
       });
@@ -2288,16 +2257,6 @@ export default function AttendanceTab({ user }) {
                         <span className="badge" style={{background:'rgba(79, 70, 229, 0.08)',color:'var(--primary-hover)',border:'1px solid rgba(79, 70, 229, 0.2)',fontSize:'0.75rem'}}>
                           فرقة {normalizeYear(s.year_level)}
                         </span>
-                        {attendanceType === 'lecture' && selectedGroup !== 'all' && getStudentLectureGroup(s, selectedSubject) !== selectedGroup && (
-                          <span className="badge" style={{background:'rgba(245, 158, 11, 0.15)',color:'#fbbf24',border:'1px solid rgba(245, 158, 11, 0.35)',fontSize:'0.75rem',fontWeight:700}}>
-                            ⚡ طالب من مجموعة {getStudentLectureGroup(s, selectedSubject)} (حاضر استثنائي)
-                          </span>
-                        )}
-                        {attendanceType === 'section' && selectedSection !== 'all' && getStudentSubSection(s, selectedSubject) !== normalizeSection(selectedSection) && (
-                          <span className="badge" style={{background:'rgba(245, 158, 11, 0.15)',color:'#fbbf24',border:'1px solid rgba(245, 158, 11, 0.35)',fontSize:'0.75rem',fontWeight:700}}>
-                            ⚡ طالب من {getStudentSubSection(s, selectedSubject)} (حاضر استثنائي)
-                          </span>
-                        )}
                       </div>
                       {status === 'excused' && excuse && (
                         <div style={{marginTop:'6px',fontSize:'0.8rem',color:'#3b82f6',display:'flex',alignItems:'center',gap:'4px'}}>
@@ -2445,16 +2404,6 @@ export default function AttendanceTab({ user }) {
                     <td style={{padding:'12px 16px',fontWeight:'bold',fontFamily:'monospace'}}>{s.user_id}</td>
                     <td style={{padding:'12px 16px',fontWeight:700,fontSize:'1rem'}}>
                       {s.name}
-                      {attendanceType === 'lecture' && selectedGroup !== 'all' && getStudentLectureGroup(s, selectedSubject) !== selectedGroup && (
-                        <span className="badge" style={{background:'rgba(245, 158, 11, 0.15)',color:'#fbbf24',marginRight:'8px',fontSize:'0.75rem',fontWeight:700}}>
-                          ⚡ مجموعة {getStudentLectureGroup(s, selectedSubject)} (استثنائي)
-                        </span>
-                      )}
-                      {attendanceType === 'section' && selectedSection !== 'all' && getStudentSubSection(s, selectedSubject) !== normalizeSection(selectedSection) && (
-                        <span className="badge" style={{background:'rgba(245, 158, 11, 0.15)',color:'#fbbf24',marginRight:'8px',fontSize:'0.75rem',fontWeight:700}}>
-                          ⚡ {getStudentSubSection(s, selectedSubject)} (استثنائي)
-                        </span>
-                      )}
                       {status === 'excused' && excuse && <span style={{fontSize:'0.75rem',color:'#3b82f6',display:'block'}}>عذر: {excuse}</span>}
                     </td>
                     <td style={{padding:'12px 16px'}}>
