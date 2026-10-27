@@ -44,10 +44,10 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
         }
       });
 
-      // 4. Background periodic update check (every 3 minutes)
+      // 4. Background periodic update check (every 1 minute)
       setInterval(() => {
         reg.update().catch(() => {});
-      }, 3 * 60 * 1000);
+      }, 60 * 1000);
 
       // 5. If new worker is waiting, activate it immediately
       if (reg.waiting) {

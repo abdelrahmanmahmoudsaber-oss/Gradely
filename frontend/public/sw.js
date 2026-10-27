@@ -1,9 +1,11 @@
-const CACHE_NAME = 'gradely-cache-v2';
+const CACHE_NAME = 'gradely-cache-v3-20261027';
 const STATIC_PRECACHE = [
   '/',
   '/favicon.svg',
   '/pwa-192x192.png',
   '/pwa-512x512.png',
+  '/pwa-maskable-512x512.png',
+  '/apple-touch-icon.png',
   '/manifest.webmanifest'
 ];
 
@@ -19,7 +21,7 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// Clean up old caches on activation and claim all open tabs
+// Clean up old caches on activation and claim all open tabs immediately
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
@@ -53,10 +55,10 @@ self.addEventListener('fetch', (event) => {
   }
 
   // 2. Navigation / HTML pages: NETWORK-FIRST with cache fallback
-  // Ensures user always gets the latest deployed index.html when online
+  // Ensures user always gets the latest deployed index.html when online without stale caching
   if (req.mode === 'navigate' || url.pathname.endsWith('.html') || url.pathname === '/') {
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: 'no-cache' })
         .then((networkRes) => {
           if (networkRes && networkRes.status === 200) {
             const clone = networkRes.clone();
@@ -90,7 +92,7 @@ self.addEventListener('fetch', (event) => {
   // 4. Other static images/fonts/manifest: STALE-WHILE-REVALIDATE
   event.respondWith(
     caches.match(req).then((cachedRes) => {
-      const fetchPromise = fetch(req)
+      const fetchPromise = fetch(req, { cache: 'no-cache' })
         .then((networkRes) => {
           if (networkRes && networkRes.status === 200) {
             const clone = networkRes.clone();

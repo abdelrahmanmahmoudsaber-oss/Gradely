@@ -89,38 +89,38 @@ BEGIN
   END IF;
 
   RETURN jsonb_build_object(
-    'users', (
+    'users', COALESCE((
       SELECT jsonb_agg(u)
       FROM (
         SELECT id, user_id, name, role, year_level, section, assigned_subjects
         FROM public.users
         ORDER BY section ASC, user_id ASC
       ) u
-    ),
-    'subjects', (
+    ), '[]'::jsonb),
+    'subjects', COALESCE((
       SELECT jsonb_agg(s)
       FROM (
         SELECT id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students
         FROM public.subjects
         ORDER BY year_level ASC, name ASC
       ) s
-    ),
-    'attendance', (
+    ), '[]'::jsonb),
+    'attendance', COALESCE((
       SELECT jsonb_agg(a)
       FROM (
         SELECT student_id, subject_id, week_number, status
         FROM public.attendance
         ORDER BY subject_id ASC, week_number ASC
       ) a
-    ),
-    'grades', (
+    ), '[]'::jsonb),
+    'grades', COALESCE((
       SELECT jsonb_agg(g)
       FROM (
-        SELECT student_id, subject_id, total, midterm, final, custom_columns
+        SELECT student_id, subject_id, quiz_1, quiz_2, project, attendance_score, final_grade
         FROM public.grades
         ORDER BY subject_id ASC
       ) g
-    )
+    ), '[]'::jsonb)
   );
 END;
 $$;

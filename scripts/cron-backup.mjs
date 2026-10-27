@@ -78,12 +78,28 @@ async function fetchBackupData() {
                         (process.env.SUPABASE_SERVICE_ROLE_KEY && SUPABASE_KEY === process.env.SUPABASE_SERVICE_ROLE_KEY);
 
   // Try the secure get_system_backup_data RPC first
-  // The RPC accepts p_session_token; for cron jobs we pass the cron secret as the token.
-  // If a SUPABASE_SERVICE_ROLE_KEY is set, the RPC auth check will pass via is_admin() in service context.
+  // The RPC accepts p_session_token / p_cron_secret / p_backup_secret.
   try {
-    const { data: rpcData, error: rpcErr } = await supabase.rpc('get_system_backup_data', {
-      p_session_token: BACKUP_SECRET || null
+    let rpcData = null;
+    let rpcErr = null;
+
+    const res1 = await supabase.rpc('get_system_backup_data', {
+      p_session_token: BACKUP_SECRET || null,
+      p_cron_secret: BACKUP_SECRET || null
     });
+
+    if (!res1.error && res1.data && res1.data.users) {
+      rpcData = res1.data;
+    } else {
+      const res2 = await supabase.rpc('get_system_backup_data', {
+        p_backup_secret: BACKUP_SECRET || null
+      });
+      if (!res2.error && res2.data && res2.data.users) {
+        rpcData = res2.data;
+      } else {
+        rpcErr = res1.error || res2.error;
+      }
+    }
 
     if (rpcErr) {
       console.warn(`[RPC WARN] get_system_backup_data returned error: code=${rpcErr.code} msg=${rpcErr.message}`);
