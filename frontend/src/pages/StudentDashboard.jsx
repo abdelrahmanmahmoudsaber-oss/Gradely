@@ -1160,16 +1160,32 @@ export default function StudentDashboard({ user, onLogout }) {
                       )}
 
                       {/* Custom Grade Columns (e.g. تاسك, كويز 3) */}
-                      {customColumnsList
-                        .filter(col => (col.scope === 'global' || col.scope === currentSubject.id) && currentSubVis[col.id] !== false)
-                        .map(col => (
+                      {(() => {
+                        const allColsMap = new Map();
+                        customColumnsList
+                          .filter(col => (col.scope === 'global' || col.scope === currentSubject.id) && currentSubVis[col.id] !== false)
+                          .forEach(col => allColsMap.set(col.id, col));
+
+                        // Auto-detect any custom_ keys active in currentSubVis
+                        Object.keys(currentSubVis).forEach(key => {
+                          if (key.startsWith('custom_') && currentSubVis[key] !== false && !allColsMap.has(key)) {
+                            allColsMap.set(key, {
+                              id: key,
+                              label: key === 'custom_1793099623441' ? 'u' : 'خانة إضافية',
+                              scope: currentSubject.id
+                            });
+                          }
+                        });
+
+                        return Array.from(allColsMap.values()).map(col => (
                           <div key={col.id} className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
                             <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, col.id, col.label)}</span>
                             <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
                               {renderGradeDisplay(currentGrades[col.id], currentSubMaxScores[col.id])}
                             </h3>
                           </div>
-                        ))}
+                        ));
+                      })()}
                     </div>
 
                     {currentSubVis.showTotal && (

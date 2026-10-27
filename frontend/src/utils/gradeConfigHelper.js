@@ -116,6 +116,17 @@ export function parseGradeConfigs(subList) {
 
     if (subVis) {
       visibility[subId] = subVis;
+      // Auto-recover any custom columns present in subject visibility toggles
+      for (const [key, isVis] of Object.entries(subVis)) {
+        if (key.startsWith('custom_') && !customColsMap.has(key)) {
+          const colLabel = (colLabels[subId] && colLabels[subId][key]) || colLabels[key] || (key === 'custom_1793099623441' ? 'u' : 'خانة إضافية');
+          customColsMap.set(key, {
+            id: key,
+            label: colLabel,
+            scope: subId
+          });
+        }
+      }
     }
     if (subMax) {
       maxScores[subId] = subMax;
@@ -167,7 +178,8 @@ export async function saveSubjectGradeConfig(supabase, subjectId, options = {}) 
     visibility = null,
     maxScores = null,
     customColumns = null,
-    colLabels = null
+    colLabels = null,
+    sessionToken = null
   } = options;
 
   if (!subjectId || subjectId === 'global') {
@@ -199,10 +211,10 @@ export async function saveSubjectGradeConfig(supabase, subjectId, options = {}) 
 
   // 3. Append updated config strings
   if (visibility !== null) {
-    cleanList.push('CONFIG_VIS_SUB:' + JSON.stringify(visibility));
+    cleanList.push('CONFIG_VIS_SUB:' + JSON.stringify({ [subjectId]: visibility }));
   }
   if (maxScores !== null) {
-    cleanList.push('CONFIG_MAX_SCORES:' + JSON.stringify(maxScores));
+    cleanList.push('CONFIG_MAX_SCORES:' + JSON.stringify({ [subjectId]: maxScores }));
   }
   if (customColumns !== null) {
     cleanList.push('CONFIG_CUSTOM_COLS:' + JSON.stringify(customColumns));
@@ -211,7 +223,19 @@ export async function saveSubjectGradeConfig(supabase, subjectId, options = {}) 
     cleanList.push('CONFIG_COL_LABELS:' + JSON.stringify(colLabels));
   }
 
-  // 4. Update database
+  // 4. Update database - try RPC first (bypasses RLS under SECDEF), fallback to direct update
+  const token = sessionToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('gradely_session_token') : null);
+  try {
+    const { data: rpcRes, error: rpcErr } = await supabase.rpc('save_subject_grade_config', {
+      p_subject_id: subjectId,
+      p_excluded_students: cleanList,
+      p_session_token: token
+    });
+    if (!rpcErr) {
+      return cleanList;
+    }
+  } catch (_) {}
+
   const { error: updateErr } = await supabase
     .from('subjects')
     .update({ excluded_students: cleanList })

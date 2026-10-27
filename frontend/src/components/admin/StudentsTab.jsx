@@ -764,12 +764,21 @@ export default function StudentsTab({ user }) {
     }
   };
 
+  const getSecureRandomInt = (max) => {
+    if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+      const arr = new Uint32Array(1);
+      window.crypto.getRandomValues(arr);
+      return arr[0] % max;
+    }
+    return Math.floor(Math.random() * max);
+  };
+
   const generateRandomPassword = (format) => {
     if (format === 'numeric6') {
-      return String(Math.floor(100000 + Math.random() * 900000));
+      return String(100000 + getSecureRandomInt(900000));
     }
     if (format === 'alphanumeric8') {
-      // 8-char mixed: uppercase + lowercase + digits + symbol — much harder to guess
+      // 8-char mixed: uppercase + lowercase + digits + symbol — cryptographically secure
       const upper = 'ABCDEFGHJKMNPQRSTUVWXYZ';
       const lower = 'abcdefghjkmnpqrstuvwxyz';
       const digits = '23456789';
@@ -777,26 +786,26 @@ export default function StudentsTab({ user }) {
       const allChars = upper + lower + digits + symbols;
       // Guarantee at least 1 from each category
       let result = [
-        upper.charAt(Math.floor(Math.random() * upper.length)),
-        lower.charAt(Math.floor(Math.random() * lower.length)),
-        digits.charAt(Math.floor(Math.random() * digits.length)),
-        symbols.charAt(Math.floor(Math.random() * symbols.length)),
+        upper.charAt(getSecureRandomInt(upper.length)),
+        lower.charAt(getSecureRandomInt(lower.length)),
+        digits.charAt(getSecureRandomInt(digits.length)),
+        symbols.charAt(getSecureRandomInt(symbols.length)),
       ];
       for (let i = result.length; i < 8; i++) {
-        result.push(allChars.charAt(Math.floor(Math.random() * allChars.length)));
+        result.push(allChars.charAt(getSecureRandomInt(allChars.length)));
       }
-      // Shuffle to avoid predictable pattern
+      // Cryptographically secure Fisher-Yates shuffle
       for (let i = result.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = getSecureRandomInt(i + 1);
         [result[i], result[j]] = [result[j], result[i]];
       }
       return result.join('');
     }
-    // alphanumeric6 (default)
+    // alphanumeric6 (default) - cryptographically secure
     const chars = '23456789abcdefghjkmnpqrstuvwxyz';
     let res = '';
     for (let i = 0; i < 6; i++) {
-      res += chars.charAt(Math.floor(Math.random() * chars.length));
+      res += chars.charAt(getSecureRandomInt(chars.length));
     }
     return res;
   };
