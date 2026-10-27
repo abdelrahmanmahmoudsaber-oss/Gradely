@@ -37,7 +37,7 @@ export default function AuditLogsTab({ user }) {
     try {
       const [subRes, stuRes] = await Promise.all([
         supabase.from('subjects').select('id, name'),
-        supabase.from('users').select('user_id, name, year_level, section')
+        supabase.from('users').select('user_id, name, year_level, section, role')
       ]);
 
       const subMap = {};
@@ -51,12 +51,19 @@ export default function AuditLogsTab({ user }) {
 
       const stuMap = {};
       const stuYrMap = {};
+      const adminList = [];
       (stuRes.data || []).forEach(u => {
         stuMap[u.user_id] = u.name;
         stuYrMap[u.user_id] = u.year_level;
+        if (u.role === 'admin' || u.role === 'super_admin') {
+          adminList.push({ user_id: u.user_id, name: u.name, role: u.role });
+        }
       });
       setStudentsMap(stuMap);
       setStudentsYearMap(stuYrMap);
+      if (adminList.length > 0) {
+        setActorsList(adminList);
+      }
     } catch (e) {
       console.warn('Metadata fetch error in AuditLogsTab:', e);
     }
@@ -94,9 +101,18 @@ export default function AuditLogsTab({ user }) {
       const rawLogs = data || [];
       setLogs(rawLogs);
 
-      // Extract unique actors for filter
-      const uniqueActors = Array.from(new Set(rawLogs.map(l => l.actor_user_id).filter(Boolean)));
-      setActorsList(uniqueActors);
+      // Merge any actors seen in logs with known adminList
+      setActorsList(prev => {
+        const existingIds = new Set(prev.map(a => typeof a === 'object' ? a.user_id : a));
+        const newOnes = [];
+        rawLogs.forEach(l => {
+          if (l.actor_user_id && !existingIds.has(l.actor_user_id)) {
+            existingIds.add(l.actor_user_id);
+            newOnes.push({ user_id: l.actor_user_id, name: l.actor_user_id });
+          }
+        });
+        return [...prev, ...newOnes];
+      });
 
     } catch (err) {
       console.error('Audit logs fetch error:', err);
@@ -504,22 +520,26 @@ export default function AuditLogsTab({ user }) {
           </div>
 
           {/* Actor / TA Filter */}
-          {actorsList.length > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>المعيد:</span>
-              <select 
-                value={actorFilter} 
-                onChange={e => setActorFilter(e.target.value)}
-                className="input-field"
-                style={{ padding: '6px 10px', fontSize: '0.85rem' }}
-              >
-                <option value="all">جميع المنفّذين</option>
-                {actorsList.map(act => (
-                  <option key={act} value={act}>{act}</option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>المسؤول / المعيد:</span>
+            <select 
+              value={actorFilter} 
+              onChange={e => setActorFilter(e.target.value)}
+              className="input-field"
+              style={{ padding: '6px 10px', fontSize: '0.85rem' }}
+            >
+              <option value="all">جميع المنفّذين والمعيدين</option>
+              {actorsList.map(act => {
+                const uid = typeof act === 'object' ? act.user_id : act;
+                const uName = typeof act === 'object' ? act.name : (studentsMap[act] || act);
+                return (
+                  <option key={uid} value={uid}>
+                    {uName} ({uid})
+                  </option>
+                );
+              })}
+            </select>
+          </div>
 
           {/* Table / Section Filter */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>

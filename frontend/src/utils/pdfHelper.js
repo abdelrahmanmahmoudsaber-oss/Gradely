@@ -976,6 +976,9 @@ export async function printWeekAttendancePDF({
     const grp = getStudentLectureGroup ? getStudentLectureGroup(s) : 'A';
     const isGrpA = grp === 'A';
 
+    const stuScore = (options.studentScores && options.studentScores[s.user_id] != null) ? options.studentScores[s.user_id] : '';
+    const displayScore = stuScore !== '' ? `<span style="font-weight:700;color:#0f172a;font-size:11px;">${stuScore} / 5</span>` : '&nbsp;';
+
     return `
       <tr style="border-bottom: 1px solid #cbd5e1; background-color: ${globalIdx % 2 === 0 ? '#ffffff' : '#f8fafc'}; height: 26px;">
         <td style="text-align:center;font-weight:700;color:#64748b;padding:4px 3px;border:1px solid #cbd5e1;font-size:11px;">${globalIdx + 1}</td>
@@ -992,7 +995,7 @@ export async function printWeekAttendancePDF({
             ${statusText}
           </span>
         </td>
-        <td style="text-align:center;min-width:75px;padding:4px 3px;border:1px solid #cbd5e1;">&nbsp;</td>
+        <td style="text-align:center;min-width:75px;padding:4px 3px;border:1px solid #cbd5e1;">${displayScore}</td>
       </tr>
     `;
   };

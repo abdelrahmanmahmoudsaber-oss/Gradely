@@ -1095,6 +1095,21 @@ export default function StudentDashboard({ user, onLogout }) {
                           {attSubMode === 'lecture' ? `محاضرة ${w}` : `أسبوع ${w}`}
                         </div>
                         <div style={{fontWeight: 'bold', color: statusColor, fontSize: '0.85rem'}}>{statusLabel}</div>
+                        {attSubMode === 'section' && currentGrades?.custom_grades && currentGrades.custom_grades['sec_score_w' + w] != null && (
+                          <div style={{
+                            fontSize: '0.74rem',
+                            fontWeight: 800,
+                            color: 'var(--primary-hover)',
+                            background: 'rgba(79, 70, 229, 0.12)',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            marginTop: '4px',
+                            border: '1px solid rgba(79, 70, 229, 0.25)',
+                            display: 'inline-block'
+                          }}>
+                            ⭐ درجة: {currentGrades.custom_grades['sec_score_w' + w]} / 5
+                          </div>
+                        )}
                         {hasRecordedAttendance && wDate ? (
                           <div style={{
                             fontSize: '0.73rem',

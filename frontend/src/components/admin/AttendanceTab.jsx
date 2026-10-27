@@ -62,6 +62,7 @@ export default function AttendanceTab({ user }) {
   const [sessionDate, setSessionDate] = useState(() => getTodayDateStr());
   const [attendanceRecords, setAttendanceRecords] = useState({});
   const [excuseReasons, setExcuseReasons] = useState({});
+  const [sectionScores, setSectionScores] = useState({});
   const [autoSaveStatus, setAutoSaveStatus] = useState('');
   const [message, setMessage] = useState('');
   const [studentSearch, setStudentSearch] = useState('');
@@ -503,6 +504,32 @@ export default function AttendanceTab({ user }) {
 
       setAttendanceRecords(recs);
       setExcuseReasons(excuses);
+
+      // Load weekly section participation scores from grades table
+      if (attendanceType === 'section') {
+        try {
+          const { data: gData } = await supabase
+            .from('grades')
+            .select('student_id, custom_grades')
+            .eq('subject_id', selectedSubject);
+
+          if (gData && Array.isArray(gData)) {
+            const scKey = 'sec_score_w' + week;
+            const scMap = {};
+            gData.forEach(g => {
+              if (g.custom_grades && g.custom_grades[scKey] !== undefined) {
+                scMap[g.student_id] = g.custom_grades[scKey];
+              }
+            });
+            setSectionScores(scMap);
+          }
+        } catch (e) {
+          console.warn('Section scores load warning:', e);
+        }
+      } else {
+        setSectionScores({});
+      }
+
       setSessionDate(foundDate);
       setOfflineNotice('');
       cacheManager.set(cacheKey, { records: recs, excuses, date: foundDate });
@@ -748,6 +775,37 @@ export default function AttendanceTab({ user }) {
     }
   };
 
+  const handleUpdateSectionScore = async (studentId, val) => {
+    const parsed = val === '' ? null : Math.min(5, Math.max(0, parseFloat(val) || 0));
+    setSectionScores(prev => ({ ...prev, [studentId]: parsed }));
+
+    try {
+      const { data: existingG } = await supabase
+        .from('grades')
+        .select('custom_grades')
+        .eq('student_id', studentId)
+        .eq('subject_id', selectedSubject)
+        .maybeSingle();
+
+      const existingCust = (existingG && existingG.custom_grades) || {};
+      const updatedCust = {
+        ...existingCust,
+        ['sec_score_w' + week]: parsed
+      };
+
+      await supabase.from('grades').upsert({
+        student_id: studentId,
+        subject_id: selectedSubject,
+        custom_grades: updatedCust
+      }, { onConflict: 'student_id,subject_id' });
+
+      setAutoSaveStatus('✓ تم حفظ درجة المشاركة');
+      setTimeout(() => setAutoSaveStatus(''), 2000);
+    } catch (err) {
+      console.warn('Update section score error:', err);
+    }
+  };
+
   // Instant 0ms Local Toggle + Non-blocking Background Upsert
   // Instant 0ms Local Toggle + Non-blocking Database Upsert + Offline Storage
   const toggleAttendance = async (studentId, newStatus) => {
@@ -762,6 +820,15 @@ export default function AttendanceTab({ user }) {
 
     const updatedRecs = { ...attendanceRecords, [studentId]: nextVal };
     setAttendanceRecords(updatedRecs);
+
+    // Auto default score for section attendance: 5 if present, 0 if absent
+    if (attendanceType === 'section') {
+      if (nextVal === 'present' && (sectionScores[studentId] === undefined || sectionScores[studentId] === null)) {
+        handleUpdateSectionScore(studentId, 5);
+      } else if (nextVal === 'absent' && (sectionScores[studentId] === undefined || sectionScores[studentId] === 5)) {
+        handleUpdateSectionScore(studentId, 0);
+      }
+    }
     
     const effWeek = getEffectiveWeekNum();
     const storageKey = 'gradely_local_att_' + (attendanceType === 'lecture' ? 'lec_' : 'sec_') + selectedSubject + '_w' + week;
@@ -786,20 +853,37 @@ export default function AttendanceTab({ user }) {
 
     try {
       await saveSubjectWeekDate(selectedSubject, week, sessionDate);
-      const { error } = await supabase.from('attendance').upsert({
-        student_id: studentId,
-        subject_id: selectedSubject,
-        week_number: effWeek,
-        status: nextVal || 'unrecorded'
-      }, { onConflict: 'student_id,subject_id,week_number' });
 
-      if (error) {
-        console.error('Attendance save error:', error);
-        queueAttendanceChange(studentId, selectedSubject, effWeek, nextVal);
-        setAutoSaveStatus('🟡 تم الحفظ محلياً (في انتظار المزامنة)');
-      } else {
+      // Try secure RPC first
+      let saveSuccess = false;
+      try {
+        const { error: rpcErr } = await supabase.rpc('save_attendance_record', {
+          p_student_id: studentId,
+          p_subject_id: selectedSubject,
+          p_week_number: effWeek,
+          p_status: nextVal || 'unrecorded',
+          p_session_token: localStorage.getItem('gradely_session_token') || null
+        });
+        if (!rpcErr) saveSuccess = true;
+      } catch (_) {}
+
+      // Direct upsert fallback
+      if (!saveSuccess) {
+        const { error } = await supabase.from('attendance').upsert({
+          student_id: studentId,
+          subject_id: selectedSubject,
+          week_number: effWeek,
+          status: nextVal || 'unrecorded'
+        }, { onConflict: 'student_id,subject_id,week_number' });
+        if (!error) saveSuccess = true;
+      }
+
+      if (saveSuccess) {
         setAutoSaveStatus('✓ تم الحفظ تلقائياً');
         setTimeout(() => setAutoSaveStatus(''), 2000);
+      } else {
+        queueAttendanceChange(studentId, selectedSubject, effWeek, nextVal);
+        setAutoSaveStatus('🟡 تم الحفظ محلياً (في انتظار المزامنة)');
       }
     } catch (err) {
       console.error('Attendance toggle error:', err);
@@ -1255,6 +1339,7 @@ export default function AttendanceTab({ user }) {
           excuseReasons: excuseReasons,
           getStudentSubSection: (s) => s.nativeSection || getStudentSubSection(s, selectedSubject),
           getStudentLectureGroup: (s) => s.nativeGroup || getStudentLectureGroup(s, selectedSubject),
+          studentScores: sectionScores,
           filename: `${filename}.pdf`,
           onProgress: (cur, tot) => {
             setPdfProgressText(`جاري تجهيز صفحة ${cur} من ${tot}...`);
@@ -2355,6 +2440,47 @@ export default function AttendanceTab({ user }) {
                   )}
                 </div>
 
+                {/* Section Participation Score Input (Sections only) */}
+                {attendanceType === 'section' && (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    margin: '8px 0',
+                    padding: '6px 12px',
+                    background: 'rgba(99, 102, 241, 0.05)',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(99, 102, 241, 0.18)'
+                  }}>
+                    <span style={{ fontSize: '0.84rem', fontWeight: 800, color: 'var(--primary-hover)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      ⭐ درجة مشاركة السكشن:
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <input
+                        type="number"
+                        min="0"
+                        max="5"
+                        step="0.5"
+                        placeholder="5"
+                        value={sectionScores[s.user_id] != null ? sectionScores[s.user_id] : ''}
+                        onChange={(e) => handleUpdateSectionScore(s.user_id, e.target.value)}
+                        style={{
+                          width: '54px',
+                          textAlign: 'center',
+                          padding: '4px 6px',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border)',
+                          background: 'var(--bg)',
+                          color: 'var(--text-main)',
+                          fontWeight: 800,
+                          fontSize: '0.92rem'
+                        }}
+                      />
+                      <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-muted)' }}>/ 5</span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Modern 4-Segment Action Bar */}
                 <div style={{
                   display:'grid',
@@ -2467,6 +2593,9 @@ export default function AttendanceTab({ user }) {
                 <th style={{padding:'12px 16px'}}>اسم الطالب</th>
                 <th style={{padding:'12px 16px'}}>السكشن</th>
                 <th style={{padding:'12px 16px',textAlign:'center',minWidth:'320px'}}>حالة الحضور (أسبوع {week})</th>
+                {attendanceType === 'section' && (
+                  <th style={{padding:'12px 16px',textAlign:'center',width:'130px'}}>درجة السكشن (من 5)</th>
+                )}
                 {isSuper && <th style={{padding:'12px 16px',width:'40px',textAlign:'center'}}></th>}
               </tr>
             </thead>
@@ -2495,6 +2624,33 @@ export default function AttendanceTab({ user }) {
                         <button onClick={()=>toggleAttendance(s.user_id,'excused')} style={{border:'none',borderRadius:'4px',padding:'6px 12px',fontSize:'0.85rem',fontWeight:800,cursor:'pointer',background: status === 'excused' ? '#3b82f6' : 'transparent',color: status === 'excused' ? '#fff' : 'var(--text-muted)'}}>عذر</button>
                       </div>
                     </td>
+                    {attendanceType === 'section' && (
+                      <td style={{padding:'8px 16px',textAlign:'center'}}>
+                        <div style={{display:'inline-flex',alignItems:'center',gap:'4px'}}>
+                          <input
+                            type="number"
+                            min="0"
+                            max="5"
+                            step="0.5"
+                            placeholder="5"
+                            value={sectionScores[s.user_id] != null ? sectionScores[s.user_id] : ''}
+                            onChange={(e) => handleUpdateSectionScore(s.user_id, e.target.value)}
+                            style={{
+                              width:'48px',
+                              textAlign:'center',
+                              padding:'4px 6px',
+                              borderRadius:'4px',
+                              border:'1px solid var(--border)',
+                              background:'var(--bg)',
+                              color:'var(--text-main)',
+                              fontWeight:800,
+                              fontSize:'0.85rem'
+                            }}
+                          />
+                          <span style={{fontSize:'0.8rem',color:'var(--text-muted)'}}>/ 5</span>
+                        </div>
+                      </td>
+                    )}
                     {isSuper && (
                       <td style={{padding:'8px 16px',textAlign:'center'}}>
                         <button onClick={()=>handleExcludeStudent(s.user_id, s.name)} style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}} title="حذف الطالب من المادة">
