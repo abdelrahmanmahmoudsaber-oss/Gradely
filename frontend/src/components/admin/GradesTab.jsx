@@ -2,9 +2,17 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { exportExcelFile, parseExcelFile } from '../../utils/excelHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
-import { Download, Upload, Save, Users, Filter, BookOpen, AlertCircle, Plus, X, Check } from 'lucide-react';
+import { Download, Upload, Save, Users, Filter, BookOpen, AlertCircle, Plus, X, Check, Eye, EyeOff } from 'lucide-react';
 import { getSectionInstructorName as resolveSectionTA } from '../../utils/sectionHelper';
 import { getAdminBaseData } from '../../utils/adminDataHelper';
+import { 
+  parseGradeConfigs, 
+  getSubjectVisibility, 
+  getSubjectMaxScores, 
+  saveSubjectGradeConfig, 
+  DEFAULT_VISIBILITY, 
+  DEFAULT_MAX_SCORES 
+} from '../../utils/gradeConfigHelper';
 
 export default function GradesTab({ user }) {
   const isSuper = isSuperUser(user);
@@ -21,6 +29,14 @@ export default function GradesTab({ user }) {
   const [importing, setImporting] = useState(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState('');
   const [saveTimeout, setSaveTimeout] = useState(null);
+
+  // Grade visibility and max scores configuration state
+  const [gradeConfigs, setGradeConfigs] = useState({
+    visibility: {},
+    maxScores: {},
+    colLabels: {},
+    customColumns: []
+  });
 
   // Custom grade columns state & modal
   const [showAddColModal, setShowAddColModal] = useState(false);
@@ -84,6 +100,9 @@ export default function GradesTab({ user }) {
       setAllAdmins(allUsersList.filter(u => u.role === 'admin' || u.role === 'super_admin' || isSuperUser(u)));
       setAllStudents(allUsersList.filter(u => u.role === 'student'));
       setSubjects(accessibleSubjects);
+
+      const parsedConfigs = parseGradeConfigs(accessibleSubjects);
+      setGradeConfigs(parsedConfigs);
 
       if (accessibleSubjects.length > 0) {
         const firstSub = accessibleSubjects[0];
@@ -159,6 +178,62 @@ export default function GradesTab({ user }) {
   };
 
   const activeCustomCols = getActiveCustomColumns();
+  const currentSubVis = getSubjectVisibility(gradeConfigs.visibility, selectedSubject);
+  const currentSubMaxScores = getSubjectMaxScores(gradeConfigs.maxScores, selectedSubject);
+
+  const handleToggleColumnVisibility = async (colKey) => {
+    if (!selectedSubject) return;
+    const updatedVis = {
+      ...currentSubVis,
+      [colKey]: !currentSubVis[colKey]
+    };
+    const newVisibility = {
+      ...gradeConfigs.visibility,
+      [selectedSubject]: updatedVis
+    };
+    setGradeConfigs(prev => ({ ...prev, visibility: newVisibility }));
+
+    try {
+      const cleanExcluded = await saveSubjectGradeConfig(supabase, selectedSubject, {
+        visibility: updatedVis
+      });
+      const updatedSubs = subjects.map(s => s.id === selectedSubject ? { ...s, excluded_students: cleanExcluded } : s);
+      setSubjects(updatedSubs);
+      cacheManager.set('admin_subjects_base', updatedSubs);
+      setMessage(`✅ تم تحديث ظهور الخانة (${updatedVis[colKey] ? 'ظاهرة للطالب' : 'مخفية عن الطالب'})`);
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err) {
+      console.error('Save visibility error:', err);
+      setMessage('❌ فشل حفظ إعدادات الظهور');
+    }
+  };
+
+  const handleMaxScoreChange = async (scoreKey, newVal) => {
+    if (!selectedSubject) return;
+    const num = Math.max(1, parseFloat(newVal) || 1);
+    const updatedMax = {
+      ...currentSubMaxScores,
+      [scoreKey]: num
+    };
+    const newMaxScores = {
+      ...gradeConfigs.maxScores,
+      [selectedSubject]: updatedMax
+    };
+    setGradeConfigs(prev => ({ ...prev, maxScores: newMaxScores }));
+
+    try {
+      const cleanExcluded = await saveSubjectGradeConfig(supabase, selectedSubject, {
+        maxScores: updatedMax
+      });
+      const updatedSubs = subjects.map(s => s.id === selectedSubject ? { ...s, excluded_students: cleanExcluded } : s);
+      setSubjects(updatedSubs);
+      cacheManager.set('admin_subjects_base', updatedSubs);
+      setAutoSaveStatus('✅ تم حفظ الدرجة العظمى');
+      setTimeout(() => setAutoSaveStatus(''), 2500);
+    } catch (err) {
+      console.error('Save max score error:', err);
+    }
+  };
 
   const handleAddCustomColumn = async (e) => {
     if (e) e.preventDefault();
@@ -176,24 +251,19 @@ export default function GradesTab({ user }) {
 
       const existingCols = getActiveCustomColumns();
       const updatedCols = [...existingCols, newColObj];
-      const colsConfigStr = 'CONFIG_CUSTOM_COLS:' + JSON.stringify(updatedCols);
-      const visSubStr = 'CONFIG_VIS_SUB:' + JSON.stringify({ [selectedSubject]: { [colKey]: true } });
+      const updatedVis = {
+        ...currentSubVis,
+        [colKey]: true
+      };
 
-      const targetSub = subjects.find(s => s.id === selectedSubject);
-      if (targetSub) {
-        const cleanExcluded = Array.isArray(targetSub.excluded_students)
-          ? targetSub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG_CUSTOM_COLS:') && !x.startsWith('CONFIG_VIS_SUB:'))
-          : [];
-        cleanExcluded.push(colsConfigStr);
-        cleanExcluded.push(visSubStr);
+      const cleanExcluded = await saveSubjectGradeConfig(supabase, selectedSubject, {
+        customColumns: updatedCols,
+        visibility: updatedVis
+      });
 
-        const { error } = await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', selectedSubject);
-        if (error) throw error;
-
-        const updatedSubjects = subjects.map(s => s.id === selectedSubject ? { ...s, excluded_students: cleanExcluded } : s);
-        setSubjects(updatedSubjects);
-        cacheManager.set('admin_subjects_base', updatedSubjects);
-      }
+      const updatedSubs = subjects.map(s => s.id === selectedSubject ? { ...s, excluded_students: cleanExcluded } : s);
+      setSubjects(updatedSubs);
+      cacheManager.set('admin_subjects_base', updatedSubs);
 
       setNewColName('');
       setShowAddColModal(false);
@@ -648,25 +718,241 @@ export default function GradesTab({ user }) {
       </div>
 
       {selectedSubject && (
-        <div className="panel" style={{padding:0,overflowX:'auto'}}>
-          <table className="table" style={{width:'100%',borderCollapse:'collapse'}}>
-            <thead>
-              <tr style={{background:'rgba(255,255,255,0.02)',borderBottom:'1px solid var(--border)',textAlign:'right'}}>
-                <th style={{padding:'14px 16px'}}>الرقم الأكاديمي</th>
-                <th style={{padding:'14px 16px'}}>اسم الطالب</th>
-                <th style={{padding:'14px 16px'}}>السكشن</th>
-                <th style={{padding:'14px 16px',textAlign:'center'}}>{getColumnLabel('showQuiz1', 'كويز 1')}</th>
-                <th style={{padding:'14px 16px',textAlign:'center'}}>{getColumnLabel('showQuiz2', 'كويز 2')}</th>
-                <th style={{padding:'14px 16px',textAlign:'center'}}>{getColumnLabel('showProject', 'المشروع')}</th>
-                <th style={{padding:'14px 16px',textAlign:'center'}}>{getColumnLabel('showAttendanceScore', 'درجة الحضور')}</th>
-                {activeCustomCols.map(col => (
-                  <th key={col.id} style={{padding:'14px 16px',textAlign:'center',color:'var(--primary-hover)'}}>
-                    {col.label}
+        <>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'0.8rem',marginBottom:'1rem',padding:'0.75rem 1.2rem',background:'rgba(79, 70, 229, 0.06)',border:'1px solid rgba(79, 70, 229, 0.2)',borderRadius:'10px',fontSize:'0.85rem'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+              <span style={{fontSize:'1.1rem'}}>💡</span>
+              <span style={{color:'var(--text-muted)'}}>
+                <strong style={{color:'var(--primary-hover)'}}>نظام درجات المادة:</strong> يمكنك ضبط الدرجة العظمى لكل كويز (مثلاً من 5 أو 10) والتحكم في إظهار أو إخفاء أي خانة للطلاب مباشرة عبر أيقونة العين 👁️ / 🙈.
+              </span>
+            </div>
+            {autoSaveStatus && <span style={{color:'var(--success)',fontWeight:700}}>{autoSaveStatus}</span>}
+          </div>
+
+          <div className="panel" style={{padding:0,overflowX:'auto'}}>
+            <table className="table" style={{width:'100%',borderCollapse:'collapse'}}>
+              <thead>
+                <tr style={{background:'rgba(255,255,255,0.02)',borderBottom:'1px solid var(--border)',textAlign:'right'}}>
+                  <th style={{padding:'14px 16px'}}>الرقم الأكاديمي</th>
+                  <th style={{padding:'14px 16px'}}>اسم الطالب</th>
+                  <th style={{padding:'14px 16px'}}>السكشن</th>
+
+                  {/* Quiz 1 */}
+                  <th style={{padding:'12px 14px',textAlign:'center'}}>
+                    <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'4px'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                        <span>{getColumnLabel('showQuiz1', 'كويز 1')}</span>
+                        <button 
+                          type="button" 
+                          onClick={() => handleToggleColumnVisibility('showQuiz1')}
+                          title={currentSubVis.showQuiz1 ? 'الدرجة ظاهرة للطلاب (اضغط للإخفاء)' : 'الدرجة مخفية عن الطلاب (اضغط للإظهار)'}
+                          style={{
+                            background: currentSubVis.showQuiz1 ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                            border: '1px solid ' + (currentSubVis.showQuiz1 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'),
+                            borderRadius: '4px', cursor: 'pointer', padding: '3px 5px', display: 'flex', alignItems: 'center',
+                            color: currentSubVis.showQuiz1 ? 'var(--success)' : 'var(--danger)'
+                          }}
+                        >
+                          {currentSubVis.showQuiz1 ? <Eye size={14} /> : <EyeOff size={14} />}
+                        </button>
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',gap:'3px',fontSize:'0.75rem',color:'var(--text-muted)'}}>
+                        <span>من:</span>
+                        <input 
+                          type="number" 
+                          min="1"
+                          max="100"
+                          value={currentSubMaxScores.quiz_1 ?? 5} 
+                          onChange={e => handleMaxScoreChange('quiz_1', e.target.value)}
+                          style={{
+                            width: '42px', padding: '2px 4px', textAlign: 'center', fontSize: '0.78rem',
+                            borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-main)', fontWeight: 700
+                          }}
+                          title="تحديد الدرجة العظمى لكويز 1 في هذه المادة"
+                        />
+                      </div>
+                    </div>
                   </th>
-                ))}
-                <th style={{padding:'14px 16px',textAlign:'center'}}>المجموع</th>
-              </tr>
-            </thead>
+
+                  {/* Quiz 2 */}
+                  <th style={{padding:'12px 14px',textAlign:'center'}}>
+                    <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'4px'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                        <span>{getColumnLabel('showQuiz2', 'كويز 2')}</span>
+                        <button 
+                          type="button" 
+                          onClick={() => handleToggleColumnVisibility('showQuiz2')}
+                          title={currentSubVis.showQuiz2 ? 'الدرجة ظاهرة للطلاب (اضغط للإخفاء)' : 'الدرجة مخفية عن الطلاب (اضغط للإظهار)'}
+                          style={{
+                            background: currentSubVis.showQuiz2 ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                            border: '1px solid ' + (currentSubVis.showQuiz2 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'),
+                            borderRadius: '4px', cursor: 'pointer', padding: '3px 5px', display: 'flex', alignItems: 'center',
+                            color: currentSubVis.showQuiz2 ? 'var(--success)' : 'var(--danger)'
+                          }}
+                        >
+                          {currentSubVis.showQuiz2 ? <Eye size={14} /> : <EyeOff size={14} />}
+                        </button>
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',gap:'3px',fontSize:'0.75rem',color:'var(--text-muted)'}}>
+                        <span>من:</span>
+                        <input 
+                          type="number" 
+                          min="1"
+                          max="100"
+                          value={currentSubMaxScores.quiz_2 ?? 5} 
+                          onChange={e => handleMaxScoreChange('quiz_2', e.target.value)}
+                          style={{
+                            width: '42px', padding: '2px 4px', textAlign: 'center', fontSize: '0.78rem',
+                            borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-main)', fontWeight: 700
+                          }}
+                          title="تحديد الدرجة العظمى لكويز 2 في هذه المادة"
+                        />
+                      </div>
+                    </div>
+                  </th>
+
+                  {/* Project */}
+                  <th style={{padding:'12px 14px',textAlign:'center'}}>
+                    <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'4px'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                        <span>{getColumnLabel('showProject', 'المشروع')}</span>
+                        <button 
+                          type="button" 
+                          onClick={() => handleToggleColumnVisibility('showProject')}
+                          title={currentSubVis.showProject ? 'الدرجة ظاهرة للطلاب (اضغط للإخفاء)' : 'الدرجة مخفية عن الطلاب (اضغط للإظهار)'}
+                          style={{
+                            background: currentSubVis.showProject ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                            border: '1px solid ' + (currentSubVis.showProject ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'),
+                            borderRadius: '4px', cursor: 'pointer', padding: '3px 5px', display: 'flex', alignItems: 'center',
+                            color: currentSubVis.showProject ? 'var(--success)' : 'var(--danger)'
+                          }}
+                        >
+                          {currentSubVis.showProject ? <Eye size={14} /> : <EyeOff size={14} />}
+                        </button>
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',gap:'3px',fontSize:'0.75rem',color:'var(--text-muted)'}}>
+                        <span>من:</span>
+                        <input 
+                          type="number" 
+                          min="1"
+                          max="100"
+                          value={currentSubMaxScores.project ?? 10} 
+                          onChange={e => handleMaxScoreChange('project', e.target.value)}
+                          style={{
+                            width: '42px', padding: '2px 4px', textAlign: 'center', fontSize: '0.78rem',
+                            borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-main)', fontWeight: 700
+                          }}
+                          title="تحديد الدرجة العظمى للمشروع في هذه المادة"
+                        />
+                      </div>
+                    </div>
+                  </th>
+
+                  {/* Attendance Score */}
+                  <th style={{padding:'12px 14px',textAlign:'center'}}>
+                    <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'4px'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                        <span>{getColumnLabel('showAttendanceScore', 'درجة الحضور')}</span>
+                        <button 
+                          type="button" 
+                          onClick={() => handleToggleColumnVisibility('showAttendanceScore')}
+                          title={currentSubVis.showAttendanceScore ? 'درجة الحضور ظاهرة للطلاب (اضغط للإخفاء)' : 'درجة الحضور مخفية عن الطلاب (اضغط للإظهار)'}
+                          style={{
+                            background: currentSubVis.showAttendanceScore ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                            border: '1px solid ' + (currentSubVis.showAttendanceScore ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'),
+                            borderRadius: '4px', cursor: 'pointer', padding: '3px 5px', display: 'flex', alignItems: 'center',
+                            color: currentSubVis.showAttendanceScore ? 'var(--success)' : 'var(--danger)'
+                          }}
+                        >
+                          {currentSubVis.showAttendanceScore ? <Eye size={14} /> : <EyeOff size={14} />}
+                        </button>
+                      </div>
+                      <div style={{display:'flex',alignItems:'center',gap:'3px',fontSize:'0.75rem',color:'var(--text-muted)'}}>
+                        <span>من:</span>
+                        <input 
+                          type="number" 
+                          min="1"
+                          max="100"
+                          value={currentSubMaxScores.attendance_score ?? 5} 
+                          onChange={e => handleMaxScoreChange('attendance_score', e.target.value)}
+                          style={{
+                            width: '42px', padding: '2px 4px', textAlign: 'center', fontSize: '0.78rem',
+                            borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-main)', fontWeight: 700
+                          }}
+                          title="تحديد درجة الحضور في هذه المادة"
+                        />
+                      </div>
+                    </div>
+                  </th>
+
+                  {/* Custom Columns */}
+                  {activeCustomCols.map(col => {
+                    const isColVisible = currentSubVis[col.id] !== false;
+                    return (
+                      <th key={col.id} style={{padding:'12px 14px',textAlign:'center',color:'var(--primary-hover)'}}>
+                        <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'4px'}}>
+                          <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                            <span>{col.label}</span>
+                            <button 
+                              type="button" 
+                              onClick={() => handleToggleColumnVisibility(col.id)}
+                              title={isColVisible ? 'الخانة ظاهرة للطلاب (اضغط للإخفاء)' : 'الخانة مخفية عن الطلاب (اضغط للإظهار)'}
+                              style={{
+                                background: isColVisible ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                                border: '1px solid ' + (isColVisible ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'),
+                                borderRadius: '4px', cursor: 'pointer', padding: '3px 5px', display: 'flex', alignItems: 'center',
+                                color: isColVisible ? 'var(--success)' : 'var(--danger)'
+                              }}
+                            >
+                              {isColVisible ? <Eye size={14} /> : <EyeOff size={14} />}
+                            </button>
+                          </div>
+                          <div style={{display:'flex',alignItems:'center',gap:'3px',fontSize:'0.75rem',color:'var(--text-muted)'}}>
+                            <span>من:</span>
+                            <input 
+                              type="number" 
+                              min="1"
+                              max="100"
+                              value={currentSubMaxScores[col.id] ?? 5} 
+                              onChange={e => handleMaxScoreChange(col.id, e.target.value)}
+                              style={{
+                                width: '42px', padding: '2px 4px', textAlign: 'center', fontSize: '0.78rem',
+                                borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-main)', fontWeight: 700
+                              }}
+                              title={'تحديد الدرجة العظمى لـ ' + col.label}
+                            />
+                          </div>
+                        </div>
+                      </th>
+                    );
+                  })}
+
+                  {/* Total */}
+                  <th style={{padding:'12px 14px',textAlign:'center'}}>
+                    <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:'4px'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                        <span>المجموع</span>
+                        <button 
+                          type="button" 
+                          onClick={() => handleToggleColumnVisibility('showTotal')}
+                          title={currentSubVis.showTotal ? 'المجموع الكلي ظاهر للطلاب (اضغط للإخفاء)' : 'المجموع الكلي مخفي عن الطلاب (اضغط للإظهار)'}
+                          style={{
+                            background: currentSubVis.showTotal ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                            border: '1px solid ' + (currentSubVis.showTotal ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'),
+                            borderRadius: '4px', cursor: 'pointer', padding: '3px 5px', display: 'flex', alignItems: 'center',
+                            color: currentSubVis.showTotal ? 'var(--success)' : 'var(--danger)'
+                          }}
+                        >
+                          {currentSubVis.showTotal ? <Eye size={14} /> : <EyeOff size={14} />}
+                        </button>
+                      </div>
+                      <span style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
+                        {currentSubVis.showTotal ? 'ظاهر للطلاب' : 'مخفي للطلاب'}
+                      </span>
+                    </div>
+                  </th>
+                </tr>
+              </thead>
             <tbody>
               {displayedEnrolledStudents.map(stu => {
                 const g = grades[stu.user_id] || { quiz_1: 0, quiz_2: 0, project: 0, attendance_score: 0 };
@@ -721,6 +1007,7 @@ export default function GradesTab({ user }) {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {/* Modal: Add Custom Column */}

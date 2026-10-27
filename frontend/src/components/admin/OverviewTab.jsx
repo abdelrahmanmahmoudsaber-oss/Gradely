@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { getSectionInstructorName as resolveSectionTA, syncAllSubjectsSectionTAs } from '../../utils/sectionHelper';
 import { getAdminBaseData } from '../../utils/adminDataHelper';
+import { parseGradeConfigs, saveSubjectGradeConfig, DEFAULT_VISIBILITY } from '../../utils/gradeConfigHelper';
 
 export default function OverviewTab({ user }) {
   const [stats, setStats] = useState({
@@ -111,62 +112,10 @@ export default function OverviewTab({ user }) {
 
   const parseVisibilityFromSubjects = (subList) => {
     if (!Array.isArray(subList)) return null;
-    const settings = {
-      global: {
-        showQuiz1: true,
-        showQuiz2: true,
-        showProject: true,
-        showAttendanceScore: true,
-        showTotal: true,
-        showAttendanceTab: true
-      }
-    };
-    const mergedLabels = {};
-    const colsMap = new Map();
-
-    for (const sub of subList) {
-      if (Array.isArray(sub.excluded_students)) {
-        sub.excluded_students.forEach(item => {
-          if (typeof item === 'string') {
-            if (item.startsWith('CONFIG:')) {
-              try { settings.global = JSON.parse(item.replace('CONFIG:', '')); } catch (e) {}
-            } else if (item.startsWith('CONFIG_VIS_SUB:')) {
-              try {
-                const parsed = JSON.parse(item.replace('CONFIG_VIS_SUB:', ''));
-                if (parsed && typeof parsed === 'object') {
-                  settings[sub.id] = parsed[sub.id] || parsed;
-                }
-              } catch (e) {}
-            } else if (item.startsWith('CONFIG_SUB:')) {
-              try {
-                const parsed = JSON.parse(item.replace('CONFIG_SUB:', ''));
-                if (parsed[sub.id] && !settings[sub.id]) {
-                  settings[sub.id] = parsed[sub.id];
-                }
-                if (parsed.global && !settings.global) {
-                  settings.global = parsed.global;
-                }
-              } catch (e) {}
-            } else if (item.startsWith('CONFIG_CUSTOM_COLS:')) {
-              try {
-                const cols = JSON.parse(item.replace('CONFIG_CUSTOM_COLS:', ''));
-                if (Array.isArray(cols)) {
-                  cols.forEach(c => { if (c && c.id) colsMap.set(c.id, c); });
-                }
-              } catch (e) {}
-            } else if (item.startsWith('CONFIG_COL_LABELS:')) {
-              try {
-                const lbls = JSON.parse(item.replace('CONFIG_COL_LABELS:', ''));
-                Object.assign(mergedLabels, lbls);
-              } catch (e) {}
-            }
-          }
-        });
-      }
-    }
-    setColumnLabels(mergedLabels);
-    setCustomColumnsList(Array.from(colsMap.values()));
-    return settings;
+    const configs = parseGradeConfigs(subList);
+    setColumnLabels(configs.colLabels || {});
+    setCustomColumnsList(configs.customColumns || []);
+    return configs.visibility;
   };
 
   const fetchOverviewData = async () => {
@@ -315,18 +264,14 @@ export default function OverviewTab({ user }) {
 
     try {
       const globalConfigStr = 'CONFIG:' + JSON.stringify(updatedSettings.global || {});
-      const subConfigStr = 'CONFIG_SUB:' + JSON.stringify(updatedSettings);
 
       if (currentSubScope !== 'global') {
-        // Fast direct save to the specific subject using isolated tag (never gets overwritten by other subjects)
-        const { data: targetSub } = await supabase.from('subjects').select('id, excluded_students').eq('id', currentSubScope).single();
-        if (targetSub) {
-          const cleanExcluded = Array.isArray(targetSub.excluded_students)
-            ? targetSub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG_VIS_SUB:') && !x.startsWith('CONFIG_SUB:') && !x.startsWith('CONFIG:'))
-            : [];
-          cleanExcluded.push('CONFIG_VIS_SUB:' + JSON.stringify(updatedSubScope));
-          await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', currentSubScope);
-        }
+        const cleanExcluded = await saveSubjectGradeConfig(supabase, currentSubScope, {
+          visibility: updatedSubScope
+        });
+        const updatedSubs = allSubjectsList.map(s => s.id === currentSubScope ? { ...s, excluded_students: cleanExcluded } : s);
+        setAllSubjectsList(updatedSubs);
+        cacheManager.set('admin_subjects_base', updatedSubs);
       } else {
         // Global save
         const { data: subData } = await supabase.from('subjects').select('id, excluded_students');

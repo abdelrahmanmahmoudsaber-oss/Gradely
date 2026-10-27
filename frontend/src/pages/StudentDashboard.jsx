@@ -9,6 +9,13 @@ import {
 } from 'lucide-react';
 import { getSectionInstructorName as resolveSectionTA } from '../utils/sectionHelper';
 import ActiveSessionsModal from '../components/ActiveSessionsModal';
+import {
+  parseGradeConfigs,
+  getSubjectVisibility,
+  getSubjectMaxScores,
+  DEFAULT_VISIBILITY,
+  DEFAULT_MAX_SCORES
+} from '../utils/gradeConfigHelper';
 
 const SUBJECT_COLORS = [
   { bg: 'rgba(79, 70, 229, 0.15)', border: 'var(--primary)', text: 'var(--primary-hover)', tag: '#6366f1' },
@@ -27,9 +34,16 @@ const LinkedInOfficialIcon = () => (
   </svg>
 );
 
-const renderGradeDisplay = (val) => {
+const renderGradeDisplay = (val, maxScore) => {
   if (val === null || val === undefined || val === '') {
     return <span style={{fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 600}}>لم ترصد</span>;
+  }
+  if (maxScore !== undefined && maxScore !== null && maxScore !== '') {
+    return (
+      <span>
+        {val} <span style={{fontSize: '0.88rem', color: 'var(--text-muted)', fontWeight: 500}}>/ {maxScore}</span>
+      </span>
+    );
   }
   return val;
 };
@@ -58,15 +72,9 @@ export default function StudentDashboard({ user, onLogout }) {
     return s;
   };
 
-  // Dynamic Visibility Settings controlled by Super Admin
-  const [visibility, setVisibility] = useState({
-    showQuiz1: true,
-    showQuiz2: true,
-    showProject: true,
-    showAttendanceScore: true,
-    showTotal: true,
-    showAttendanceTab: true
-  });
+  // Dynamic Visibility Settings controlled by Admin / Instructor
+  const [visibility, setVisibility] = useState({ global: { ...DEFAULT_VISIBILITY } });
+  const [maxScores, setMaxScores] = useState({ global: { ...DEFAULT_MAX_SCORES } });
 
   // Password Change State
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -278,79 +286,12 @@ export default function StudentDashboard({ user, onLogout }) {
     return 'S1';
   };
 
-  const parseVisibilityFromSubjects = (subList) => {
-    if (!Array.isArray(subList)) return null;
-    const settings = {
-      global: {
-        showQuiz1: true,
-        showQuiz2: true,
-        showProject: true,
-        showAttendanceScore: true,
-        showTotal: true,
-        showAttendanceTab: true
-      }
-    };
-    const mergedLabels = {};
-
-    for (const sub of subList) {
-      if (Array.isArray(sub.excluded_students)) {
-        sub.excluded_students.forEach(item => {
-          if (typeof item === 'string') {
-            if (item.startsWith('CONFIG:')) {
-              try { settings.global = JSON.parse(item.replace('CONFIG:', '')); } catch (e) {}
-            } else if (item.startsWith('CONFIG_VIS_SUB:')) {
-              try {
-                const parsed = JSON.parse(item.replace('CONFIG_VIS_SUB:', ''));
-                if (parsed && typeof parsed === 'object') {
-                  settings[sub.id] = parsed[sub.id] || parsed;
-                }
-              } catch (e) {}
-            } else if (item.startsWith('CONFIG_SUB:')) {
-              try {
-                const parsed = JSON.parse(item.replace('CONFIG_SUB:', ''));
-                if (parsed[sub.id] && !settings[sub.id]) {
-                  settings[sub.id] = parsed[sub.id];
-                }
-                if (parsed.global && !settings.global) {
-                  settings.global = parsed.global;
-                }
-              } catch (e) {}
-            } else if (item.startsWith('CONFIG_CUSTOM_COLS:')) {
-              try {
-                const cols = JSON.parse(item.replace('CONFIG_CUSTOM_COLS:', ''));
-                if (Array.isArray(cols)) {
-                  setCustomColumnsList(prev => {
-                    const map = new Map();
-                    prev.forEach(c => map.set(c.id, c));
-                    cols.forEach(c => map.set(c.id, c));
-                    return Array.from(map.values());
-                  });
-                }
-              } catch (e) {}
-            } else if (item.startsWith('CONFIG_COL_LABELS:')) {
-              try {
-                const lbls = JSON.parse(item.replace('CONFIG_COL_LABELS:', ''));
-                Object.assign(mergedLabels, lbls);
-              } catch (e) {}
-            }
-          }
-        });
-      }
-    }
-    setColumnLabels(mergedLabels);
-    return settings;
+  const getSubVisibility = (subId) => {
+    return getSubjectVisibility(visibility, subId);
   };
 
-  const getSubVisibility = (subId) => {
-    const defaultVis = { showQuiz1: true, showQuiz2: true, showProject: true, showAttendanceScore: true, showTotal: true, showAttendanceTab: true };
-    if (!visibility) return defaultVis;
-    const globalVis = visibility.global || {};
-    const subVis = visibility[subId] || {};
-    return {
-      ...defaultVis,
-      ...globalVis,
-      ...subVis
-    };
+  const getSubMaxScores = (subId) => {
+    return getSubjectMaxScores(maxScores, subId);
   };
 
   const fetchData = async () => {
@@ -369,9 +310,9 @@ export default function StudentDashboard({ user, onLogout }) {
       }
 
       const [subRes, adminRes] = await Promise.all([
-        subData.length > 0 
+        subData.length > 0 && Array.isArray(subData[0]?.excluded_students) && subData[0].excluded_students.length > 0
           ? Promise.resolve({ data: subData }) 
-          : supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name'),
+          : supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, excluded_students'),
         supabase.from('users').select('id, user_id, name, role, assigned_subjects').in('role', ['admin', 'super_admin'])
       ]);
 
@@ -394,8 +335,18 @@ export default function StudentDashboard({ user, onLogout }) {
           }
         } catch (e) {}
       }
-      if (subData.length === 0) {
-        subData = subRes.data || [];
+      if (subRes.data && subRes.data.length > 0) {
+        // Merge excluded_students configuration into subData
+        const configMap = new Map();
+        subRes.data.forEach(s => configMap.set(s.id, s.excluded_students));
+        if (subData.length > 0) {
+          subData = subData.map(s => ({
+            ...s,
+            excluded_students: configMap.get(s.id) || s.excluded_students || []
+          }));
+        } else {
+          subData = subRes.data;
+        }
       }
 
       // Fetch attendance: try secure RPC first, with fallback to direct query
@@ -449,19 +400,18 @@ export default function StudentDashboard({ user, onLogout }) {
         }
       }
 
-      let currentVisibility = {
-        showQuiz1: true,
-        showQuiz2: true,
-        showProject: true,
-        showAttendanceScore: true,
-        showTotal: true,
-        showAttendanceTab: true
-      };
+      const activeConfigs = parseGradeConfigs(subData);
+      let currentVisibility = activeConfigs.visibility || { global: { ...DEFAULT_VISIBILITY } };
+      let currentMaxScores = activeConfigs.maxScores || { global: { ...DEFAULT_MAX_SCORES } };
 
-      const parsed = parseVisibilityFromSubjects(subData);
-      if (parsed) currentVisibility = parsed;
+      if (activeConfigs.colLabels) {
+        setColumnLabels(activeConfigs.colLabels);
+      }
+      if (activeConfigs.customColumns && activeConfigs.customColumns.length > 0) {
+        setCustomColumnsList(activeConfigs.customColumns);
+      }
 
-      // Also fetch system visibility safely from RPC (does not expose internal admin config)
+      // Also try RPC if available
       try {
         const { data: visRpc } = await supabase.rpc('get_system_visibility');
         if (visRpc && typeof visRpc === 'object' && Object.keys(visRpc).length > 0) {
@@ -471,7 +421,7 @@ export default function StudentDashboard({ user, onLogout }) {
       } catch (_) {}
 
       setVisibility(currentVisibility);
-      const gVis = currentVisibility.global || currentVisibility;
+      setMaxScores(currentMaxScores);
       setViewMode('attendance');
 
       const hasExplicitAssignments = Array.isArray(user.assigned_subjects) && user.assigned_subjects.length > 0;
@@ -619,18 +569,38 @@ export default function StudentDashboard({ user, onLogout }) {
   const currentAttendance = attendance.filter(a => a.subject_id === selectedSubjectId);
   const absCount = currentAttendance.filter(a => normalizeStatus(a.status) === 'absent').length;
 
-  // Calculate dynamic visible total score for current subject
+  // Calculate dynamic visible total score & max total score for current subject
   const currentSubVis = getSubVisibility(selectedSubjectId);
+  const currentSubMaxScores = getSubMaxScores(selectedSubjectId);
   let visibleTotal = 0;
+  let visibleMaxTotal = 0;
   let hasAnyGradeVisible = false;
-  if (currentSubVis.showQuiz1) { visibleTotal += (currentGrades.quiz_1 || 0); hasAnyGradeVisible = true; }
-  if (currentSubVis.showQuiz2) { visibleTotal += (currentGrades.quiz_2 || 0); hasAnyGradeVisible = true; }
-  if (currentSubVis.showProject) { visibleTotal += (currentGrades.project || 0); hasAnyGradeVisible = true; }
-  if (currentSubVis.showAttendanceScore) { visibleTotal += (currentGrades.attendance_score || 0); hasAnyGradeVisible = true; }
+
+  if (currentSubVis.showQuiz1) {
+    visibleTotal += (currentGrades.quiz_1 || 0);
+    visibleMaxTotal += (currentSubMaxScores.quiz_1 || 0);
+    hasAnyGradeVisible = true;
+  }
+  if (currentSubVis.showQuiz2) {
+    visibleTotal += (currentGrades.quiz_2 || 0);
+    visibleMaxTotal += (currentSubMaxScores.quiz_2 || 0);
+    hasAnyGradeVisible = true;
+  }
+  if (currentSubVis.showProject) {
+    visibleTotal += (currentGrades.project || 0);
+    visibleMaxTotal += (currentSubMaxScores.project || 0);
+    hasAnyGradeVisible = true;
+  }
+  if (currentSubVis.showAttendanceScore) {
+    visibleTotal += (currentGrades.attendance_score || 0);
+    visibleMaxTotal += (currentSubMaxScores.attendance_score || 0);
+    hasAnyGradeVisible = true;
+  }
   customColumnsList
     .filter(col => (col.scope === 'global' || col.scope === selectedSubjectId) && currentSubVis[col.id] !== false)
     .forEach(col => {
       visibleTotal += (parseFloat(currentGrades[col.id]) || 0);
+      visibleMaxTotal += (currentSubMaxScores[col.id] || 0);
       hasAnyGradeVisible = true;
     });
 
@@ -1157,7 +1127,7 @@ export default function StudentDashboard({ user, onLogout }) {
                         <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
                           <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, 'showQuiz1', 'كويز 1')}</span>
                           <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
-                            {renderGradeDisplay(currentGrades.quiz_1)}
+                            {renderGradeDisplay(currentGrades.quiz_1, currentSubMaxScores.quiz_1)}
                           </h3>
                         </div>
                       )}
@@ -1166,7 +1136,7 @@ export default function StudentDashboard({ user, onLogout }) {
                         <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
                           <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, 'showQuiz2', 'كويز 2')}</span>
                           <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
-                            {renderGradeDisplay(currentGrades.quiz_2)}
+                            {renderGradeDisplay(currentGrades.quiz_2, currentSubMaxScores.quiz_2)}
                           </h3>
                         </div>
                       )}
@@ -1175,7 +1145,7 @@ export default function StudentDashboard({ user, onLogout }) {
                         <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
                           <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, 'showProject', 'المشروع')}</span>
                           <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
-                            {renderGradeDisplay(currentGrades.project)}
+                            {renderGradeDisplay(currentGrades.project, currentSubMaxScores.project)}
                           </h3>
                         </div>
                       )}
@@ -1184,7 +1154,7 @@ export default function StudentDashboard({ user, onLogout }) {
                         <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
                           <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, 'showAttendanceScore', 'الحضور')}</span>
                           <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--success)'}}>
-                            {renderGradeDisplay(currentGrades.attendance_score)}
+                            {renderGradeDisplay(currentGrades.attendance_score, currentSubMaxScores.attendance_score)}
                           </h3>
                         </div>
                       )}
@@ -1196,7 +1166,7 @@ export default function StudentDashboard({ user, onLogout }) {
                           <div key={col.id} className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
                             <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, col.id, col.label)}</span>
                             <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
-                              {currentGrades[col.id] || 0}
+                              {renderGradeDisplay(currentGrades[col.id], currentSubMaxScores[col.id])}
                             </h3>
                           </div>
                         ))}
@@ -1206,11 +1176,16 @@ export default function StudentDashboard({ user, onLogout }) {
                       <div style={{background: 'linear-gradient(135deg, rgba(79, 70, 229, 0.15), rgba(99, 102, 241, 0.05))', border: '1px solid var(--primary)', borderRadius: '10px', padding: '1.2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.8rem'}}>
                         <div>
                           <h3 style={{margin: '0 0 2px 0', fontSize: '1.1rem', color: 'var(--text-main)'}}>المجموع الكلي</h3>
-                          <p className="text-muted" style={{margin: 0, fontSize: '0.8rem'}}>مجموع الدرجات المرصودة حالياً</p>
+                          <p className="text-muted" style={{margin: 0, fontSize: '0.8rem'}}>مجموع الدرجات المرصودة والمعلنة حالياً</p>
                         </div>
                         <div style={{fontSize: '1.8rem', fontWeight: 800, color: 'var(--primary-hover)'}}>
                           {visibleTotal}
-                          <span style={{fontSize: '1rem', color: 'var(--text-muted)', marginRight: '4px'}}>درجة</span>
+                          {visibleMaxTotal > 0 && (
+                            <span style={{fontSize: '1.1rem', color: 'var(--text-muted)', marginRight: '6px', fontWeight: 600}}>
+                              / {visibleMaxTotal}
+                            </span>
+                          )}
+                          <span style={{fontSize: '0.95rem', color: 'var(--text-muted)', marginRight: '4px'}}>درجة</span>
                         </div>
                       </div>
                     )}
