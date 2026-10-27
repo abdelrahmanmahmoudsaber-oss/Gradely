@@ -960,6 +960,7 @@ export async function printWeekAttendancePDF({
     const sec = getStudentSubSection(s);
     const grp = getStudentLectureGroup ? getStudentLectureGroup(s) : 'A';
     const isGrpA = grp === 'A';
+    const isCross = groupName && (groupName === 'A' || groupName === 'B') && grp !== groupName;
 
     return `
       <tr style="border-bottom: 1px solid #cbd5e1; background-color: ${globalIdx % 2 === 0 ? '#ffffff' : '#f8fafc'}; height: 26px;">
@@ -968,8 +969,8 @@ export async function printWeekAttendancePDF({
         <td style="font-weight:700;padding:4px 8px;border:1px solid #cbd5e1;color:#0f172a;text-align:right;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(s.name)}</td>
         <td style="text-align:center;padding:4px 3px;border:1px solid #cbd5e1;color:#334155;font-size:11px;">${escapeHtml(sec)}</td>
         <td style="text-align:center;padding:4px 3px;border:1px solid #cbd5e1;">
-          <span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:10.5px;font-weight:800;background-color:${isGrpA ? '#e0e7ff' : '#fae8ff'};color:${isGrpA ? '#3730a3' : '#86198f'};border:1px solid ${isGrpA ? '#c7d2fe' : '#f5d0fe'};">
-            ${escapeHtml(grp)}
+          <span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:800;background-color:${isCross ? '#fef3c7' : (isGrpA ? '#e0e7ff' : '#fae8ff')};color:${isCross ? '#b45309' : (isGrpA ? '#3730a3' : '#86198f')};border:1px solid ${isCross ? '#fcd34d' : (isGrpA ? '#c7d2fe' : '#f5d0fe')};">
+            ${isCross ? `⚡ ${escapeHtml(grp)} (استثنائي)` : escapeHtml(grp)}
           </span>
         </td>
         <td style="text-align:center;padding:4px 3px;border:1px solid #cbd5e1;">
