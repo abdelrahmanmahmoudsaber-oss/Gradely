@@ -7,6 +7,7 @@
 import { getSectionInstructorName as resolveSectionTA } from './sectionHelper';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
+import DOMPurify from 'dompurify';
 
 const escapeHtml = (str) => {
   if (str == null) return '';
@@ -496,7 +497,7 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
   `;
 
   printWindow.document.open();
-  printWindow.document.write(htmlContent);
+  printWindow.document.write(DOMPurify.sanitize(htmlContent));
   printWindow.document.close();
 }
 
@@ -811,7 +812,7 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
     const printWindow = window.open('', '_blank');
     if (printWindow) {
       printWindow.document.open();
-      printWindow.document.write(htmlContent);
+      printWindow.document.write(DOMPurify.sanitize(htmlContent));
       printWindow.document.close();
     } else {
       alert('يرجى السماح بالنوافذ المنبثقة (Popups) لعرض كروت الطباعة');

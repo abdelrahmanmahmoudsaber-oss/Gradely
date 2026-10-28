@@ -941,26 +941,64 @@ export default function OverviewTab({ user }) {
 
   const handleDeleteCustomColumn = async (colId) => {
     if (!window.confirm('هل تريد حذف هذه الخانة المخصصة نهائياً؟')) return;
-    const targetScope = selectedSubjectForVisibility || 'global';
+    
+    // 1. Identify the column and target subject scope
+    const colObj = customColumnsList.find(c => c.id === colId);
+    const targetScopeKey = (colObj && colObj.scope && colObj.scope !== 'global')
+      ? colObj.scope
+      : (selectedSubjectForVisibility || 'global');
+
     const updatedCols = customColumnsList.filter(c => c.id !== colId);
     setCustomColumnsList(updatedCols);
 
+    // Also remove from columnLabels
+    const updatedLabels = { ...columnLabels };
+    if (updatedLabels[colId]) delete updatedLabels[colId];
+    if (updatedLabels[targetScopeKey] && updatedLabels[targetScopeKey][colId]) {
+      delete updatedLabels[targetScopeKey][colId];
+    }
+    setColumnLabels(updatedLabels);
+
+    // Also remove from visibilitySettings
+    const updatedVis = { ...visibilitySettings };
+    if (updatedVis[colId] !== undefined) delete updatedVis[colId];
+    if (updatedVis[targetScopeKey] && updatedVis[targetScopeKey][colId] !== undefined) {
+      delete updatedVis[targetScopeKey][colId];
+    }
+    setVisibilitySettings(updatedVis);
+
     try {
-      const colsConfigStr = 'CONFIG_CUSTOM_COLS:' + JSON.stringify(updatedCols);
-      if (targetScope !== 'global') {
-        const { data: targetSub } = await supabase.from('subjects').select('id, excluded_students').eq('id', targetScope).single();
-        if (targetSub) {
-          const cleanExcluded = Array.isArray(targetSub.excluded_students) 
-            ? targetSub.excluded_students.filter(x => typeof x === 'string' && !x.startsWith('CONFIG_CUSTOM_COLS:')) 
-            : [];
-          cleanExcluded.push(colsConfigStr);
-          await supabase.from('subjects').update({ excluded_students: cleanExcluded }).eq('id', targetScope);
+      if (targetScopeKey !== 'global') {
+        const cleanExcluded = await saveSubjectGradeConfig(supabase, targetScopeKey, {
+          customColumns: updatedCols.filter(c => c.scope === targetScopeKey),
+          colLabels: updatedLabels[targetScopeKey] || {},
+          visibility: updatedVis[targetScopeKey] || {}
+        });
+
+        // Instantly update in-memory subjects array and cache
+        const updatedSubs = allSubjectsList.map(s => s.id === targetScopeKey ? { ...s, excluded_students: cleanExcluded } : s);
+        setAllSubjectsList(updatedSubs);
+        cacheManager.set('admin_subjects_base', updatedSubs);
+      } else {
+        const subjectsToClean = allSubjectsList.length > 0 ? allSubjectsList : [];
+        for (const sub of subjectsToClean) {
+          const subCols = updatedCols.filter(c => c.scope === sub.id);
+          await saveSubjectGradeConfig(supabase, sub.id, {
+            customColumns: subCols,
+            colLabels: updatedLabels[sub.id] || {},
+            visibility: updatedVis[sub.id] || {}
+          });
         }
+        cacheManager.invalidate('admin_subjects_base');
       }
-      cacheManager.invalidate('admin_subjects_base');
+
+      cacheManager.clear();
+      setSettingsMessage('✅ تم حذف الخانة المخصصة بنجاح وحفظ التغييرات نهائياً!');
+      setTimeout(() => setSettingsMessage(''), 3000);
       setEditingColumn(null);
     } catch (err) {
-      console.error(err);
+      console.error('Delete custom column error:', err);
+      setSettingsMessage('❌ حدث خطأ أثناء حفظ حذف الخانة');
     }
   };
 

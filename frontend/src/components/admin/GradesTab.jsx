@@ -284,6 +284,32 @@ export default function GradesTab({ user }) {
     }
   };
 
+  const handleDeleteCustomColumn = async (colId) => {
+    if (!window.confirm('هل تريد حذف هذه الخانة المخصصة نهائياً من درجات المادة؟')) return;
+    try {
+      const activeCustomCols = getActiveCustomColumns();
+      const updatedCols = activeCustomCols.filter(c => c.id !== colId);
+      
+      const updatedVis = { ...currentSubVis };
+      delete updatedVis[colId];
+
+      const cleanExcluded = await saveSubjectGradeConfig(supabase, selectedSubject, {
+        customColumns: updatedCols,
+        visibility: updatedVis
+      });
+
+      const updatedSubs = subjects.map(s => s.id === selectedSubject ? { ...s, excluded_students: cleanExcluded } : s);
+      setSubjects(updatedSubs);
+      cacheManager.set('admin_subjects_base', updatedSubs);
+
+      setMessage('✅ تم حذف الخانة بنجاح وحفظ التغييرات نهائياً!');
+      setTimeout(() => setMessage(''), 3500);
+    } catch (err) {
+      console.error('Delete custom column error:', err);
+      setMessage('❌ حدث خطأ أثناء حذف الخانة');
+    }
+  };
+
   const fetchGrades = async () => {
     const cacheKey = 'grades_' + selectedSubject;
     const cached = cacheManager.get(cacheKey);
@@ -641,13 +667,14 @@ export default function GradesTab({ user }) {
           }
         };
         setGradeConfigs(prev => ({ ...prev, visibility: updatedVis }));
-        await saveSubjectGradeConfig(selectedSubject, {
+        await saveSubjectGradeConfig(supabase, selectedSubject, {
           visibility: updatedVis,
           maxScores: gradeConfigs.maxScores
         });
       }
 
       // 2. Insert notification record
+      const sessionToken = user?.session_token || localStorage.getItem('gradely_session_token') || '';
       const senderName = user?.name || 'أستاذ المادة';
       const finalTitle = notifyTitle.trim() || `📢 إعلان ورصد درجات مادة ${sub.name}`;
       const finalMsg = notifyMsg.trim() || `تم رصد وإعلان درجات مادة ${sub.name} الآن.`;
@@ -658,7 +685,8 @@ export default function GradesTab({ user }) {
         p_year_level: normalizeYear(sub.year_level),
         p_sender_name: senderName,
         p_title: finalTitle,
-        p_message: finalMsg
+        p_message: finalMsg,
+        p_session_token: sessionToken
       });
 
       if (rpcErr) {
@@ -1022,6 +1050,21 @@ export default function GradesTab({ user }) {
                               }}
                             >
                               {isColVisible ? <Eye size={14} /> : <EyeOff size={14} />}
+                            </button>
+                            <button 
+                              type="button" 
+                              onClick={() => handleDeleteCustomColumn(col.id)}
+                              title={'حذف خانة ' + col.label + ' نهائياً'}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                cursor: 'pointer',
+                                padding: '2px 4px',
+                                color: 'var(--text-muted)',
+                                fontSize: '0.85rem'
+                              }}
+                            >
+                              ✕
                             </button>
                           </div>
                           <div style={{display:'flex',alignItems:'center',gap:'3px',fontSize:'0.75rem',color:'var(--text-muted)'}}>
