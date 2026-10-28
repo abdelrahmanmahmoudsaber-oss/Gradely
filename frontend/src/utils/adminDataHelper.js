@@ -11,10 +11,15 @@ export async function getAdminBaseData(currentUser = null, forceRefresh = false)
   let allUsersList = !forceRefresh ? cacheManager.get('admin_users_base') : null;
   let allSubList = !forceRefresh ? cacheManager.get('admin_subjects_base') : null;
 
+  // Auto-invalidate stale cache if last_sign_in_at wasn't previously cached
+  if (allUsersList && allUsersList.length > 0 && allUsersList[0].last_sign_in_at === undefined) {
+    allUsersList = null;
+  }
+
   if (!allUsersList || !allSubList || allUsersList.length === 0 || allSubList.length === 0) {
     try {
       const [userRes, subRes] = await Promise.all([
-        supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects'),
+        supabase.from('users').select('id, user_id, name, role, year_level, section, assigned_subjects, last_sign_in_at'),
         supabase.from('subjects').select('id, name, year_level, total_weeks, instructor_name, instructor_id, enrolled_students, excluded_students')
       ]);
 

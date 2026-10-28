@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
 import { exportExcelFile, parseExcelFile } from '../../utils/excelHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
-import { Download, Upload, Save, Users, Filter, BookOpen, AlertCircle, Plus, X, Check, Eye, EyeOff } from 'lucide-react';
+import { Download, Upload, Save, Users, Filter, BookOpen, AlertCircle, Plus, X, Check, Eye, EyeOff, Bell, Send } from 'lucide-react';
 import { getSectionInstructorName as resolveSectionTA } from '../../utils/sectionHelper';
 import { getAdminBaseData } from '../../utils/adminDataHelper';
 import { 
@@ -42,6 +42,13 @@ export default function GradesTab({ user }) {
   const [showAddColModal, setShowAddColModal] = useState(false);
   const [newColName, setNewColName] = useState('');
   const [addingCol, setAddingCol] = useState(false);
+
+  // Notify Students Announcement Modal State
+  const [showNotifyModal, setShowNotifyModal] = useState(false);
+  const [notifyTitle, setNotifyTitle] = useState('');
+  const [notifyMsg, setNotifyMsg] = useState('');
+  const [notifyAutoMakeVisible, setNotifyAutoMakeVisible] = useState(true);
+  const [sendingNotification, setSendingNotification] = useState(false);
 
   const normalizeYear = (yr) => {
     if (!yr) return '1';
@@ -604,6 +611,94 @@ export default function GradesTab({ user }) {
     setTimeout(() => setMessage(''), 5000);
   };
 
+  const handleOpenNotifyModal = () => {
+    const sub = subjects.find(s => s.id === selectedSubject);
+    const subName = sub ? sub.name : '';
+    setNotifyTitle(`📢 إعلان ورصد درجات مادة ${subName}`);
+    setNotifyMsg(`تم رصد وإعلان درجات مادة ${subName} الآن! يمكنك الدخول على حسابك والاطلاع على تفاصيل درجاتك.`);
+    setShowNotifyModal(true);
+  };
+
+  const handleSendNotification = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const sub = subjects.find(s => s.id === selectedSubject);
+    if (!sub) return;
+
+    try {
+      setSendingNotification(true);
+
+      // 1. If instructor checked auto-make visible, ensure visibility is enabled
+      if (notifyAutoMakeVisible) {
+        const curVis = getSubjectVisibility(gradeConfigs.visibility, selectedSubject);
+        const updatedVis = {
+          ...gradeConfigs.visibility,
+          [selectedSubject]: {
+            ...curVis,
+            showQuiz1: true,
+            showQuiz2: true,
+            showProject: true,
+            showTotal: true
+          }
+        };
+        setGradeConfigs(prev => ({ ...prev, visibility: updatedVis }));
+        await saveSubjectGradeConfig(selectedSubject, {
+          visibility: updatedVis,
+          maxScores: gradeConfigs.maxScores
+        });
+      }
+
+      // 2. Insert notification record
+      const senderName = user?.name || 'أستاذ المادة';
+      const finalTitle = notifyTitle.trim() || `📢 إعلان ورصد درجات مادة ${sub.name}`;
+      const finalMsg = notifyMsg.trim() || `تم رصد وإعلان درجات مادة ${sub.name} الآن.`;
+
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('send_grade_notification', {
+        p_subject_id: selectedSubject,
+        p_subject_name: sub.name,
+        p_year_level: normalizeYear(sub.year_level),
+        p_sender_name: senderName,
+        p_title: finalTitle,
+        p_message: finalMsg
+      });
+
+      if (rpcErr) {
+        console.warn('RPC notification notice, falling back to dual storage:', rpcErr);
+        // Direct table insert fallback
+        await supabase.from('notifications').insert({
+          subject_id: selectedSubject,
+          subject_name: sub.name,
+          year_level: normalizeYear(sub.year_level),
+          sender_name: senderName,
+          title: finalTitle,
+          message: finalMsg
+        });
+
+        // Dual-store tag in excluded_students
+        const tag = 'CONFIG_NOTIF:' + JSON.stringify({
+          id: Date.now().toString(),
+          title: finalTitle,
+          message: finalMsg,
+          sender: senderName,
+          createdAt: new Date().toISOString()
+        });
+        const currentEx = Array.isArray(sub.excluded_students) ? sub.excluded_students : [];
+        const filtered = currentEx.filter(e => typeof e !== 'string' || !e.startsWith('CONFIG_NOTIF:'));
+        filtered.push(tag);
+        await supabase.from('subjects').update({ excluded_students: filtered }).eq('id', selectedSubject);
+        sub.excluded_students = filtered;
+      }
+
+      setMessage(`✅ تم إرسال إشعار إعلان الدرجات بنجاح لجميع طلبة مادة (${sub.name})!`);
+      setShowNotifyModal(false);
+      setTimeout(() => setMessage(''), 6000);
+    } catch (err) {
+      console.error('Send notification error:', err);
+      setMessage('❌ حدث خطأ أثناء إرسال الإشعار للطلبة.');
+    } finally {
+      setSendingNotification(false);
+    }
+  };
+
   if (loading) {
     return <div style={{padding:'3rem',textAlign:'center',color:'var(--text-muted)'}}>جاري تحميل الدرجات التفصيلية...</div>;
   }
@@ -651,6 +746,28 @@ export default function GradesTab({ user }) {
             style={{color:'var(--success)',borderColor:'rgba(16, 185, 129, 0.4)',display:'inline-flex',alignItems:'center',gap:'8px',padding:'8px 14px',fontSize:'0.9rem'}}
           >
             <Download size={17} /> تصدير إكسيل
+          </button>
+
+          <button 
+            type="button"
+            className="btn-secondary" 
+            onClick={handleOpenNotifyModal}
+            disabled={!selectedSubject}
+            style={{
+              background: 'linear-gradient(135deg, rgba(79, 70, 229, 0.15), rgba(99, 102, 241, 0.25))',
+              color: 'var(--primary-hover)',
+              borderColor: 'var(--primary)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '8px 16px',
+              fontSize: '0.92rem',
+              fontWeight: 800,
+              cursor: 'pointer'
+            }}
+            title="إرسال إشعار فوري وتنبيه لجميع طلبة المادة بإعلان الدرجات"
+          >
+            <Bell size={17} /> 📢 إبلاغ الطلبة بالدرجات
           </button>
 
           <button 
@@ -1061,6 +1178,134 @@ export default function GradesTab({ user }) {
                 </button>
                 <button type="submit" className="btn-primary" disabled={addingCol || !newColName.trim()} style={{background:'var(--primary)'}}>
                   {addingCol ? 'جاري الإضافة...' : 'إضافة وتثبيت الخانة'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* NOTIFY STUDENTS MODAL */}
+      {showNotifyModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.7)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '1rem'
+        }}>
+          <div className="panel fade-in" style={{
+            maxWidth: '520px',
+            width: '100%',
+            background: 'var(--surface)',
+            border: '2px solid var(--primary)',
+            borderRadius: '12px',
+            padding: '1.5rem',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
+          }}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',borderBottom:'1px solid var(--border)',paddingBottom:'0.8rem'}}>
+              <h3 style={{margin:0,fontSize:'1.15rem',fontWeight:800,color:'var(--primary-hover)',display:'flex',alignItems:'center',gap:'8px'}}>
+                <Bell size={20} /> إرسال إشعار فوري للطلبة بإعلان الدرجات
+              </h3>
+              <button 
+                type="button" 
+                onClick={() => setShowNotifyModal(false)}
+                style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSendNotification}>
+              <div style={{marginBottom:'1rem'}}>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'0.85rem',fontWeight:700}}>
+                  المادة المحددة:
+                </label>
+                <div style={{padding:'8px 12px',background:'var(--bg)',borderRadius:'8px',fontSize:'0.92rem',fontWeight:800,color:'var(--primary-hover)'}}>
+                  {currentSub ? `${currentSub.name} (الفرقة ${normalizeYear(currentSub.year_level)})` : 'يرجى اختيار مادة'}
+                </div>
+              </div>
+
+              <div style={{marginBottom:'1rem'}}>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'0.85rem',fontWeight:700}}>
+                  عنوان الإشعار (يظهر في التنبيهات):
+                </label>
+                <input 
+                  type="text" 
+                  className="input-field" 
+                  value={notifyTitle} 
+                  onChange={e => setNotifyTitle(e.target.value)} 
+                  required 
+                  style={{width:'100%',padding:'8px 10px'}} 
+                />
+              </div>
+
+              <div style={{marginBottom:'1.2rem'}}>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'0.85rem',fontWeight:700}}>
+                  نص وتفاصيل الإشعار للطلبة:
+                </label>
+                <textarea 
+                  className="input-field" 
+                  rows={3}
+                  value={notifyMsg} 
+                  onChange={e => setNotifyMsg(e.target.value)} 
+                  required 
+                  style={{width:'100%',padding:'10px',resize:'vertical'}} 
+                />
+              </div>
+
+              <div style={{
+                background: 'rgba(79, 70, 229, 0.08)',
+                border: '1px solid rgba(79, 70, 229, 0.2)',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                marginBottom: '1.5rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px'
+              }}>
+                <input 
+                  type="checkbox" 
+                  id="chk-auto-vis" 
+                  checked={notifyAutoMakeVisible} 
+                  onChange={e => setNotifyAutoMakeVisible(e.target.checked)}
+                  style={{cursor:'pointer',width:'16px',height:'16px'}}
+                />
+                <label htmlFor="chk-auto-vis" style={{fontSize:'0.85rem',fontWeight:700,cursor:'pointer',color:'var(--text-main)',margin:0}}>
+                  تفعيل إظهار خانات الدرجات للطلبة تلقائياً (في حال كانت مخفية)
+                </label>
+              </div>
+
+              <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+                <button 
+                  type="button" 
+                  className="btn-secondary" 
+                  onClick={() => setShowNotifyModal(false)} 
+                  disabled={sendingNotification}
+                >
+                  إلغاء
+                </button>
+                <button 
+                  type="submit" 
+                  className="btn-primary" 
+                  disabled={sendingNotification || !notifyTitle.trim()} 
+                  style={{
+                    background:'var(--primary)',
+                    display:'inline-flex',
+                    alignItems:'center',
+                    gap:'8px',
+                    fontWeight:800,
+                    padding:'8px 18px'
+                  }}
+                >
+                  <Send size={16} /> {sendingNotification ? 'جاري الإرسال للطلبة...' : '📢 إرسال الإشعار لجميع الطلبة الآن'}
                 </button>
               </div>
             </form>

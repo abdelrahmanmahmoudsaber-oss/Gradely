@@ -5,7 +5,7 @@ import { printStudentReportPDF } from '../utils/pdfHelper';
 import { 
   LogOut, BookOpen, Calendar, FileText, GraduationCap, UserCheck, 
   Award, TrendingUp, Star, CheckCircle2, AlertTriangle, Printer, 
-  BarChart3, Sparkles, Trophy, Target, KeyRound, Lock, X
+  BarChart3, Sparkles, Trophy, Target, KeyRound, Lock, X, Bell, Check
 } from 'lucide-react';
 import { getSectionInstructorName as resolveSectionTA } from '../utils/sectionHelper';
 import ActiveSessionsModal from '../components/ActiveSessionsModal';
@@ -76,6 +76,17 @@ export default function StudentDashboard({ user, onLogout }) {
   const [visibility, setVisibility] = useState({ global: { ...DEFAULT_VISIBILITY } });
   const [maxScores, setMaxScores] = useState({ global: { ...DEFAULT_MAX_SCORES } });
 
+  // Notifications State
+  const [notifications, setNotifications] = useState([]);
+  const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+  const [readNotifIds, setReadNotifIds] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(`gradely_read_notifs_${user.user_id}`)) || [];
+    } catch (e) {
+      return [];
+    }
+  });
+
   // Password Change State
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showSessionsModal, setShowSessionsModal] = useState(false);
@@ -128,9 +139,12 @@ export default function StudentDashboard({ user, onLogout }) {
         throw new Error(rpcRes.message || 'كلمة المرور الحالية غير صحيحة');
       }
 
+      if (rpcRes?.session_token) {
+        localStorage.setItem('gradely_session_token', rpcRes.session_token);
+      }
       sessionStorage.removeItem('gradely_must_change_pwd_' + user.user_id);
       localStorage.setItem('gradely_pwd_updated_' + user.user_id, 'true');
-      setPasswordMsg({ type: 'success', text: '✅ تم تغيير وتعيين كلمة المرور بنجاح!' });
+      setPasswordMsg({ type: 'success', text: '✅ تم تغيير وتعيين كلمة المرور بنجاح وإلغاء كلمة المرور السابقة والجلسات الأخرى!' });
       setTimeout(() => {
         setShowPasswordModal(false);
         setIsForcePasswordChange(false);
@@ -191,6 +205,120 @@ export default function StudentDashboard({ user, onLogout }) {
     if (lower.includes('fourth') || lower.includes('four')) return '4';
     return '';
   };
+
+  const fetchNotifications = async (currentSubjectsList = subjects) => {
+    try {
+      const notifList = [];
+
+      // 1. Fetch from public.notifications table
+      try {
+        const { data: dbNotifs } = await supabase
+          .from('notifications')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(30);
+
+        if (dbNotifs && Array.isArray(dbNotifs)) {
+          const enrolledSubIds = currentSubjectsList.map(s => s.id);
+          const stuYear = inferStudentYear(user.user_id, user.year_level);
+
+          dbNotifs.forEach(n => {
+            const matchesSub = n.subject_id && enrolledSubIds.includes(n.subject_id);
+            const matchesYear = n.year_level && normalizeYear(n.year_level) === stuYear;
+            if (matchesSub || matchesYear || (!n.subject_id && !n.year_level)) {
+              notifList.push({
+                id: n.id,
+                subjectId: n.subject_id,
+                subjectName: n.subject_name,
+                title: n.title,
+                message: n.message,
+                sender: n.sender_name,
+                createdAt: n.created_at
+              });
+            }
+          });
+        }
+      } catch (err) {
+        console.warn('Notifications table fetch notice:', err);
+      }
+
+      // 2. Fetch from dual-stored subject CONFIG_NOTIF tags
+      currentSubjectsList.forEach(sub => {
+        if (Array.isArray(sub.excluded_students)) {
+          sub.excluded_students.forEach(tag => {
+            if (typeof tag === 'string' && tag.startsWith('CONFIG_NOTIF:')) {
+              try {
+                const parsed = JSON.parse(tag.replace('CONFIG_NOTIF:', ''));
+                if (!notifList.some(n => n.id === parsed.id)) {
+                  notifList.push({
+                    id: parsed.id || `${sub.id}_${parsed.createdAt}`,
+                    subjectId: sub.id,
+                    subjectName: sub.name,
+                    title: parsed.title,
+                    message: parsed.message,
+                    sender: parsed.sender,
+                    createdAt: parsed.createdAt
+                  });
+                }
+              } catch (e) {}
+            }
+          });
+        }
+      });
+
+      // Sort newest first
+      notifList.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      setNotifications(notifList);
+
+      // Web Notification Check (alert user if new unread notification)
+      if (notifList.length > 0 && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        const lastAlerted = localStorage.getItem(`gradely_last_alerted_notif_${user.user_id}`);
+        const newest = notifList[0];
+        if (newest && newest.id !== lastAlerted) {
+          localStorage.setItem(`gradely_last_alerted_notif_${user.user_id}`, newest.id);
+          try {
+            new Notification(newest.title, {
+              body: newest.message,
+              icon: '/favicon.ico'
+            });
+          } catch(e) {}
+        }
+      }
+    } catch (e) {
+      console.warn('Notification processing notice:', e);
+    }
+  };
+
+  const markNotificationAsRead = (id) => {
+    setReadNotifIds(prev => {
+      if (prev.includes(id)) return prev;
+      const updated = [...prev, id];
+      try { localStorage.setItem(`gradely_read_notifs_${user.user_id}`, JSON.stringify(updated)); } catch(e) {}
+      return updated;
+    });
+  };
+
+  const markAllNotificationsAsRead = () => {
+    const allIds = notifications.map(n => n.id);
+    setReadNotifIds(allIds);
+    try { localStorage.setItem(`gradely_read_notifs_${user.user_id}`, JSON.stringify(allIds)); } catch(e) {}
+  };
+
+  const handleRequestPushPermission = async () => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      try {
+        const perm = await Notification.requestPermission();
+        if (perm === 'granted') {
+          new Notification('Gradely — تم تفعيل الإشعارات بنجاح!', {
+            body: 'ستصلك الآن تنبيهات فورية عند إعلان ورصد الدرجات والغياب.',
+            icon: '/favicon.ico'
+          });
+        }
+      } catch (e) {}
+    }
+  };
+
+  const unreadCount = notifications.filter(n => !readNotifIds.includes(n.id)).length;
 
     const formatDisplayDate = (dateStr) => {
     if (!dateStr) return '';
@@ -453,6 +581,7 @@ export default function StudentDashboard({ user, onLogout }) {
       setSubjects(studentSubjects);
       setAttendance(attData);
       setGrades(grdData);
+      fetchNotifications(studentSubjects);
 
       if (studentSubjects.length > 0) {
         setSelectedSubjectId(studentSubjects[0].id);
@@ -572,6 +701,18 @@ export default function StudentDashboard({ user, onLogout }) {
   // Calculate dynamic visible total score & max total score for current subject
   const currentSubVis = getSubVisibility(selectedSubjectId);
   const currentSubMaxScores = getSubMaxScores(selectedSubjectId);
+
+  // Per-subject section participation configuration
+  const secPartTag = (currentSubject?.excluded_students || []).find(e => typeof e === 'string' && e.startsWith('CONFIG_SEC_PART:'));
+  let isSecPartEnabled = false;
+  let secPartMax = 5;
+  if (secPartTag) {
+    try {
+      const parsed = JSON.parse(secPartTag.replace('CONFIG_SEC_PART:', ''));
+      isSecPartEnabled = Boolean(parsed.enabled);
+      if (parsed.max) secPartMax = parsed.max;
+    } catch(e) {}
+  }
   let visibleTotal = 0;
   let visibleMaxTotal = 0;
   let hasAnyGradeVisible = false;
@@ -631,6 +772,44 @@ export default function StudentDashboard({ user, onLogout }) {
           <span className="badge" style={{background:'rgba(16, 185, 129, 0.1)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.2)',padding:'5px 10px',fontWeight:700,fontSize:'0.8rem'}}>
             الفرقة {inferStudentYear(user.user_id, user.year_level)} | {getStudentPrimarySection(user)}
           </span>
+
+          {/* Notifications Center Bell Button */}
+          <button 
+            type="button"
+            onClick={() => setShowNotificationsModal(true)} 
+            style={{
+              background: unreadCount > 0 ? 'rgba(239, 68, 68, 0.15)' : 'rgba(79, 70, 229, 0.1)',
+              color: unreadCount > 0 ? 'var(--danger)' : 'var(--primary-hover)',
+              border: '1px solid ' + (unreadCount > 0 ? 'rgba(239, 68, 68, 0.4)' : 'rgba(79, 70, 229, 0.3)'),
+              padding: '6px 14px',
+              borderRadius: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+              fontWeight: 700,
+              position: 'relative',
+              transition: 'all 0.2s'
+            }}
+            title="الإشعارات والتنبيهات المباشرة"
+          >
+            <Bell size={15} />
+            <span>الإشعارات</span>
+            {unreadCount > 0 && (
+              <span style={{
+                background: 'var(--danger)',
+                color: '#fff',
+                borderRadius: '50%',
+                padding: '1px 6px',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                lineHeight: 1.2
+              }}>
+                {unreadCount}
+              </span>
+            )}
+          </button>
 
           <button 
             onClick={() => { setShowPasswordModal(true); setIsForcePasswordChange(false); setPasswordMsg({type:'',text:''}); }} 
@@ -718,12 +897,19 @@ export default function StudentDashboard({ user, onLogout }) {
             {/* Best Attendance Subject */}
             {currentSubVis.showAttendanceTab && bestAttendanceSub && (
               <div className="panel" style={{display: 'flex', alignItems: 'center', gap: '1rem', borderTop: '4px solid #f59e0b'}}>
-                <div style={{background: 'rgba(245, 158, 11, 0.1)', padding: '0.9rem', borderRadius: '50%', color: '#f59e0b'}}>
+                <div style={{background: 'rgba(245, 158, 11, 0.1)', padding: '0.9rem', borderRadius: '50%', color: '#f59e0b', flexShrink: 0}}>
                   <Trophy size={24} />
                 </div>
-                <div>
+                <div style={{flex: 1, minWidth: 0}}>
                   <p className="text-muted" style={{margin: '0 0 3px 0', fontSize: '0.85rem'}}>الأعلى التزاماً وحضوراً</p>
-                  <h3 style={{margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#f59e0b', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:'160px'}}>
+                  <h3 style={{
+                    margin: '0 0 4px 0',
+                    fontSize: '1.02rem',
+                    fontWeight: 800,
+                    color: '#f59e0b',
+                    wordBreak: 'break-word',
+                    lineHeight: '1.35'
+                  }} title={bestAttendanceSub.name}>
                     {bestAttendanceSub.name}
                   </h3>
                   <span style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>نسبة حضور: {bestAttendanceSub.rate}%</span>
@@ -734,12 +920,19 @@ export default function StudentDashboard({ user, onLogout }) {
             {/* Highest Grade Subject */}
             {currentSubVis.showTotal && bestGradesSub && (
               <div className="panel" style={{display: 'flex', alignItems: 'center', gap: '1rem', borderTop: '4px solid #3b82f6'}}>
-                <div style={{background: 'rgba(59, 130, 246, 0.1)', padding: '0.9rem', borderRadius: '50%', color: '#3b82f6'}}>
+                <div style={{background: 'rgba(59, 130, 246, 0.1)', padding: '0.9rem', borderRadius: '50%', color: '#3b82f6', flexShrink: 0}}>
                   <Star size={24} />
                 </div>
-                <div>
+                <div style={{flex: 1, minWidth: 0}}>
                   <p className="text-muted" style={{margin: '0 0 3px 0', fontSize: '0.85rem'}}>المادة الأكثر تميزاً</p>
-                  <h3 style={{margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#3b82f6', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:'160px'}}>
+                  <h3 style={{
+                    margin: '0 0 4px 0',
+                    fontSize: '1.02rem',
+                    fontWeight: 800,
+                    color: '#3b82f6',
+                    wordBreak: 'break-word',
+                    lineHeight: '1.35'
+                  }} title={bestGradesSub.name}>
                     {bestGradesSub.name}
                   </h3>
                   <span style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>الدرجة: {bestGradesSub.score} درجة</span>
@@ -1095,7 +1288,7 @@ export default function StudentDashboard({ user, onLogout }) {
                           {attSubMode === 'lecture' ? `محاضرة ${w}` : `أسبوع ${w}`}
                         </div>
                         <div style={{fontWeight: 'bold', color: statusColor, fontSize: '0.85rem'}}>{statusLabel}</div>
-                        {attSubMode === 'section' && currentGrades?.custom_grades && currentGrades.custom_grades['sec_score_w' + w] != null && (
+                        {attSubMode === 'section' && isSecPartEnabled && currentGrades?.custom_grades && currentGrades.custom_grades['sec_score_w' + w] != null && (
                           <div style={{
                             fontSize: '0.74rem',
                             fontWeight: 800,
@@ -1107,7 +1300,7 @@ export default function StudentDashboard({ user, onLogout }) {
                             border: '1px solid rgba(79, 70, 229, 0.25)',
                             display: 'inline-block'
                           }}>
-                            ⭐ درجة: {currentGrades.custom_grades['sec_score_w' + w]} / 5
+                            ⭐ درجة: {currentGrades.custom_grades['sec_score_w' + w]} / {secPartMax}
                           </div>
                         )}
                         {hasRecordedAttendance && wDate ? (
@@ -1446,6 +1639,198 @@ export default function StudentDashboard({ user, onLogout }) {
                 )}
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* NOTIFICATIONS CENTER MODAL */}
+      {showNotificationsModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.7)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '1rem'
+        }}>
+          <div className="panel fade-in" style={{
+            maxWidth: '560px',
+            width: '100%',
+            maxHeight: '85vh',
+            display: 'flex',
+            flexDirection: 'column',
+            background: 'var(--surface)',
+            border: '2px solid var(--primary)',
+            borderRadius: '12px',
+            padding: '1.5rem',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
+          }}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1rem',borderBottom:'1px solid var(--border)',paddingBottom:'0.8rem'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                <div style={{background:'rgba(79, 70, 229, 0.15)',padding:'6px',borderRadius:'8px',color:'var(--primary-hover)',display:'flex'}}>
+                  <Bell size={18} />
+                </div>
+                <h3 style={{margin:0,fontSize:'1.15rem',fontWeight:800}}>مركز الإشعارات والتنبيهات</h3>
+                {unreadCount > 0 && (
+                  <span className="badge" style={{background:'rgba(239, 68, 68, 0.15)',color:'var(--danger)',border:'1px solid rgba(239, 68, 68, 0.3)',fontSize:'0.75rem'}}>
+                    {unreadCount} غير مقروء
+                  </span>
+                )}
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                {unreadCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={markAllNotificationsAsRead}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--primary-hover)',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      padding: '4px 8px'
+                    }}
+                  >
+                    تحديد الكل كمقروء ✓
+                  </button>
+                )}
+                <button 
+                  type="button" 
+                  onClick={() => setShowNotificationsModal(false)}
+                  style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Native Browser Notification Enable Prompt */}
+            {typeof window !== 'undefined' && 'Notification' in window && Notification.permission !== 'granted' && (
+              <div style={{
+                background: 'rgba(79, 70, 229, 0.08)',
+                border: '1px solid rgba(79, 70, 229, 0.25)',
+                borderRadius: '8px',
+                padding: '8px 12px',
+                marginBottom: '1rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <span style={{fontSize:'0.8rem',color:'var(--text-main)',fontWeight:600}}>
+                  🔔 تلقي إشعارات فورية على جهازك أو هاتفك عند إعلان أي درجات جديدة
+                </span>
+                <button
+                  type="button"
+                  onClick={handleRequestPushPermission}
+                  style={{
+                    background: 'var(--primary)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '4px 10px',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  تفعيل التنبيهات
+                </button>
+              </div>
+            )}
+
+            {/* Notifications List */}
+            <div style={{flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '4px'}}>
+              {notifications.length === 0 ? (
+                <div style={{textAlign:'center',padding:'3rem 1rem',color:'var(--text-muted)'}}>
+                  <div style={{fontSize:'2rem',marginBottom:'8px'}}>📭</div>
+                  <div style={{fontWeight:700}}>لا توجد أي إشعارات جديدة حالياً</div>
+                  <div style={{fontSize:'0.82rem',marginTop:'4px'}}>ستظهر هنا إعلانات المعيدين ورصد الدرجات فور نشرها.</div>
+                </div>
+              ) : (
+                notifications.map(n => {
+                  const isRead = readNotifIds.includes(n.id);
+                  return (
+                    <div 
+                      key={n.id}
+                      onClick={() => markNotificationAsRead(n.id)}
+                      style={{
+                        background: isRead ? 'rgba(255, 255, 255, 0.02)' : 'rgba(79, 70, 229, 0.08)',
+                        border: '1px solid ' + (isRead ? 'var(--border)' : 'rgba(79, 70, 229, 0.35)'),
+                        borderRadius: '10px',
+                        padding: '12px 14px',
+                        transition: 'all 0.15s ease',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'6px',gap:'8px'}}>
+                        <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                          <span style={{
+                            width: '8px',
+                            height: '8px',
+                            borderRadius: '50%',
+                            background: isRead ? 'transparent' : 'var(--danger)',
+                            display: 'inline-block'
+                          }} />
+                          <span className="badge" style={{background:'rgba(79, 70, 229, 0.15)',color:'var(--primary-hover)',fontWeight:800,fontSize:'0.75rem'}}>
+                            {n.subjectName || 'إعلان عام'}
+                          </span>
+                        </div>
+                        <span style={{fontSize:'0.72rem',color:'var(--text-muted)'}}>
+                          {n.createdAt ? new Date(n.createdAt).toLocaleDateString('ar-EG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                        </span>
+                      </div>
+
+                      <div style={{fontWeight: 800, fontSize: '0.92rem', color: 'var(--text-main)', marginBottom: '4px'}}>
+                        {n.title}
+                      </div>
+
+                      <p style={{margin: '0 0 8px 0', fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: '1.45', whiteSpace: 'pre-wrap'}}>
+                        {n.message}
+                      </p>
+
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'6px',paddingTop:'6px',borderTop:'1px dashed rgba(255,255,255,0.06)'}}>
+                        <span style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>
+                          بواسطة: <strong style={{color:'var(--text-main)'}}>{n.sender || 'أستاذ المادة'}</strong>
+                        </span>
+                        {n.subjectId && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              markNotificationAsRead(n.id);
+                              setSelectedSubjectId(n.subjectId);
+                              setViewMode('grades');
+                              setShowNotificationsModal(false);
+                            }}
+                            style={{
+                              background: 'rgba(79, 70, 229, 0.15)',
+                              color: 'var(--primary-hover)',
+                              border: '1px solid rgba(79, 70, 229, 0.3)',
+                              borderRadius: '6px',
+                              padding: '3px 10px',
+                              fontSize: '0.78rem',
+                              fontWeight: 800,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            📊 عرض درجات المادة ←
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
       )}

@@ -976,8 +976,10 @@ export async function printWeekAttendancePDF({
     const grp = getStudentLectureGroup ? getStudentLectureGroup(s) : 'A';
     const isGrpA = grp === 'A';
 
+    const isSectionScoreEnabled = Boolean(options.showSectionScore);
+    const maxScoreVal = options.maxSectionScore || 5;
     const stuScore = (options.studentScores && options.studentScores[s.user_id] != null) ? options.studentScores[s.user_id] : '';
-    const displayScore = stuScore !== '' ? `<span style="font-weight:700;color:#0f172a;font-size:11px;">${stuScore} / 5</span>` : '&nbsp;';
+    const displayScore = stuScore !== '' ? `<span style="font-weight:700;color:#0f172a;font-size:11px;">${stuScore} / ${maxScoreVal}</span>` : '&nbsp;';
 
     return `
       <tr style="border-bottom: 1px solid #cbd5e1; background-color: ${globalIdx % 2 === 0 ? '#ffffff' : '#f8fafc'}; height: 26px;">
@@ -995,7 +997,7 @@ export async function printWeekAttendancePDF({
             ${statusText}
           </span>
         </td>
-        <td style="text-align:center;min-width:75px;padding:4px 3px;border:1px solid #cbd5e1;">${displayScore}</td>
+        ${isSectionScoreEnabled ? `<td style="text-align:center;min-width:75px;padding:4px 3px;border:1px solid #cbd5e1;">${displayScore}</td>` : ''}
       </tr>
     `;
   };
@@ -1118,11 +1120,11 @@ export async function printWeekAttendancePDF({
               <th style="width:55px;padding:5px 2px;border:1px solid #1e293b;font-weight:700;text-align:center;">السكشن</th>
               <th style="width:55px;padding:5px 2px;border:1px solid #1e293b;font-weight:700;text-align:center;">الجروب</th>
               <th style="width:75px;padding:5px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الحالة</th>
-              <th style="width:75px;padding:5px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الدرجة</th>
+              ${Boolean(options.showSectionScore) ? `<th style="width:75px;padding:5px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الدرجة (من ${options.maxSectionScore || 5})</th>` : ''}
             </tr>
           </thead>
           <tbody>
-            ${pageRowsHtml || '<tr><td colspan="7" style="text-align:center;padding:15px;color:#94a3b8;border:1px solid #cbd5e1;">لا توجد سجلات مطابقة</td></tr>'}
+            ${pageRowsHtml || `<tr><td colspan="${Boolean(options.showSectionScore) ? 7 : 6}" style="text-align:center;padding:15px;color:#94a3b8;border:1px solid #cbd5e1;">لا توجد سجلات مطابقة</td></tr>`}
           </tbody>
         </table>
       `;

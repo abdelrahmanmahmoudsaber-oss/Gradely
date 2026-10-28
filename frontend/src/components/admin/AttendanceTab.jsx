@@ -602,6 +602,54 @@ export default function AttendanceTab({ user }) {
 
   const currentSub = (attendanceType === 'lecture' ? allSystemSubjects : subjects).find(s => s.id === selectedSubject);
 
+  // Per-subject section participation configuration (disabled by default, configurable max)
+  const secPartConfig = useMemo(() => {
+    if (!currentSub || !Array.isArray(currentSub.excluded_students)) {
+      return { enabled: false, max: 5 };
+    }
+    const tag = currentSub.excluded_students.find(e => typeof e === 'string' && e.startsWith('CONFIG_SEC_PART:'));
+    if (!tag) return { enabled: false, max: 5 };
+    try {
+      const parsed = JSON.parse(tag.replace('CONFIG_SEC_PART:', ''));
+      return {
+        enabled: Boolean(parsed.enabled),
+        max: typeof parsed.max === 'number' && parsed.max > 0 ? parsed.max : 5
+      };
+    } catch (e) {
+      return { enabled: false, max: 5 };
+    }
+  }, [currentSub, selectedSubject]);
+
+  const handleToggleSecPart = async (newEnabled, newMax = null) => {
+    if (!selectedSubject) return;
+    const targetSub = subjects.find(s => s.id === selectedSubject) || allSystemSubjects.find(s => s.id === selectedSubject);
+    if (!targetSub) return;
+
+    const effectiveMax = newMax !== null ? (Math.max(1, Number(newMax)) || 5) : (secPartConfig.max || 5);
+    const currentExcluded = Array.isArray(targetSub.excluded_students) ? targetSub.excluded_students : [];
+    const filtered = currentExcluded.filter(e => typeof e !== 'string' || !e.startsWith('CONFIG_SEC_PART:'));
+
+    if (newEnabled) {
+      filtered.push(`CONFIG_SEC_PART:${JSON.stringify({ enabled: true, max: effectiveMax })}`);
+    }
+
+    try {
+      const { error } = await supabase
+        .from('subjects')
+        .update({ excluded_students: filtered })
+        .eq('id', selectedSubject);
+
+      if (!error) {
+        targetSub.excluded_students = filtered;
+        setSubjects([...subjects]);
+        setAllSystemSubjects([...allSystemSubjects]);
+        cacheManager.set('admin_subjects_base', [...subjects]);
+      }
+    } catch (err) {
+      console.error('Failed to update section participation config:', err);
+    }
+  };
+
   const getEnrolledStudents = () => {
     if (!currentSub) return [];
     if (Array.isArray(currentSub.enrolled_students) && currentSub.enrolled_students.length > 0) {
@@ -776,7 +824,8 @@ export default function AttendanceTab({ user }) {
   };
 
   const handleUpdateSectionScore = async (studentId, val) => {
-    const parsed = val === '' ? null : Math.min(5, Math.max(0, parseFloat(val) || 0));
+    const maxVal = secPartConfig.max || 5;
+    const parsed = val === '' ? null : Math.min(maxVal, Math.max(0, parseFloat(val) || 0));
     setSectionScores(prev => ({ ...prev, [studentId]: parsed }));
 
     try {
@@ -821,11 +870,12 @@ export default function AttendanceTab({ user }) {
     const updatedRecs = { ...attendanceRecords, [studentId]: nextVal };
     setAttendanceRecords(updatedRecs);
 
-    // Auto default score for section attendance: 5 if present, 0 if absent
-    if (attendanceType === 'section') {
+    // Auto default score for section attendance ONLY IF participation grades are enabled for this subject
+    if (attendanceType === 'section' && secPartConfig.enabled) {
+      const maxScore = secPartConfig.max || 5;
       if (nextVal === 'present' && (sectionScores[studentId] === undefined || sectionScores[studentId] === null)) {
-        handleUpdateSectionScore(studentId, 5);
-      } else if (nextVal === 'absent' && (sectionScores[studentId] === undefined || sectionScores[studentId] === 5)) {
+        handleUpdateSectionScore(studentId, maxScore);
+      } else if (nextVal === 'absent' && (sectionScores[studentId] === undefined || sectionScores[studentId] === maxScore)) {
         handleUpdateSectionScore(studentId, 0);
       }
     }
@@ -1340,6 +1390,8 @@ export default function AttendanceTab({ user }) {
           getStudentSubSection: (s) => s.nativeSection || getStudentSubSection(s, selectedSubject),
           getStudentLectureGroup: (s) => s.nativeGroup || getStudentLectureGroup(s, selectedSubject),
           studentScores: sectionScores,
+          showSectionScore: attendanceType === 'section' && secPartConfig.enabled,
+          maxSectionScore: secPartConfig.max || 5,
           filename: `${filename}.pdf`,
           onProgress: (cur, tot) => {
             setPdfProgressText(`جاري تجهيز صفحة ${cur} من ${tot}...`);
@@ -1894,6 +1946,85 @@ export default function AttendanceTab({ user }) {
         </div>
       )}
 
+      {/* SECTION PARTICIPATION CONFIGURATION TOGGLE (Per Subject) */}
+      {attendanceType === 'section' && selectedSubject && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '12px',
+          background: secPartConfig.enabled ? 'rgba(99, 102, 241, 0.08)' : 'rgba(255, 255, 255, 0.02)',
+          border: '1px solid ' + (secPartConfig.enabled ? 'rgba(99, 102, 241, 0.3)' : 'var(--border)'),
+          borderRadius: '10px',
+          padding: '10px 16px',
+          marginBottom: '1.2rem'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '1.2rem' }}>⭐</span>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: '0.92rem', color: secPartConfig.enabled ? 'var(--primary-hover)' : 'var(--text-main)' }}>
+                درجة مشاركة السكشن ({currentSub?.name}):
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                {secPartConfig.enabled
+                  ? `مفعلة لهذه المادة فقط (الدرجة القصوى: ${secPartConfig.max} درجات لكل سكشن) — تظهر بالجدول والكروت وكشف الغياب`
+                  : 'معطلة حالياً لهذه المادة (لا تظهر أي درجات مشاركة للسكشن افتراضياً إلا إذا قام المعيد بتفعيلها لهذه المادة)'}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {secPartConfig.enabled && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-muted)' }}>الدرجة من:</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  step="1"
+                  value={secPartConfig.max}
+                  onChange={(e) => handleToggleSecPart(true, e.target.value)}
+                  style={{
+                    width: '54px',
+                    padding: '4px 6px',
+                    textAlign: 'center',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg)',
+                    color: 'var(--text-main)',
+                    fontWeight: 800,
+                    fontSize: '0.88rem'
+                  }}
+                  title="تحديد الدرجة العظمى لمشاركة السكشن لهذه المادة"
+                />
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => handleToggleSecPart(!secPartConfig.enabled)}
+              style={{
+                background: secPartConfig.enabled ? 'var(--primary)' : 'transparent',
+                color: secPartConfig.enabled ? '#fff' : 'var(--text-muted)',
+                border: '1px solid ' + (secPartConfig.enabled ? 'var(--primary)' : 'var(--border)'),
+                borderRadius: '8px',
+                padding: '6px 14px',
+                fontWeight: 800,
+                fontSize: '0.84rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.2s'
+              }}
+            >
+              {secPartConfig.enabled ? '✓ مفعلة لهذه المادة' : '○ تفعيل درجة المشاركة للمادة'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* QUICK ATTENDANCE TOOLBAR & LIVE COUNTERS */}
       {selectedSubject && (
         <div className="panel" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem',flexWrap:'wrap',gap:'1rem',background:'var(--surface)',padding:'1rem 1.2rem'}}>
@@ -2440,8 +2571,8 @@ export default function AttendanceTab({ user }) {
                   )}
                 </div>
 
-                {/* Section Participation Score Input (Sections only) */}
-                {attendanceType === 'section' && (
+                {/* Section Participation Score Input (Sections only, and only if enabled for this subject) */}
+                {attendanceType === 'section' && secPartConfig.enabled && (
                   <div style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -2459,9 +2590,9 @@ export default function AttendanceTab({ user }) {
                       <input
                         type="number"
                         min="0"
-                        max="5"
+                        max={secPartConfig.max}
                         step="0.5"
-                        placeholder="5"
+                        placeholder={String(secPartConfig.max)}
                         value={sectionScores[s.user_id] != null ? sectionScores[s.user_id] : ''}
                         onChange={(e) => handleUpdateSectionScore(s.user_id, e.target.value)}
                         style={{
@@ -2476,7 +2607,7 @@ export default function AttendanceTab({ user }) {
                           fontSize: '0.92rem'
                         }}
                       />
-                      <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-muted)' }}>/ 5</span>
+                      <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-muted)' }}>/ {secPartConfig.max}</span>
                     </div>
                   </div>
                 )}
@@ -2593,8 +2724,8 @@ export default function AttendanceTab({ user }) {
                 <th style={{padding:'12px 16px'}}>اسم الطالب</th>
                 <th style={{padding:'12px 16px'}}>السكشن</th>
                 <th style={{padding:'12px 16px',textAlign:'center',minWidth:'320px'}}>حالة الحضور (أسبوع {week})</th>
-                {attendanceType === 'section' && (
-                  <th style={{padding:'12px 16px',textAlign:'center',width:'130px'}}>درجة السكشن (من 5)</th>
+                {attendanceType === 'section' && secPartConfig.enabled && (
+                  <th style={{padding:'12px 16px',textAlign:'center',width:'140px'}}>درجة السكشن (من {secPartConfig.max})</th>
                 )}
                 {isSuper && <th style={{padding:'12px 16px',width:'40px',textAlign:'center'}}></th>}
               </tr>
@@ -2624,15 +2755,15 @@ export default function AttendanceTab({ user }) {
                         <button onClick={()=>toggleAttendance(s.user_id,'excused')} style={{border:'none',borderRadius:'4px',padding:'6px 12px',fontSize:'0.85rem',fontWeight:800,cursor:'pointer',background: status === 'excused' ? '#3b82f6' : 'transparent',color: status === 'excused' ? '#fff' : 'var(--text-muted)'}}>عذر</button>
                       </div>
                     </td>
-                    {attendanceType === 'section' && (
+                    {attendanceType === 'section' && secPartConfig.enabled && (
                       <td style={{padding:'8px 16px',textAlign:'center'}}>
                         <div style={{display:'inline-flex',alignItems:'center',gap:'4px'}}>
                           <input
                             type="number"
                             min="0"
-                            max="5"
+                            max={secPartConfig.max}
                             step="0.5"
-                            placeholder="5"
+                            placeholder={String(secPartConfig.max)}
                             value={sectionScores[s.user_id] != null ? sectionScores[s.user_id] : ''}
                             onChange={(e) => handleUpdateSectionScore(s.user_id, e.target.value)}
                             style={{
@@ -2647,7 +2778,7 @@ export default function AttendanceTab({ user }) {
                               fontSize:'0.85rem'
                             }}
                           />
-                          <span style={{fontSize:'0.8rem',color:'var(--text-muted)'}}>/ 5</span>
+                          <span style={{fontSize:'0.8rem',color:'var(--text-muted)'}}>/{secPartConfig.max}</span>
                         </div>
                       </td>
                     )}
