@@ -240,8 +240,8 @@ BEGIN
           updated_at = now()
       WHERE id = v_auth_id;
     EXCEPTION WHEN OTHERS THEN
-      NULL;
-    END IF;
+      PERFORM 1;
+    END;
   END IF;
 
   -- 3. Clear rate limit attempts
