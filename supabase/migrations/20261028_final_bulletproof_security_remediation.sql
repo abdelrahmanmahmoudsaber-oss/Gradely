@@ -85,7 +85,7 @@ BEGIN
       SELECT 1
       FROM public.student_sessions ss
       JOIN public.users u ON LOWER(u.user_id) = LOWER(ss.user_id)
-      WHERE (ss.token = v_clean_token OR ss.session_token = v_clean_token)
+      WHERE ss.token = v_clean_token
         AND (ss.expires_at IS NULL OR ss.expires_at > now())
         AND u.role IN ('admin', 'super_admin', 'ta', 'instructor')
     ) OR EXISTS (
@@ -191,7 +191,7 @@ BEGIN
     IF EXISTS (
       SELECT 1 FROM public.users u
       JOIN public.student_sessions ss ON LOWER(u.user_id) = LOWER(ss.user_id)
-      WHERE (ss.token = v_clean_token OR ss.session_token = v_clean_token)
+      WHERE ss.token = v_clean_token
         AND (ss.expires_at IS NULL OR ss.expires_at > now())
         AND u.role IN ('admin', 'super_admin', 'ta', 'instructor')
     ) OR EXISTS (
@@ -206,7 +206,7 @@ BEGIN
       -- Check if token belongs to a student
       SELECT LOWER(ss.user_id) INTO v_student_id
       FROM public.student_sessions ss
-      WHERE (ss.token = v_clean_token OR ss.session_token = v_clean_token)
+      WHERE ss.token = v_clean_token
         AND (ss.expires_at IS NULL OR ss.expires_at > now())
       LIMIT 1;
 
