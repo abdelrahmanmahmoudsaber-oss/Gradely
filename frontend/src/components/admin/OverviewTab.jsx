@@ -942,56 +942,54 @@ export default function OverviewTab({ user }) {
   const handleDeleteCustomColumn = async (colId) => {
     if (!window.confirm('هل تريد حذف هذه الخانة المخصصة نهائياً؟')) return;
     
-    // 1. Identify the column and target subject scope
-    const colObj = customColumnsList.find(c => c.id === colId);
-    const targetScopeKey = (colObj && colObj.scope && colObj.scope !== 'global')
-      ? colObj.scope
-      : (selectedSubjectForVisibility || 'global');
-
+    // 1. Immediately update UI state
     const updatedCols = customColumnsList.filter(c => c.id !== colId);
     setCustomColumnsList(updatedCols);
 
-    // Also remove from columnLabels
     const updatedLabels = { ...columnLabels };
-    if (updatedLabels[colId]) delete updatedLabels[colId];
-    if (updatedLabels[targetScopeKey] && updatedLabels[targetScopeKey][colId]) {
-      delete updatedLabels[targetScopeKey][colId];
-    }
+    delete updatedLabels[colId];
+    Object.keys(updatedLabels).forEach(k => {
+      if (typeof updatedLabels[k] === 'object' && updatedLabels[k] !== null) {
+        delete updatedLabels[k][colId];
+      }
+    });
     setColumnLabels(updatedLabels);
 
-    // Also remove from visibilitySettings
     const updatedVis = { ...visibilitySettings };
-    if (updatedVis[colId] !== undefined) delete updatedVis[colId];
-    if (updatedVis[targetScopeKey] && updatedVis[targetScopeKey][colId] !== undefined) {
-      delete updatedVis[targetScopeKey][colId];
-    }
+    delete updatedVis[colId];
+    Object.keys(updatedVis).forEach(k => {
+      if (typeof updatedVis[k] === 'object' && updatedVis[k] !== null) {
+        delete updatedVis[k][colId];
+      }
+    });
     setVisibilitySettings(updatedVis);
 
     try {
-      if (targetScopeKey !== 'global') {
-        const cleanExcluded = await saveSubjectGradeConfig(supabase, targetScopeKey, {
-          customColumns: updatedCols.filter(c => c.scope === targetScopeKey),
-          colLabels: updatedLabels[targetScopeKey] || {},
-          visibility: updatedVis[targetScopeKey] || {}
-        });
+      // 2. Find ALL subjects that contain this column in their excluded_students tag
+      const subsToClean = allSubjectsList.filter(s => {
+        if (!Array.isArray(s.excluded_students)) return false;
+        return s.excluded_students.some(e => typeof e === 'string' && e.includes(colId));
+      });
 
-        // Instantly update in-memory subjects array and cache
-        const updatedSubs = allSubjectsList.map(s => s.id === targetScopeKey ? { ...s, excluded_students: cleanExcluded } : s);
-        setAllSubjectsList(updatedSubs);
-        cacheManager.set('admin_subjects_base', updatedSubs);
-      } else {
-        const subjectsToClean = allSubjectsList.length > 0 ? allSubjectsList : [];
-        for (const sub of subjectsToClean) {
-          const subCols = updatedCols.filter(c => c.scope === sub.id);
-          await saveSubjectGradeConfig(supabase, sub.id, {
-            customColumns: subCols,
-            colLabels: updatedLabels[sub.id] || {},
-            visibility: updatedVis[sub.id] || {}
-          });
+      // Also ensure the currently selected subject is in the list
+      if (selectedSubjectForVisibility && selectedSubjectForVisibility !== 'global') {
+        const currSub = allSubjectsList.find(s => s.id === selectedSubjectForVisibility);
+        if (currSub && !subsToClean.some(s => s.id === currSub.id)) {
+          subsToClean.push(currSub);
         }
-        cacheManager.invalidate('admin_subjects_base');
       }
 
+      for (const targetSub of subsToClean) {
+        const cleanExcluded = await saveSubjectGradeConfig(supabase, targetSub.id, {
+          customColumns: updatedCols.filter(c => c.scope === targetSub.id),
+          colLabels: updatedLabels[targetSub.id] || {},
+          visibility: updatedVis[targetSub.id] || {}
+        });
+        targetSub.excluded_students = cleanExcluded;
+      }
+
+      setAllSubjectsList([...allSubjectsList]);
+      cacheManager.set('admin_subjects_base', [...allSubjectsList]);
       cacheManager.clear();
       setSettingsMessage('✅ تم حذف الخانة المخصصة بنجاح وحفظ التغييرات نهائياً!');
       setTimeout(() => setSettingsMessage(''), 3000);
