@@ -331,3 +331,37 @@ CREATE POLICY "Strict notifications insert policy" ON public.notifications
   FOR INSERT WITH CHECK (
     auth.uid() IS NOT NULL OR session_user IN ('postgres', 'supabase_admin')
   );
+
+
+-- ------------------------------------------------------------------------------
+-- 5. ALLOW METADATA UPDATES (CONFIG_SEC_PART / DATES) ON SUBJECTS TABLE
+-- ------------------------------------------------------------------------------
+GRANT UPDATE (excluded_students) ON TABLE public.subjects TO anon, authenticated;
+
+DROP POLICY IF EXISTS "Allow staff update excluded_students" ON public.subjects;
+CREATE POLICY "Allow staff update excluded_students" ON public.subjects
+  FOR UPDATE TO anon, authenticated
+  USING (true)
+  WITH CHECK (true);
+
+CREATE OR REPLACE FUNCTION public.update_subject_excluded_students(
+  p_subject_id        uuid,
+  p_excluded_students text[],
+  p_session_token     text DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+BEGIN
+  UPDATE public.subjects
+  SET excluded_students = p_excluded_students
+  WHERE id = p_subject_id;
+
+  RETURN jsonb_build_object('success', true);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.update_subject_excluded_students(uuid, text[], text) TO anon, authenticated;
+ALTER FUNCTION public.update_subject_excluded_students(uuid, text[], text) OWNER TO postgres;

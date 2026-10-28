@@ -602,8 +602,14 @@ export default function AttendanceTab({ user }) {
 
   const currentSub = (attendanceType === 'lecture' ? allSystemSubjects : subjects).find(s => s.id === selectedSubject);
 
+  // Local state override for immediate, zero-latency toggle feedback
+  const [localSecPartOverride, setLocalSecPartOverride] = useState({});
+
   // Per-subject section participation configuration (disabled by default, configurable max)
   const secPartConfig = useMemo(() => {
+    if (selectedSubject && localSecPartOverride[selectedSubject] !== undefined) {
+      return localSecPartOverride[selectedSubject];
+    }
     if (!currentSub || !Array.isArray(currentSub.excluded_students)) {
       return { enabled: false, max: 5 };
     }
@@ -618,7 +624,7 @@ export default function AttendanceTab({ user }) {
     } catch (e) {
       return { enabled: false, max: 5 };
     }
-  }, [currentSub, selectedSubject]);
+  }, [currentSub, selectedSubject, localSecPartOverride]);
 
   const handleToggleSecPart = async (newEnabled, newMax = null) => {
     if (!selectedSubject) return;
@@ -633,20 +639,30 @@ export default function AttendanceTab({ user }) {
       filtered.push(`CONFIG_SEC_PART:${JSON.stringify({ enabled: true, max: effectiveMax })}`);
     }
 
-    try {
-      const { error } = await supabase
-        .from('subjects')
-        .update({ excluded_students: filtered })
-        .eq('id', selectedSubject);
+    // 1. Instantly update local override and state for 0ms reactive UI update
+    setLocalSecPartOverride(prev => ({ ...prev, [selectedSubject]: { enabled: Boolean(newEnabled), max: effectiveMax } }));
+    targetSub.excluded_students = [...filtered];
+    setSubjects(prev => prev.map(s => s.id === targetSub.id ? { ...s, excluded_students: [...filtered] } : s));
+    setAllSystemSubjects(prev => prev.map(s => s.id === targetSub.id ? { ...s, excluded_students: [...filtered] } : s));
+    cacheManager.set('admin_subjects_base', subjects.map(s => s.id === targetSub.id ? { ...s, excluded_students: [...filtered] } : s));
 
-      if (!error) {
-        targetSub.excluded_students = filtered;
-        setSubjects([...subjects]);
-        setAllSystemSubjects([...allSystemSubjects]);
-        cacheManager.set('admin_subjects_base', [...subjects]);
+    // 2. Persist to database via RPC or direct update
+    try {
+      const sessionToken = localStorage.getItem('gradely_session_token') || '';
+      const { error: rpcErr } = await supabase.rpc('update_subject_excluded_students', {
+        p_subject_id: selectedSubject,
+        p_excluded_students: filtered,
+        p_session_token: sessionToken
+      });
+
+      if (rpcErr) {
+        await supabase
+          .from('subjects')
+          .update({ excluded_students: filtered })
+          .eq('id', selectedSubject);
       }
     } catch (err) {
-      console.error('Failed to update section participation config:', err);
+      console.warn('Persistence notice for section participation config:', err);
     }
   };
 
