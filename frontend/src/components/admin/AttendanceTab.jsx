@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../../supabaseClient';
 import { exportExcelFile, parseAttendanceExcelFile, exportAttendanceTemplateExcel, getStudentLectureGroup, matchSheetToSubject } from '../../utils/excelHelper';
