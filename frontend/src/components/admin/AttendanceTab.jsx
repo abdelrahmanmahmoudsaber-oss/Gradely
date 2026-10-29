@@ -989,8 +989,20 @@ export default function AttendanceTab({ user }) {
 
       if (upsertRows.length > 0) {
         await saveSubjectWeekDate(selectedSubject, week, sessionDate);
-        const { error } = await supabase.from('attendance').upsert(upsertRows, { onConflict: 'student_id,subject_id,week_number' });
-        if (error) throw error;
+        const sessionToken = localStorage.getItem('gradely_session_token') || null;
+        let bulkSaved = false;
+        try {
+          const { error: rpcErr } = await supabase.rpc('save_bulk_attendance', {
+            p_records: upsertRows,
+            p_session_token: sessionToken
+          });
+          if (!rpcErr) bulkSaved = true;
+        } catch (_) {}
+
+        if (!bulkSaved) {
+          const { error } = await supabase.from('attendance').upsert(upsertRows, { onConflict: 'student_id,subject_id,week_number' });
+          if (error) throw error;
+        }
       }
 
       // Also save week date in subject config
