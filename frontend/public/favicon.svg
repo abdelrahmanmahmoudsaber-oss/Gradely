@@ -1,129 +1,52 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <!-- Background Gradient: Deep Obsidian to Royal Navy -->
-    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0e172a" />
-      <stop offset="50%" stop-color="#0a1120" />
-      <stop offset="100%" stop-color="#050811" />
+    <linearGradient id="sqBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="45%" stop-color="#0b1325" />
+      <stop offset="100%" stop-color="#070b14" />
     </linearGradient>
-
-    <!-- Subtle Premium Squircle Border Glow -->
-    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.75" />
-      <stop offset="50%" stop-color="#818cf8" stop-opacity="0.3" />
-      <stop offset="100%" stop-color="#0284c7" stop-opacity="0.6" />
+    <linearGradient id="sqBorder" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.8" />
+      <stop offset="50%" stop-color="#818cf8" stop-opacity="0.4" />
+      <stop offset="100%" stop-color="#0284c7" stop-opacity="0.7" />
     </linearGradient>
-
-    <!-- Ambient Center Radial Glow -->
-    <radialGradient id="ambientGlow" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#0284c7" stop-opacity="0.32" />
-      <stop offset="60%" stop-color="#6366f1" stop-opacity="0.14" />
-      <stop offset="100%" stop-color="#000000" stop-opacity="0" />
+    <radialGradient id="sqGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0284c7" stop-opacity="0.4" />
+      <stop offset="50%" stop-color="#6366f1" stop-opacity="0.2" />
+      <stop offset="100%" stop-color="#070b14" stop-opacity="0" />
     </radialGradient>
-
-    <!-- Emblem Letter "G" Vibrant Gradient -->
-    <linearGradient id="gGrad" x1="15%" y1="10%" x2="90%" y2="90%">
+    <linearGradient id="sqGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#38bdf8" />
       <stop offset="40%" stop-color="#60a5fa" />
-      <stop offset="85%" stop-color="#818cf8" />
+      <stop offset="80%" stop-color="#818cf8" />
       <stop offset="100%" stop-color="#a855f7" />
     </linearGradient>
-
-    <!-- "G" Specular Highlight -->
-    <linearGradient id="gHighlight" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.4" />
-      <stop offset="40%" stop-color="#ffffff" stop-opacity="0" />
-    </linearGradient>
-
-    <!-- Graduation Cap Gold Gradients -->
-    <linearGradient id="capGold" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#fde047" />
+    <linearGradient id="sqCapGold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
       <stop offset="40%" stop-color="#f59e0b" />
       <stop offset="100%" stop-color="#d97706" />
     </linearGradient>
-
-    <linearGradient id="capUnder" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="sqCapUnder" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#b45309" />
       <stop offset="100%" stop-color="#78350f" />
     </linearGradient>
-
-    <filter id="dropShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.65" />
-    </filter>
-
-    <filter id="capShadow" x="-25%" y="-25%" width="150%" height="150%">
-      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#000000" flood-opacity="0.55" />
+    <filter id="sqDrop" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="16" stdDeviation="22" flood-color="#000000" flood-opacity="0.9" />
     </filter>
   </defs>
 
-  <!-- Background Base -->
-  <rect x="6" y="6" width="500" height="500" rx="115" ry="115" fill="url(#bgGrad)" stroke="url(#borderGrad)" stroke-width="4.5" />
+  <rect x="8" y="8" width="496" height="496" rx="112" ry="112" fill="url(#sqBg)" stroke="url(#sqBorder)" stroke-width="4" />
+  <circle cx="256" cy="256" r="210" fill="url(#sqGlow)" />
 
-  <!-- Ambient Glow Behind Emblem -->
-  <circle cx="256" cy="265" r="190" fill="url(#ambientGlow)" />
-
-  <!-- Main Scaled Group -->
-  <g transform="translate(36, 36) scale(0.86)" filter="url(#dropShadow)">
-    
-    <!-- Bold Modern "G" Geometry (Canvas: 500x500 relative) -->
-    <path d="
-      M 265 140 
-      C 185 140, 125 200, 125 280 
-      C 125 360, 185 420, 265 420 
-      C 345 420, 385 365, 385 310 
-      L 265 310 
-      L 265 250 
-      L 445 250 
-      C 450 370, 375 470, 265 470 
-      C 145 470, 65 380, 65 280 
-      C 65 170, 150 90, 265 90 
-      C 320 90, 370 110, 405 145 
-      L 360 190 
-      C 335 160, 300 140, 265 140 
-      Z
-    " fill="url(#gGrad)" />
-
-    <!-- Subtle Inner Highlight Path on the "G" -->
-    <path d="
-      M 265 140 
-      C 185 140, 125 200, 125 280 
-      C 125 360, 185 420, 265 420 
-      C 345 420, 385 365, 385 310 
-      L 265 310 
-      L 265 250 
-      L 445 250 
-      C 450 370, 375 470, 265 470 
-      C 145 470, 65 380, 65 280 
-      C 65 170, 150 90, 265 90 
-      C 320 90, 370 110, 405 145 
-      L 360 190 
-      C 335 160, 300 140, 265 140 
-      Z
-    " fill="url(#gHighlight)" opacity="0.45" />
-
-    <!-- Academic Graduation Cap Tilted on Upper-Left of the "G" -->
-    <g transform="translate(75, 48) rotate(-14)" filter="url(#capShadow)">
-      <!-- Cap Skull Cap Underbody -->
-      <path d="M 60 78 L 60 118 C 60 138, 200 138, 200 118 L 200 78 Z" fill="url(#capUnder)" />
-      
-      <!-- Cap Diamond Mortarboard Top -->
-      <polygon points="130,20 240,65 130,110 20,65" fill="url(#capGold)" stroke="#fef08a" stroke-width="3" />
-      
-      <!-- Top Center Button -->
-      <ellipse cx="130" cy="65" rx="10" ry="7" fill="#fef3c7" />
-
-      <!-- Golden Tassel String -->
-      <path d="M 130 65 Q 50 88 40 128" stroke="#fde047" stroke-width="4.5" fill="none" stroke-linecap="round" />
-      
-      <!-- Hanging Tassel Fringe -->
-      <circle cx="40" cy="132" r="7.5" fill="#f59e0b" stroke="#fef08a" stroke-width="2" />
-      <polygon points="36,136 44,136 47,156 33,156" fill="url(#capGold)" />
-    </g>
-
-    <!-- Subtle Academic Star Accent -->
-    <g transform="translate(415, 105) scale(0.65)" opacity="0.9">
-      <path d="M 25 0 L 31 16 L 47 18 L 35 29 L 38 45 L 25 36 L 12 45 L 15 29 L 3 18 L 19 16 Z" fill="#38bdf8" />
+  <g transform="translate(256, 256) scale(3.5) translate(-50, -56)" filter="url(#sqDrop)">
+    <path d="M 52 28 C 36 28 24 40 24 56 C 24 72 36 84 52 84 C 68 84 76 73 76 62 L 52 62 L 52 50 L 88 50 C 89 74 74 94 52 94 C 28 94 12 76 12 56 C 12 34 29 18 52 18 C 63 18 73 22 80 29 L 71 38 C 66 32 59 28 52 28 Z" fill="url(#sqGrad)" />
+    <g transform="translate(18, 10) rotate(-16) scale(0.92)">
+      <polygon points="26,4 48,13 26,22 4,13" fill="url(#sqCapGold)" stroke="#fef9c3" stroke-width="1.3" />
+      <path d="M 12 16 L 12 24 C 12 28 40 28 40 24 L 40 16 Z" fill="url(#sqCapUnder)" />
+      <circle cx="26" cy="13" r="2.4" fill="#fef08a" />
+      <path d="M 26 13 Q 10 18 8 26" stroke="#fde047" stroke-width="1.8" fill="none" stroke-linecap="round" />
+      <circle cx="8" cy="27" r="2.2" fill="#f59e0b" />
     </g>
   </g>
 </svg>

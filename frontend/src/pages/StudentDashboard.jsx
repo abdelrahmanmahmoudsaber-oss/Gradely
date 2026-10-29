@@ -223,9 +223,17 @@ export default function StudentDashboard({ user, onLogout }) {
           const stuYear = inferStudentYear(user.user_id, user.year_level);
 
           dbNotifs.forEach(n => {
-            const matchesSub = n.subject_id && enrolledSubIds.includes(n.subject_id);
+            const hasSubject = Boolean(n.subject_id);
+            const matchesSub = hasSubject && enrolledSubIds.includes(n.subject_id);
             const matchesYear = n.year_level && normalizeYear(n.year_level) === stuYear;
-            if (matchesSub || matchesYear || (!n.subject_id && !n.year_level)) {
+
+            // Strict Subject Scoping:
+            // 1) If notification is for a specific subject, ONLY students enrolled in that subject may see it.
+            //    Never leak subject notifications to non-enrolled students just because they share the same year_level.
+            // 2) If notification has no subject_id, it is a general announcement: show if matching year_level or platform-wide.
+            const shouldInclude = hasSubject ? matchesSub : (matchesYear || !n.year_level);
+
+            if (shouldInclude) {
               notifList.push({
                 id: n.id,
                 subjectId: n.subject_id,

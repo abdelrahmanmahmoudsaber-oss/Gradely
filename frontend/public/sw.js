@@ -1,12 +1,12 @@
-const CACHE_NAME = 'gradely-cache-v3-20261027';
+const CACHE_NAME = 'gradely-cache-v4-20261029';
 const STATIC_PRECACHE = [
   '/',
-  '/favicon.svg',
-  '/pwa-192x192.png',
-  '/pwa-512x512.png',
-  '/pwa-maskable-512x512.png',
-  '/apple-touch-icon.png',
-  '/manifest.webmanifest'
+  '/favicon.svg?v=4',
+  '/pwa-192x192.png?v=4',
+  '/pwa-512x512.png?v=4',
+  '/pwa-maskable-512x512.png?v=4',
+  '/apple-touch-icon.png?v=4',
+  '/manifest.webmanifest?v=4'
 ];
 
 // Precache essential assets on install and activate immediately
