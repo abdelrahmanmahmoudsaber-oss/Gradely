@@ -829,24 +829,28 @@ export function printStudentCredentialsSlips({ credentialsList, title = 'كرو�
  * - Page 2+ contains no redundant title banner, seamlessly continuing the table
  * - Crisp borders with no distorted border radius
  */
-export async function printWeekAttendancePDF({
-  subjectName = 'المقرر الدراسي',
-  yearLevel = '',
-  sectionName = 'الكل',
-  groupName = '',
-  weekNum = 1,
-  sessionDate = '',
-  instructorName = 'معيد المادة',
-  attendanceType = 'section',
-  filterType = 'all',
-  students = [],
-  attendanceRecords = {},
-  excuseReasons = {},
-  getStudentSubSection = (s) => s.section || 'S1',
-  getStudentLectureGroup = () => 'A',
-  filename = '',
-  onProgress = null
-}) {
+export async function printWeekAttendancePDF(options = {}) {
+  const {
+    subjectName = 'المقرر الدراسي',
+    yearLevel = '',
+    sectionName = 'الكل',
+    groupName = '',
+    weekNum = 1,
+    sessionDate = '',
+    instructorName = 'معيد المادة',
+    attendanceType = 'section',
+    filterType = 'all',
+    students = [],
+    attendanceRecords = {},
+    excuseReasons = {},
+    getStudentSubSection = (s) => s.section || 'S1',
+    getStudentLectureGroup = () => 'A',
+    studentScores = {},
+    showSectionScore = false,
+    maxSectionScore = 5,
+    filename = '',
+    onProgress = null
+  } = options;
   const isLecture = attendanceType === 'lecture';
   const typeLabel = isLecture ? 'محاضرة' : 'سكشن';
 
@@ -1033,7 +1037,7 @@ export async function printWeekAttendancePDF({
         if (localIdx === 0 && !pageInfo.isFirstPage) {
           pageRowsHtml += `
             <tr style="background:#f1f5f9;border-top:1.5px solid #6366f1;border-bottom:1.5px solid #6366f1;">
-              <td colspan="7" style="padding:4px 10px;font-weight:800;font-size:11px;color:#312e81;text-align:right;">
+              <td colspan="${Boolean(showSectionScore) ? 7 : 6}" style="padding:4px 10px;font-weight:800;font-size:11px;color:#312e81;text-align:right;">
                 📌 طلاب مجموعة (جروب ${escapeHtml(curGrp)})
               </td>
             </tr>
@@ -1041,7 +1045,7 @@ export async function printWeekAttendancePDF({
         } else if (lastGrp && curGrp !== lastGrp) {
           pageRowsHtml += `
             <tr style="background:#f1f5f9;border-top:1.5px solid #6366f1;border-bottom:1.5px solid #6366f1;">
-              <td colspan="7" style="padding:4px 10px;font-weight:800;font-size:11px;color:#312e81;text-align:right;">
+              <td colspan="${Boolean(showSectionScore) ? 7 : 6}" style="padding:4px 10px;font-weight:800;font-size:11px;color:#312e81;text-align:right;">
                 📌 طلاب مجموعة (جروب ${escapeHtml(curGrp)})
               </td>
             </tr>
