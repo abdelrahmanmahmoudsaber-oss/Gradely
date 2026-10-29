@@ -4,7 +4,8 @@ import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { exportExcelFile, exportMultiSheetExcelFile, generateMultiSheetExcelBase64 } from '../../utils/excelHelper';
 import { 
   getBackupSettings, saveBackupSettings, sendFullSystemBackupEmail, 
-  cleanupBackupSettingsFromSubjects, fetchAllSupabaseRows, normalizeStatus, getStatusLabel 
+  cleanupBackupSettingsFromSubjects, fetchAllSupabaseRows, normalizeStatus, getStatusLabel,
+  sanitizeWebhookUrl
 } from '../../utils/backupService';
 import { 
   Users, BookOpen, Clock, Shield, Sliders, Eye, EyeOff, 
@@ -88,8 +89,8 @@ export default function OverviewTab({ user }) {
   const [backupMessage, setBackupMessage] = useState('');
   const [backupSchedule, setBackupSchedule] = useState(() => localStorage.getItem('gradely_backup_schedule') || 'daily');
   const [lastBackupDate, setLastBackupDate] = useState(() => localStorage.getItem('gradely_last_backup') || null);
-  const [backupEmail, setBackupEmail] = useState(() => localStorage.getItem('gradely_backup_email') || '');
-  const [webhookScriptUrl, setWebhookScriptUrl] = useState(() => localStorage.getItem('gradely_webhook_url') || '');
+  const [backupEmail, setBackupEmail] = useState(() => localStorage.getItem('gradely_backup_email') || 'abdo2171999m@gmail.com');
+  const [webhookScriptUrl, setWebhookScriptUrl] = useState(() => sanitizeWebhookUrl(localStorage.getItem('gradely_webhook_url') || ''));
   const [showGoogleScriptModal, setShowGoogleScriptModal] = useState(false);
   const [copiedScript, setCopiedScript] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
@@ -734,16 +735,16 @@ export default function OverviewTab({ user }) {
   };
 
   const handleSaveWebhookUrl = async (url) => {
-    const trimmed = (url || '').trim();
-    setWebhookScriptUrl(trimmed);
+    const cleaned = sanitizeWebhookUrl(url);
+    setWebhookScriptUrl(cleaned);
     await saveBackupSettings({
-      email: backupEmail,
+      email: backupEmail || 'abdo2171999m@gmail.com',
       schedule: backupSchedule,
-      webhookUrl: trimmed,
+      webhookUrl: cleaned,
       lastBackup: lastBackupDate,
       nextBackup: nextBackupDate
     });
-    setBackupMessage('✅ تم حفظ رابط سكريبت Google Apps Script بنجاح');
+    setBackupMessage('✅ تم حفظ وتأكيد رابط سكريبت Google Apps Script بنجاح');
     setTimeout(() => setBackupMessage(''), 4000);
   };
 

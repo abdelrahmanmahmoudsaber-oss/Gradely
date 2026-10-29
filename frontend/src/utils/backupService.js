@@ -2,8 +2,29 @@ import { supabase } from '../supabaseClient';
 import { generateMultiSheetExcelBase64 } from './excelHelper';
 import { isSuperUser } from './dataCache';
 
-const DEFAULT_EMAIL = '';
+const DEFAULT_EMAIL = 'abdo2171999m@gmail.com';
 const DEFAULT_WEBHOOK = '';
+
+/**
+ * Sanitizes and formats a Google Apps Script Web App URL
+ * Automatically removes accidental non-URL prefixes/suffixes and ensures it ends with /exec
+ */
+export const sanitizeWebhookUrl = (url) => {
+  if (!url) return '';
+  let cleaned = String(url).trim();
+  // Strip non-URL characters that might be accidentally pasted (like "..." or quotes)
+  const httpsIdx = cleaned.indexOf('https://');
+  if (httpsIdx !== -1) {
+    cleaned = cleaned.substring(httpsIdx);
+  }
+  // Strip trailing /edit, /preview, or extra slashes
+  cleaned = cleaned.replace(/\/edit.*$/, '').replace(/\/preview.*$/, '').replace(/\/+$/, '');
+  // Auto-append /exec if omitted by the user
+  if (cleaned.startsWith('https://script.google.com/macros/s/') && !cleaned.endsWith('/exec')) {
+    cleaned += '/exec';
+  }
+  return cleaned;
+};
 
 // Interval to ms
 export const scheduleToMs = (schedule) => {
@@ -20,13 +41,14 @@ export const scheduleToMs = (schedule) => {
 let isBackupRunning = false;
 
 /**
- * Loads backup settings securely from the Super Admin's private browser storage
+ * Loads backup settings securely with permanent admin fallback
  */
 export async function getBackupSettings() {
+  const savedWebhook = sanitizeWebhookUrl(localStorage.getItem('gradely_webhook_url') || DEFAULT_WEBHOOK);
   return {
-    email: localStorage.getItem('gradely_backup_email') || '',
+    email: (localStorage.getItem('gradely_backup_email') || DEFAULT_EMAIL).trim(),
     schedule: localStorage.getItem('gradely_backup_schedule') || 'daily',
-    webhookUrl: localStorage.getItem('gradely_webhook_url') || '',
+    webhookUrl: savedWebhook,
     lastBackup: localStorage.getItem('gradely_last_backup') || '',
     nextBackup: localStorage.getItem('gradely_next_backup') || '',
     lastBackupTimestamp: parseInt(localStorage.getItem('gradely_last_backup_timestamp') || '0', 10)
@@ -34,12 +56,12 @@ export async function getBackupSettings() {
 }
 
 /**
- * Saves backup settings securely to private browser storage
+ * Saves backup settings securely to private browser storage with URL sanitization
  */
 export async function saveBackupSettings(settings) {
-  const email = (settings.email || '').trim();
+  const email = (settings.email || DEFAULT_EMAIL).trim();
   const schedule = settings.schedule || 'daily';
-  const webhookUrl = (settings.webhookUrl || '').trim();
+  const webhookUrl = sanitizeWebhookUrl(settings.webhookUrl || '');
   const lastBackup = settings.lastBackup || localStorage.getItem('gradely_last_backup') || '';
   const nextBackup = settings.nextBackup || localStorage.getItem('gradely_next_backup') || '';
   const timestamp = settings.lastBackupTimestamp || parseInt(localStorage.getItem('gradely_last_backup_timestamp') || '0', 10);
@@ -122,19 +144,24 @@ export async function sendFullSystemBackupEmail({ isAuto = false, user, customEm
   }
 
   const settings = await getBackupSettings();
-  const emailToUse = (customEmail || settings.email || '').trim();
-  const targetWebhook = (customWebhook || settings.webhookUrl || '').trim();
+  const emailToUse = (customEmail || settings.email || DEFAULT_EMAIL).trim();
+  const rawWebhook = (customWebhook || settings.webhookUrl || '').trim();
+  const targetWebhook = sanitizeWebhookUrl(rawWebhook);
 
   if (!emailToUse || !emailToUse.includes('@')) {
     return { success: false, message: 'يرجى كتابة بريد إلكتروني صحيح للنسخ الاحتياطي أولاً' };
   }
 
-  if (!targetWebhook || !targetWebhook.startsWith('https://script.google.com/')) {
+  if (!targetWebhook || !targetWebhook.startsWith('https://script.google.com/macros/s/')) {
     return { success: false, needWebhookModal: true, message: 'يرجى تفعيل وإدخال رابط Google Apps Script الخاص بك أولاً' };
   }
 
-  if (!targetWebhook || targetWebhook.includes('AKfycbzBUNCHESyAtmUK_V8Wm7KV')) {
-    return { success: false, needWebhookModal: true, message: 'يرجى تفعيل ووضع رابط Google Apps Script أولاً' };
+  if (targetWebhook.includes('AKfycbzBUNCHESyAtmUK_V8Wm7KV')) {
+    return { success: false, needWebhookModal: true, message: 'يرجى وضع رابط نشر Google Apps Script الخاص بك أولاً' };
+  }
+
+  if (!targetWebhook.endsWith('/exec')) {
+    return { success: false, needWebhookModal: true, message: 'تنبيه: رابط Google Script يجب أن ينتهي بـ /exec لكي يستقبل البيانات ويرسل الإيميل بنجاح' };
   }
 
   isBackupRunning = true;
