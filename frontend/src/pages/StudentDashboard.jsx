@@ -753,6 +753,11 @@ export default function StudentDashboard({ user, onLogout }) {
       hasAnyGradeVisible = true;
     });
 
+  // Effective Section Attendance and View Mode logic
+  const showSectionAttendance = currentSubVis.showAttendanceTab !== false;
+  const effectiveAttSubMode = !showSectionAttendance ? 'lecture' : attSubMode;
+  const effectiveViewMode = (!hasAnyGradeVisible && viewMode === 'grades') ? 'attendance' : viewMode;
+
   return (
     <div style={{minHeight: '100vh', width: '100%', flex: 1, background: 'var(--bg)', display: 'flex', flexDirection: 'column', overflowX: 'hidden'}}>
       
@@ -1007,14 +1012,14 @@ export default function StudentDashboard({ user, onLogout }) {
                 </p>
               </div>
 
-              {/* View Toggle (Only shown if attendance tab is enabled) */}
-              {currentSubVis.showAttendanceTab && (
+              {/* View Toggle (Shown when grades exist so student can switch between grades and attendance) */}
+              {hasAnyGradeVisible && (
                 <div style={{display: 'flex', gap: '6px', background: 'var(--bg)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border)'}}>
                   <button 
                     onClick={() => setViewMode('attendance')}
                     style={{
-                      background: viewMode === 'attendance' ? 'var(--primary)' : 'transparent',
-                      color: viewMode === 'attendance' ? 'white' : 'var(--text-muted)',
+                      background: effectiveViewMode === 'attendance' ? 'var(--primary)' : 'transparent',
+                      color: effectiveViewMode === 'attendance' ? 'white' : 'var(--text-muted)',
                       border: 'none',
                       padding: '8px 16px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer',
                       display: 'flex', alignItems: 'center', gap: '6px', fontSize:'0.9rem', transition: 'all 0.15s'
@@ -1025,8 +1030,8 @@ export default function StudentDashboard({ user, onLogout }) {
                   <button 
                     onClick={() => setViewMode('grades')}
                     style={{
-                      background: viewMode === 'grades' ? 'var(--primary)' : 'transparent',
-                      color: viewMode === 'grades' ? 'white' : 'var(--text-muted)',
+                      background: effectiveViewMode === 'grades' ? 'var(--primary)' : 'transparent',
+                      color: effectiveViewMode === 'grades' ? 'white' : 'var(--text-muted)',
                       border: 'none',
                       padding: '8px 16px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer',
                       display: 'flex', alignItems: 'center', gap: '6px', fontSize:'0.9rem', transition: 'all 0.15s'
@@ -1039,7 +1044,7 @@ export default function StudentDashboard({ user, onLogout }) {
             </div>
 
             {/* Attendance View (Sections & Lectures) */}
-            {viewMode === 'attendance' && (
+            {effectiveViewMode === 'attendance' && (
               <div className="fade-in">
                 {/* Sub-tabs: Section Attendance vs Lecture Attendance */}
                 <div style={{
@@ -1053,42 +1058,44 @@ export default function StudentDashboard({ user, onLogout }) {
                   width: 'fit-content',
                   flexWrap: 'wrap'
                 }}>
-                  <button 
-                    type="button"
-                    onClick={() => setAttSubMode('section')}
-                    style={{
-                      background: attSubMode === 'section' ? 'var(--primary)' : 'transparent',
-                      color: attSubMode === 'section' ? 'white' : 'var(--text-muted)',
-                      border: 'none',
-                      padding: '8px 18px',
-                      borderRadius: '9px',
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      fontSize: '0.9rem',
-                      boxShadow: attSubMode === 'section' ? '0 2px 8px rgba(79, 70, 229, 0.35)' : 'none',
-                      transition: 'all 0.2s'
-                    }}
-                  >
-                    <span style={{fontSize:'1.1rem'}}>🏢</span>
-                    <span>غياب السكاشن</span>
-                    <span style={{
-                      background: attSubMode === 'section' ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.06)',
-                      padding: '2px 8px',
-                      borderRadius: '12px',
-                      fontSize: '0.78rem'
-                    }}>
-                      {currentAttendance.filter(a => a.week_number <= 50 && normalizeStatus(a.status) === 'absent').length} غياب
-                    </span>
-                  </button>
+                  {showSectionAttendance && (
+                    <button 
+                      type="button"
+                      onClick={() => setAttSubMode('section')}
+                      style={{
+                        background: effectiveAttSubMode === 'section' ? 'var(--primary)' : 'transparent',
+                        color: effectiveAttSubMode === 'section' ? 'white' : 'var(--text-muted)',
+                        border: 'none',
+                        padding: '8px 18px',
+                        borderRadius: '9px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        fontSize: '0.9rem',
+                        boxShadow: effectiveAttSubMode === 'section' ? '0 2px 8px rgba(79, 70, 229, 0.35)' : 'none',
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <span style={{fontSize:'1.1rem'}}>🏢</span>
+                      <span>غياب السكاشن</span>
+                      <span style={{
+                        background: effectiveAttSubMode === 'section' ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.06)',
+                        padding: '2px 8px',
+                        borderRadius: '12px',
+                        fontSize: '0.78rem'
+                      }}>
+                        {currentAttendance.filter(a => a.week_number <= 50 && normalizeStatus(a.status) === 'absent').length} غياب
+                      </span>
+                    </button>
+                  )}
                   <button 
                     type="button"
                     onClick={() => setAttSubMode('lecture')}
                     style={{
-                      background: attSubMode === 'lecture' ? '#0d9488' : 'transparent',
-                      color: attSubMode === 'lecture' ? 'white' : 'var(--text-muted)',
+                      background: effectiveAttSubMode === 'lecture' ? '#0d9488' : 'transparent',
+                      color: effectiveAttSubMode === 'lecture' ? 'white' : 'var(--text-muted)',
                       border: 'none',
                       padding: '8px 18px',
                       borderRadius: '9px',
@@ -1098,14 +1105,14 @@ export default function StudentDashboard({ user, onLogout }) {
                       alignItems: 'center',
                       gap: '8px',
                       fontSize: '0.9rem',
-                      boxShadow: attSubMode === 'lecture' ? '0 2px 8px rgba(13, 148, 136, 0.35)' : 'none',
+                      boxShadow: effectiveAttSubMode === 'lecture' ? '0 2px 8px rgba(13, 148, 136, 0.35)' : 'none',
                       transition: 'all 0.2s'
                     }}
                   >
                     <span style={{fontSize:'1.1rem'}}>🏛️</span>
                     <span>غياب المحاضرات</span>
                     <span style={{
-                      background: attSubMode === 'lecture' ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.06)',
+                      background: effectiveAttSubMode === 'lecture' ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.06)',
                       padding: '2px 8px',
                       borderRadius: '12px',
                       fontSize: '0.78rem'
@@ -1116,7 +1123,7 @@ export default function StudentDashboard({ user, onLogout }) {
                 </div>
 
                 {/* Cross-tab absence discovery alert */}
-                {attSubMode === 'section' && currentAttendance.some(a => a.week_number > 100 && normalizeStatus(a.status) === 'absent') && (
+                {showSectionAttendance && effectiveAttSubMode === 'section' && currentAttendance.some(a => a.week_number > 100 && normalizeStatus(a.status) === 'absent') && (
                   <div 
                     onClick={() => setAttSubMode('lecture')}
                     style={{
@@ -1141,7 +1148,7 @@ export default function StudentDashboard({ user, onLogout }) {
                   </div>
                 )}
 
-                {attSubMode === 'lecture' && currentAttendance.some(a => a.week_number <= 50 && normalizeStatus(a.status) === 'absent') && (
+                {showSectionAttendance && effectiveAttSubMode === 'lecture' && currentAttendance.some(a => a.week_number <= 50 && normalizeStatus(a.status) === 'absent') && (
                   <div 
                     onClick={() => setAttSubMode('section')}
                     style={{
@@ -1236,8 +1243,8 @@ export default function StudentDashboard({ user, onLogout }) {
                 {/* Sub-header with counters */}
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',flexWrap:'wrap',gap:'0.8rem'}}>
                   <h4 style={{margin: 0, color: 'var(--text-muted)', fontSize:'0.95rem'}}>
-                    {attSubMode === 'lecture' ? '🏛️ سجل حضور وغياب المحاضرات' : '🏢 سجل حضور وغياب السكاشن'} — إجمالي الغياب: <span style={{color: (attSubMode === 'lecture' ? currentAttendance.filter(a => a.week_number > 100 && normalizeStatus(a.status) === 'absent').length : currentAttendance.filter(a => a.week_number <= 50 && normalizeStatus(a.status) === 'absent').length) > 3 ? 'var(--danger)' : 'var(--success)', fontWeight:'bold'}}>
-                      {attSubMode === 'lecture' ? currentAttendance.filter(a => a.week_number > 100 && normalizeStatus(a.status) === 'absent').length : currentAttendance.filter(a => a.week_number <= 50 && normalizeStatus(a.status) === 'absent').length} مرات
+                    {effectiveAttSubMode === 'lecture' ? '🏛️ سجل حضور وغياب المحاضرات' : '🏢 سجل حضور وغياب السكاشن'} — إجمالي الغياب: <span style={{color: (effectiveAttSubMode === 'lecture' ? currentAttendance.filter(a => a.week_number > 100 && normalizeStatus(a.status) === 'absent').length : currentAttendance.filter(a => a.week_number <= 50 && normalizeStatus(a.status) === 'absent').length) > 3 ? 'var(--danger)' : 'var(--success)', fontWeight:'bold'}}>
+                      {effectiveAttSubMode === 'lecture' ? currentAttendance.filter(a => a.week_number > 100 && normalizeStatus(a.status) === 'absent').length : currentAttendance.filter(a => a.week_number <= 50 && normalizeStatus(a.status) === 'absent').length} مرات
                     </span>
                   </h4>
                   <div style={{display:'flex',gap:'10px',fontSize:'0.8rem',flexWrap:'wrap'}}>
@@ -1250,7 +1257,7 @@ export default function StudentDashboard({ user, onLogout }) {
 
                 <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(105px, 1fr))', gap: '8px'}}>
                   {Array.from({ length: currentSubject.total_weeks || 12 }, (_, i) => i + 1).map(w => {
-                    const targetWeekNum = attSubMode === 'lecture' ? 100 + w : w;
+                    const targetWeekNum = effectiveAttSubMode === 'lecture' ? 100 + w : w;
                     const record = currentAttendance.find(a => a.week_number === targetWeekNum);
                     let statusLabel = 'لم يرصد';
                     let statusColor = 'var(--text-muted)';
@@ -1284,7 +1291,7 @@ export default function StudentDashboard({ user, onLogout }) {
 
                     const hasRecordedAttendance = record && normStatus !== 'unrecorded';
                     const userPrimarySection = getStudentSubSection(user, currentSubject.id);
-                    const explicitDate = attSubMode === 'lecture'
+                    const explicitDate = effectiveAttSubMode === 'lecture'
                       ? getSubjectLectureDate(currentSubject, w)
                       : getSubjectWeekDate(currentSubject, w, userPrimarySection);
                     const recordDate = record && record.created_at ? record.created_at.split('T')[0] : '';
@@ -1293,10 +1300,10 @@ export default function StudentDashboard({ user, onLogout }) {
                     return (
                       <div key={w} style={{background: bg, border: '1px solid ' + border, borderRadius: '8px', padding: '10px 6px', textAlign: 'center'}}>
                         <div style={{fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '2px'}}>
-                          {attSubMode === 'lecture' ? `محاضرة ${w}` : `أسبوع ${w}`}
+                          {effectiveAttSubMode === 'lecture' ? `محاضرة ${w}` : `أسبوع ${w}`}
                         </div>
                         <div style={{fontWeight: 'bold', color: statusColor, fontSize: '0.85rem'}}>{statusLabel}</div>
-                        {attSubMode === 'section' && isSecPartEnabled && currentGrades?.custom_grades && currentGrades.custom_grades['sec_score_w' + w] != null && (
+                        {effectiveAttSubMode === 'section' && isSecPartEnabled && currentGrades?.custom_grades && currentGrades.custom_grades['sec_score_w' + w] != null && (
                           <div style={{
                             fontSize: '0.74rem',
                             fontWeight: 800,
@@ -1314,9 +1321,9 @@ export default function StudentDashboard({ user, onLogout }) {
                         {hasRecordedAttendance && wDate ? (
                           <div style={{
                             fontSize: '0.73rem',
-                            color: attSubMode === 'lecture' ? '#2dd4bf' : '#60a5fa',
+                            color: effectiveAttSubMode === 'lecture' ? '#2dd4bf' : '#60a5fa',
                             marginTop: '5px',
-                            background: attSubMode === 'lecture' ? 'rgba(45, 212, 191, 0.12)' : 'rgba(59, 130, 246, 0.12)',
+                            background: effectiveAttSubMode === 'lecture' ? 'rgba(45, 212, 191, 0.12)' : 'rgba(59, 130, 246, 0.12)',
                             padding: '2px 6px',
                             borderRadius: '4px',
                             display: 'inline-block',
@@ -1333,7 +1340,7 @@ export default function StudentDashboard({ user, onLogout }) {
             )}
 
             {/* Grades View (Dynamically respecting visibility toggles) */}
-            {viewMode === 'grades' && (
+            {effectiveViewMode === 'grades' && (
               <div className="fade-in">
                 
                 {hasAnyGradeVisible ? (
