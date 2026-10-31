@@ -119,6 +119,9 @@ export default function AttendanceTab({ user }) {
   const [importDetectedSheets, setImportDetectedSheets] = useState([]);
   const [importAllSheetsMode, setImportAllSheetsMode] = useState(true);
   const [selectedImportSheetIndex, setSelectedImportSheetIndex] = useState(0);
+  const [importDatesConfig, setImportDatesConfig] = useState({});
+  const [activeDateConfigSheetIdx, setActiveDateConfigSheetIdx] = useState(0);
+  const [activeDateConfigWeek, setActiveDateConfigWeek] = useState(1);
 
   // ─── Smart Attendance Clone State ───────────────────────────────────────────
   const [showCloneModal, setShowCloneModal] = useState(false);
@@ -145,36 +148,46 @@ export default function AttendanceTab({ user }) {
   }, [showExportModal, showImportAttendanceModal, showCloneModal, excuseModalStudent, bulkActionConfirm, pdfExportLoading]);
 
 
-  const saveSubjectWeekDate = async (subId, weekNum, dateStr) => {
-    if (!subId || !dateStr) return;
-    const targetSub = (attendanceType === 'lecture' ? allSystemSubjects : subjects).find(s => s.id === subId);
+  const saveSubjectBatchDates = async (subId, dateEntries = []) => {
+    if (!subId || !Array.isArray(dateEntries) || dateEntries.length === 0) return;
+    const targetSub = (attendanceType === 'lecture' ? allSystemSubjects : subjects).find(s => s.id === subId)
+      || (allSystemSubjects || []).find(s => s.id === subId)
+      || (subjects || []).find(s => s.id === subId);
     if (!targetSub) return;
-    const currentExcluded = Array.isArray(targetSub.excluded_students) ? targetSub.excluded_students : [];
-    const datePrefix = (attendanceType === 'lecture' ? 'LEC_DATE_W' : 'WEEK_DATE_W') + weekNum + ':';
-    const secPrefix = (attendanceType === 'section' && selectedSection) ? ('WEEK_DATE_W' + weekNum + '_' + normalizeSection(selectedSection) + ':') : null;
 
-    let updated = [...currentExcluded];
+    let updated = Array.isArray(targetSub.excluded_students) ? [...targetSub.excluded_students] : [];
 
-    if (secPrefix) {
-      // Remove any previous entry for THIS specific section only
-      updated = updated.filter(e => typeof e === 'string' && !e.startsWith(secPrefix));
-      updated.push(secPrefix + dateStr);
-      // Also keep or set general week prefix as fallback if missing
-      if (!updated.some(e => typeof e === 'string' && e.startsWith(datePrefix))) {
+    dateEntries.forEach(({ weekNum, dateStr, section, isLecture }) => {
+      if (!weekNum || !dateStr) return;
+      const isLec = isLecture !== undefined ? isLecture : (attendanceType === 'lecture');
+      const datePrefix = (isLec ? 'LEC_DATE_W' : 'WEEK_DATE_W') + weekNum + ':';
+      const effectiveSec = section && section !== 'all' ? normalizeSection(section) : null;
+      const secPrefix = (!isLec && effectiveSec) ? ('WEEK_DATE_W' + weekNum + '_' + effectiveSec + ':') : null;
+
+      if (secPrefix) {
+        updated = updated.filter(e => typeof e === 'string' && !e.startsWith(secPrefix));
+        updated.push(secPrefix + dateStr);
+        if (!updated.some(e => typeof e === 'string' && e.startsWith(datePrefix))) {
+          updated.push(datePrefix + dateStr);
+        }
+      } else {
+        updated = updated.filter(e => typeof e === 'string' && !e.startsWith(datePrefix));
         updated.push(datePrefix + dateStr);
       }
-    } else {
-      updated = updated.filter(e => typeof e === 'string' && !e.startsWith(datePrefix));
-      updated.push(datePrefix + dateStr);
-    }
+    });
 
     try {
       await supabase.from('subjects').update({ excluded_students: updated }).eq('id', subId);
       targetSub.excluded_students = updated;
       cacheManager.invalidate('admin_subjects_base');
     } catch (e) {
-      console.warn('saveSubjectWeekDate error:', e);
+      console.warn('saveSubjectBatchDates error:', e);
     }
+  };
+
+  const saveSubjectWeekDate = async (subId, weekNum, dateStr, targetSection = null) => {
+    const sec = targetSection || (attendanceType === 'section' && selectedSection ? selectedSection : null);
+    await saveSubjectBatchDates(subId, [{ weekNum, dateStr, section: sec }]);
   };
 
 
@@ -226,6 +239,50 @@ export default function AttendanceTab({ user }) {
     const match = s.match(/(\d+)/);
     if (match) return 'S' + parseInt(match[1], 10);
     return 'S1';
+  };
+
+  const getExistingDateForWeek = (sub, weekNum, sec = null, isLec = false) => {
+    if (!sub || !Array.isArray(sub.excluded_students)) return '';
+    if (isLec) {
+      const tag = sub.excluded_students.find(t => typeof t === 'string' && t.startsWith(`LEC_DATE_W${weekNum}:`));
+      return tag ? tag.replace(`LEC_DATE_W${weekNum}:`, '') : '';
+    }
+    if (sec && sec !== 'all') {
+      const normSec = normalizeSection(sec);
+      const secTag = sub.excluded_students.find(t => typeof t === 'string' && t.startsWith(`WEEK_DATE_W${weekNum}_${normSec}:`));
+      if (secTag) return secTag.replace(`WEEK_DATE_W${weekNum}_${normSec}:`, '');
+    }
+    const tag = sub.excluded_students.find(t => typeof t === 'string' && t.startsWith(`WEEK_DATE_W${weekNum}:`));
+    return tag ? tag.replace(`WEEK_DATE_W${weekNum}:`, '') : '';
+  };
+
+  const extractDetectedSections = (records, targetSubId, studentPool) => {
+    const secSet = new Set();
+    (records || []).forEach(rec => {
+      if (rec.section) {
+        secSet.add(normalizeSection(rec.section));
+      }
+    });
+    // If no sections in rec.section, try matching students to pool
+    if (secSet.size === 0 && studentPool && studentPool.length > 0) {
+      (records || []).forEach(rec => {
+        const match = studentPool.find(s => 
+          (s.user_id && rec.studentId && String(s.user_id).trim() === String(rec.studentId).trim())
+        );
+        if (match) {
+          const sSec = getStudentSubSection(match, targetSubId);
+          if (sSec) secSet.add(normalizeSection(sSec));
+        }
+      });
+    }
+    if (secSet.size === 0) {
+      return ['S1', 'S2', 'S3', 'S4'];
+    }
+    return Array.from(secSet).sort((a, b) => {
+      const numA = parseInt(a.replace(/\D/g, ''), 10) || 0;
+      const numB = parseInt(b.replace(/\D/g, ''), 10) || 0;
+      return numA - numB;
+    });
   };
 
   useEffect(() => {
@@ -1503,6 +1560,7 @@ export default function AttendanceTab({ user }) {
     setImportAttendanceFile(file);
     if (!file) {
       setImportDetectedSheets([]);
+      setImportDatesConfig({});
       setImportAttendanceStatus('');
       return;
     }
@@ -1514,32 +1572,71 @@ export default function AttendanceTab({ user }) {
 
       if (!sheets || sheets.length === 0) {
         setImportDetectedSheets([]);
+        setImportDatesConfig({});
         setImportAttendanceStatus('❌ لم يتم العثور على أي شيت أو بيانات صالحة في هذا الملف.');
         return;
       }
 
       const availableSubs = allSystemSubjects.length > 0 ? allSystemSubjects : subjects;
+      let studentPool = allStudents;
+      if (!studentPool || studentPool.length === 0) {
+        studentPool = enrolledStudents;
+      }
+
+      const defaultDate = sessionDate || new Date().toISOString().split('T')[0];
+      const initialDatesConfig = {};
 
       const preparedSheets = sheets.map((sh, idx) => {
         const matched = matchSheetToSubject(sh.sheetName, availableSubs);
         const targetSubId = matched ? matched.id : (selectedSubject || availableSubs[0]?.id || '');
-        const targetSubName = (availableSubs.find(s => s.id === targetSubId)?.name) || sh.sheetName;
+        const targetSub = availableSubs.find(s => s.id === targetSubId);
+        const targetSubName = (targetSub?.name) || sh.sheetName;
+
+        const weeks = sh.weeksDetected && sh.weeksDetected.length > 0 ? sh.weeksDetected : [week];
+        const secs = extractDetectedSections(sh.records, targetSubId, studentPool);
+
+        initialDatesConfig[idx] = {};
+        weeks.forEach(wNum => {
+          const fallbackDate = getWeekDefaultDate(wNum) || defaultDate;
+          const existingGen = getExistingDateForWeek(targetSub, wNum, null, attendanceType === 'lecture') || fallbackDate;
+          const secDates = {};
+          let hasAnyDistinctSecDate = false;
+          secs.forEach(s => {
+            const existingSec = getExistingDateForWeek(targetSub, wNum, s, false);
+            if (existingSec && existingSec !== existingGen) {
+              hasAnyDistinctSecDate = true;
+            }
+            secDates[s] = existingSec || existingGen;
+          });
+
+          initialDatesConfig[idx][wNum] = {
+            generalDate: existingGen,
+            perSection: hasAnyDistinctSecDate,
+            sections: secDates
+          };
+        });
+
         return {
           ...sh,
           sheetIndex: idx,
           targetSubjectId: targetSubId,
           targetSubjectName: targetSubName,
+          detectedSections: secs,
           isAutoMatched: Boolean(matched)
         };
       });
 
       setImportDetectedSheets(preparedSheets);
+      setImportDatesConfig(initialDatesConfig);
       setImportAllSheetsMode(preparedSheets.length > 1);
       setSelectedImportSheetIndex(0);
+      setActiveDateConfigSheetIdx(0);
+      setActiveDateConfigWeek(preparedSheets[0]?.weeksDetected?.[0] || week);
       setImportAttendanceStatus('');
     } catch (err) {
       console.error('File inspection error:', err);
       setImportDetectedSheets([]);
+      setImportDatesConfig({});
       setImportAttendanceStatus('❌ فشل فحص الملف: ' + (err.message || 'خطأ غير معروف'));
     }
   };
@@ -1547,15 +1644,164 @@ export default function AttendanceTab({ user }) {
   const handleUpdateSheetSubject = (sheetIndex, newSubId) => {
     const availableSubs = allSystemSubjects.length > 0 ? allSystemSubjects : subjects;
     const subObj = availableSubs.find(s => s.id === newSubId);
+    let studentPool = allStudents;
+    if (!studentPool || studentPool.length === 0) studentPool = enrolledStudents;
+
     setImportDetectedSheets(prev => prev.map((sh, idx) => {
       if (idx !== sheetIndex) return sh;
+      const detectedSecs = extractDetectedSections(sh.records, newSubId, studentPool);
       return {
         ...sh,
         targetSubjectId: newSubId,
         targetSubjectName: subObj?.name || sh.sheetName,
+        detectedSections: detectedSecs,
         isAutoMatched: true
       };
     }));
+
+    setImportDatesConfig(prev => {
+      const currentSheetCfg = { ...(prev[sheetIndex] || {}) };
+      const sh = importDetectedSheets[sheetIndex];
+      if (!sh) return prev;
+      const weeks = sh.weeksDetected?.length > 0 ? sh.weeksDetected : [week];
+      const secs = extractDetectedSections(sh.records, newSubId, studentPool);
+
+      weeks.forEach(wNum => {
+        const fallbackDate = getWeekDefaultDate(wNum) || sessionDate;
+        const existingGenDate = getExistingDateForWeek(subObj, wNum, null, attendanceType === 'lecture') || fallbackDate;
+        const prevW = currentSheetCfg[wNum] || {};
+        const newSecDates = { ...(prevW.sections || {}) };
+        secs.forEach(s => {
+          if (!newSecDates[s]) {
+            newSecDates[s] = getExistingDateForWeek(subObj, wNum, s, false) || existingGenDate;
+          }
+        });
+        currentSheetCfg[wNum] = {
+          ...prevW,
+          generalDate: existingGenDate || prevW.generalDate || sessionDate,
+          sections: newSecDates
+        };
+      });
+
+      return { ...prev, [sheetIndex]: currentSheetCfg };
+    });
+  };
+
+  const handleUpdateGeneralDate = (sheetIdx, weekNum, newDate) => {
+    setImportDatesConfig(prev => {
+      const sheetCfg = { ...(prev[sheetIdx] || {}) };
+      const weekCfg = { ...(sheetCfg[weekNum] || {}) };
+      const prevSections = { ...(weekCfg.sections || {}) };
+
+      if (!weekCfg.perSection) {
+        Object.keys(prevSections).forEach(s => {
+          prevSections[s] = newDate;
+        });
+      }
+
+      sheetCfg[weekNum] = {
+        ...weekCfg,
+        generalDate: newDate,
+        sections: prevSections
+      };
+      return { ...prev, [sheetIdx]: sheetCfg };
+    });
+  };
+
+  const handleTogglePerSection = (sheetIdx, weekNum) => {
+    setImportDatesConfig(prev => {
+      const sheetCfg = { ...(prev[sheetIdx] || {}) };
+      const weekCfg = { ...(sheetCfg[weekNum] || {}) };
+      const currentPerSec = Boolean(weekCfg.perSection);
+      const newPerSec = !currentPerSec;
+
+      const sh = importDetectedSheets[sheetIdx];
+      const secs = sh?.detectedSections?.length > 0 ? sh.detectedSections : ['S1', 'S2', 'S3', 'S4'];
+      const currentSections = { ...(weekCfg.sections || {}) };
+
+      secs.forEach(s => {
+        if (!currentSections[s]) {
+          currentSections[s] = weekCfg.generalDate || sessionDate;
+        }
+      });
+
+      sheetCfg[weekNum] = {
+        ...weekCfg,
+        perSection: newPerSec,
+        sections: currentSections
+      };
+      return { ...prev, [sheetIdx]: sheetCfg };
+    });
+  };
+
+  const handleUpdateSectionDate = (sheetIdx, weekNum, sec, newDate) => {
+    setImportDatesConfig(prev => {
+      const sheetCfg = { ...(prev[sheetIdx] || {}) };
+      const weekCfg = { ...(sheetCfg[weekNum] || {}) };
+      const updatedSecs = { ...(weekCfg.sections || {}), [sec]: newDate };
+
+      sheetCfg[weekNum] = {
+        ...weekCfg,
+        sections: updatedSecs
+      };
+      return { ...prev, [sheetIdx]: sheetCfg };
+    });
+  };
+
+  const handleCopyDatesToAllWeeks = (sheetIdx, sourceWeekNum) => {
+    setImportDatesConfig(prev => {
+      const sheetCfg = { ...(prev[sheetIdx] || {}) };
+      const sourceCfg = sheetCfg[sourceWeekNum];
+      if (!sourceCfg) return prev;
+
+      const sh = importDetectedSheets[sheetIdx];
+      const weeks = sh?.weeksDetected?.length > 0 ? sh.weeksDetected : [week];
+
+      weeks.forEach(wNum => {
+        sheetCfg[wNum] = {
+          generalDate: sourceCfg.generalDate,
+          perSection: sourceCfg.perSection,
+          sections: { ...(sourceCfg.sections || {}) }
+        };
+      });
+
+      return { ...prev, [sheetIdx]: sheetCfg };
+    });
+    setMessage(`✅ تم نسخ تواريخ أسبوع ${sourceWeekNum} لجميع أسابيع الشيت بنجاح.`);
+    setTimeout(() => setMessage(''), 3000);
+  };
+
+  const handleAddManualSection = (sheetIdx) => {
+    const secName = window.prompt('أدخل رمز أو رقم السكشن الجديد (مثال: S5 أو 5):');
+    if (!secName) return;
+    const normSec = normalizeSection(secName);
+    
+    setImportDetectedSheets(prev => prev.map((sh, idx) => {
+      if (idx !== sheetIdx) return sh;
+      const existing = sh.detectedSections || [];
+      if (existing.includes(normSec)) return sh;
+      return {
+        ...sh,
+        detectedSections: [...existing, normSec].sort((a, b) => (parseInt(a.replace(/\D/g, ''), 10) || 0) - (parseInt(b.replace(/\D/g, ''), 10) || 0))
+      };
+    }));
+
+    setImportDatesConfig(prev => {
+      const sheetCfg = { ...(prev[sheetIdx] || {}) };
+      Object.keys(sheetCfg).forEach(wNum => {
+        const wCfg = { ...(sheetCfg[wNum] || {}) };
+        const secDates = { ...(wCfg.sections || {}) };
+        if (!secDates[normSec]) {
+          secDates[normSec] = wCfg.generalDate || sessionDate;
+        }
+        sheetCfg[wNum] = {
+          ...wCfg,
+          perSection: true,
+          sections: secDates
+        };
+      });
+      return { ...prev, [sheetIdx]: sheetCfg };
+    });
   };
 
   const handleProcessAttendanceImport = async () => {
@@ -1671,11 +1917,58 @@ export default function AttendanceTab({ user }) {
           totalMatchedStudents += sheetMatchedCount;
           processedSubjectNames.push(subName);
 
-          // Save active week date for this subject
+          // Save all configured week & section dates for this subject
           try {
-            await saveSubjectWeekDate(subId, week, sessionDate);
+            const sheetCfg = importDatesConfig[sIdx] || importDatesConfig[currentSheet.sheetIndex] || {};
+            const dateEntriesToSave = [];
+
+            Object.keys(sheetCfg).forEach(wKey => {
+              const wNum = parseInt(wKey, 10);
+              const wVal = sheetCfg[wKey];
+              if (!wVal) return;
+
+              if (wVal.generalDate) {
+                dateEntriesToSave.push({
+                  weekNum: wNum,
+                  dateStr: wVal.generalDate,
+                  section: null,
+                  isLecture: attendanceType === 'lecture'
+                });
+              }
+
+              if (wVal.perSection && wVal.sections && attendanceType === 'section') {
+                Object.entries(wVal.sections).forEach(([sec, sDate]) => {
+                  if (sDate) {
+                    dateEntriesToSave.push({
+                      weekNum: wNum,
+                      dateStr: sDate,
+                      section: sec,
+                      isLecture: false
+                    });
+                  }
+                });
+              }
+            });
+
+            if (dateEntriesToSave.length === 0) {
+              dateEntriesToSave.push({
+                weekNum: week,
+                dateStr: sessionDate,
+                section: selectedSection !== 'all' ? selectedSection : null,
+                isLecture: attendanceType === 'lecture'
+              });
+            }
+
+            await saveSubjectBatchDates(subId, dateEntriesToSave);
+
+            if (subId === selectedSubject) {
+              const activeWeekEntry = dateEntriesToSave.find(e => e.weekNum === week && (e.section === selectedSection || (!e.section && selectedSection === 'all')));
+              if (activeWeekEntry?.dateStr) {
+                setSessionDate(activeWeekEntry.dateStr);
+              }
+            }
           } catch (e) {
-            console.warn('saveSubjectWeekDate warning:', e);
+            console.warn('saveSubjectBatchDates warning:', e);
           }
 
           // Chunked Upsert (20 rows per chunk) with individual row fallback
@@ -1719,6 +2012,7 @@ export default function AttendanceTab({ user }) {
       setShowImportAttendanceModal(false);
       setImportAttendanceFile(null);
       setImportDetectedSheets([]);
+      setImportDatesConfig({});
       setImportAttendanceStatus('');
 
     } catch (err) {
@@ -3231,7 +3525,7 @@ export default function AttendanceTab({ user }) {
           }}
           onClick={e => { if (e.target === e.currentTarget) setShowImportAttendanceModal(false); }}
         >
-          <div className="panel fade-in" style={{maxWidth:'600px',width:'100%',maxHeight:'90vh',overflowY:'auto',padding:'2rem',borderRadius:'16px',position:'relative',border:'1px solid rgba(79, 70, 229, 0.35)',boxShadow:'0 25px 60px -15px rgba(0, 0, 0, 0.85)'}}>
+          <div className="panel fade-in" style={{maxWidth:'780px',width:'100%',maxHeight:'90vh',overflowY:'auto',padding:'2rem',borderRadius:'16px',position:'relative',border:'1px solid rgba(79, 70, 229, 0.35)',boxShadow:'0 25px 60px -15px rgba(0, 0, 0, 0.85)'}}>
             <button onClick={() => setShowImportAttendanceModal(false)} style={{position:'absolute',top:'16px',left:'16px',background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}}>
               <X size={22} />
             </button>
@@ -3373,6 +3667,219 @@ export default function AttendanceTab({ user }) {
               </div>
             )}
 
+            {/* Multi-Week & Section Date Configuration */}
+            {importDetectedSheets.length > 0 && (
+              <div style={{
+                background: 'linear-gradient(145deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.85))',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                borderRadius: '12px',
+                padding: '16px',
+                marginBottom: '1.3rem',
+                boxShadow: '0 4px 15px rgba(0, 0, 0, 0.25)'
+              }}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px',flexWrap:'wrap',gap:'8px'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                    <Calendar size={18} style={{color:'var(--primary-hover)'}} />
+                    <span style={{fontWeight:800,fontSize:'0.95rem',color:'var(--primary-hover)'}}>
+                      تحديد وتخصيص تواريخ الرصد (لكل مادة، أسبوع، وسكشن):
+                    </span>
+                  </div>
+                  <span style={{fontSize:'0.78rem',color:'var(--text-muted)'}}>
+                    يمكنك تحديد تاريخ عام للأسبوع أو تاريخ مستقل لكل سكشن على حدة
+                  </span>
+                </div>
+
+                {/* If multiple sheets, allow choosing which sheet's dates to view/edit */}
+                {importDetectedSheets.length > 1 && (
+                  <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'12px',overflowX:'auto',paddingBottom:'4px'}}>
+                    <span style={{fontSize:'0.8rem',color:'var(--text-muted)',whiteSpace:'nowrap',fontWeight:700}}>
+                      📄 المادة / الشيت:
+                    </span>
+                    {importDetectedSheets.map((sh, sIdx) => {
+                      const isActiveSheet = activeDateConfigSheetIdx === sIdx;
+                      return (
+                        <button
+                          key={sIdx}
+                          type="button"
+                          onClick={() => {
+                            setActiveDateConfigSheetIdx(sIdx);
+                            const weeks = sh.weeksDetected?.length > 0 ? sh.weeksDetected : [week];
+                            if (!weeks.includes(activeDateConfigWeek)) {
+                              setActiveDateConfigWeek(weeks[0]);
+                            }
+                          }}
+                          style={{
+                            padding: '4px 12px',
+                            borderRadius: '6px',
+                            fontSize: '0.8rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            border: isActiveSheet ? '1px solid var(--primary)' : '1px solid var(--border)',
+                            background: isActiveSheet ? 'var(--primary)' : 'rgba(255,255,255,0.05)',
+                            color: isActiveSheet ? '#fff' : 'var(--text-muted)',
+                            whiteSpace: 'nowrap',
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          {sh.sheetName} ({sh.targetSubjectName || 'المادة'})
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {(() => {
+                  const activeSheet = importDetectedSheets[activeDateConfigSheetIdx] || importDetectedSheets[0];
+                  if (!activeSheet) return null;
+                  const detectedWeeks = activeSheet.weeksDetected?.length > 0 ? activeSheet.weeksDetected : [week];
+                  const currentWeekCfg = importDatesConfig[activeDateConfigSheetIdx]?.[activeDateConfigWeek] || {
+                    generalDate: sessionDate,
+                    perSection: false,
+                    sections: {}
+                  };
+                  const detectedSecs = activeSheet.detectedSections?.length > 0 ? activeSheet.detectedSections : ['S1', 'S2', 'S3', 'S4'];
+
+                  return (
+                    <div>
+                      {/* Week selector bar */}
+                      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'12px',flexWrap:'wrap',gap:'6px'}}>
+                        <div style={{display:'flex',alignItems:'center',gap:'6px',overflowX:'auto',paddingBottom:'2px',flex:1}}>
+                          <span style={{fontSize:'0.8rem',color:'var(--text-muted)',fontWeight:700}}>الأسابيع:</span>
+                          {detectedWeeks.map(wNum => {
+                            const isSelectedWeek = activeDateConfigWeek === wNum;
+                            const isCustomSec = importDatesConfig[activeDateConfigSheetIdx]?.[wNum]?.perSection;
+                            return (
+                              <button
+                                key={wNum}
+                                type="button"
+                                onClick={() => setActiveDateConfigWeek(wNum)}
+                                style={{
+                                  padding: '4px 10px',
+                                  borderRadius: '6px',
+                                  fontSize: '0.78rem',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  border: isSelectedWeek ? '1px solid #38bdf8' : '1px solid var(--border)',
+                                  background: isSelectedWeek ? 'rgba(56, 189, 248, 0.2)' : 'rgba(0,0,0,0.2)',
+                                  color: isSelectedWeek ? '#38bdf8' : 'var(--text-muted)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '5px'
+                                }}
+                              >
+                                <span>أسبوع {wNum}</span>
+                                {isCustomSec && (
+                                  <span style={{width:'6px',height:'6px',borderRadius:'50%',background:'#38bdf8'}} title="مخصص لكل سكشن" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {detectedWeeks.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleCopyDatesToAllWeeks(activeDateConfigSheetIdx, activeDateConfigWeek)}
+                            className="btn-secondary"
+                            style={{padding:'4px 9px',fontSize:'0.75rem',color:'var(--primary-hover)',display:'flex',alignItems:'center',gap:'4px'}}
+                            title="تطبيق نفس إعدادات وتواريخ هذا الأسبوع على جميع أسابيع هذا الشيت"
+                          >
+                            <span>⚡ تطبيق على كافة الأسابيع</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Active Week Settings Box */}
+                      <div style={{background:'rgba(0,0,0,0.3)',border:'1px solid var(--border)',borderRadius:'10px',padding:'12px'}}>
+                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px',marginBottom:'10px'}}>
+                          <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                            <label style={{fontSize:'0.84rem',fontWeight:700,color:'var(--text-main)',display:'flex',alignItems:'center',gap:'6px'}}>
+                              <Calendar size={15} style={{color:'#38bdf8'}} />
+                              تاريخ أسبوع {activeDateConfigWeek} العام:
+                            </label>
+                            <input 
+                              type="date" 
+                              value={currentWeekCfg.generalDate || sessionDate}
+                              onChange={(e) => handleUpdateGeneralDate(activeDateConfigSheetIdx, activeDateConfigWeek, e.target.value)}
+                              className="input-field"
+                              style={{padding:'4px 8px',fontSize:'0.82rem',width:'145px'}}
+                            />
+                          </div>
+
+                          {/* Per-Section Toggle for Section Attendance */}
+                          {attendanceType === 'section' && (
+                            <label style={{
+                              display:'flex',alignItems:'center',gap:'6px',fontSize:'0.82rem',fontWeight:700,cursor:'pointer',
+                              color: currentWeekCfg.perSection ? 'var(--primary-hover)' : 'var(--text-muted)',
+                              background: currentWeekCfg.perSection ? 'rgba(79, 70, 229, 0.15)' : 'transparent',
+                              padding: '4px 8px', borderRadius: '6px', border: currentWeekCfg.perSection ? '1px solid rgba(99,102,241,0.3)' : '1px solid transparent'
+                            }}>
+                              <input 
+                                type="checkbox" 
+                                checked={Boolean(currentWeekCfg.perSection)}
+                                onChange={() => handleTogglePerSection(activeDateConfigSheetIdx, activeDateConfigWeek)}
+                              />
+                              <span>🎯 تخصيص تاريخ لكل سكشن على حدة ({detectedSecs.join(', ')})</span>
+                            </label>
+                          )}
+                        </div>
+
+                        {/* Per-Section Date Grid */}
+                        {attendanceType === 'section' && currentWeekCfg.perSection && (
+                          <div style={{
+                            background: 'rgba(79, 70, 229, 0.06)',
+                            border: '1px dashed rgba(99, 102, 241, 0.4)',
+                            borderRadius: '8px',
+                            padding: '12px',
+                            marginTop: '8px'
+                          }}>
+                            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px'}}>
+                              <span style={{fontSize:'0.8rem',color:'var(--primary-hover)',fontWeight:700}}>
+                                📌 تواريخ انعقاد السكاشن في أسبوع {activeDateConfigWeek}:
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleAddManualSection(activeDateConfigSheetIdx)}
+                                style={{background:'none',border:'none',color:'#38bdf8',fontSize:'0.76rem',fontWeight:700,cursor:'pointer',textDecoration:'underline'}}
+                              >
+                                + إضافة سكشن يدوي
+                              </button>
+                            </div>
+
+                            <div style={{
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+                              gap: '8px'
+                            }}>
+                              {detectedSecs.map(sec => {
+                                const secDate = currentWeekCfg.sections?.[sec] || currentWeekCfg.generalDate || sessionDate;
+                                return (
+                                  <div key={sec} style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'6px',padding:'6px 8px'}}>
+                                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'4px'}}>
+                                      <span style={{fontWeight:800,fontSize:'0.8rem',color:'var(--text-main)'}}>
+                                        سكشن {sec}
+                                      </span>
+                                    </div>
+                                    <input 
+                                      type="date"
+                                      value={secDate}
+                                      onChange={(e) => handleUpdateSectionDate(activeDateConfigSheetIdx, activeDateConfigWeek, sec, e.target.value)}
+                                      className="input-field"
+                                      style={{padding:'3px 6px',fontSize:'0.78rem',width:'100%',boxSizing:'border-box'}}
+                                    />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
             {importAttendanceStatus && (
               <div style={{
                 background: importAttendanceStatus.startsWith('❌') ? 'rgba(239, 68, 68, 0.1)' : 'rgba(79, 70, 229, 0.1)',
@@ -3391,6 +3898,7 @@ export default function AttendanceTab({ user }) {
                   setShowImportAttendanceModal(false);
                   setImportAttendanceFile(null);
                   setImportDetectedSheets([]);
+                  setImportDatesConfig({});
                   setImportAttendanceStatus('');
                 }} 
                 disabled={importingAttendance}
