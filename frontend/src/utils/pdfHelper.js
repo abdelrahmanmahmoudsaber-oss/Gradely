@@ -5,7 +5,7 @@
  */
 
 import { getSectionInstructorName as resolveSectionTA } from './sectionHelper';
-import { getStudentLectureGroup as defaultGetStudentLectureGroup } from './excelHelper';
+import { getStudentLectureGroup as defaultGetStudentLectureGroup, resolveStudentSubSection } from './excelHelper';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import DOMPurify from 'dompurify';
@@ -131,11 +131,7 @@ export function printStudentReportPDF({ student, subjects, grades, attendance, o
   };
 
   const getStudentSubSection = (student, subId) => {
-    if (student && Array.isArray(student.assigned_subjects)) {
-      const match = student.assigned_subjects.find(entry => typeof entry === 'string' && entry.startsWith(subId + ':'));
-      if (match) return normalizeSection(match.split(':')[1]);
-    }
-    return normalizeSection(student?.section || 'S1');
+    return resolveStudentSubSection(student, subId, subjects);
   };
 
   const currentDate = new Date().toLocaleDateString('ar-EG', {

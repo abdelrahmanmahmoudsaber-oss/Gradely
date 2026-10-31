@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../../supabaseClient';
-import { exportExcelFile, parseAttendanceExcelFile, exportAttendanceTemplateExcel, getStudentLectureGroup, matchSheetToSubject } from '../../utils/excelHelper';
+import { exportExcelFile, parseAttendanceExcelFile, exportAttendanceTemplateExcel, getStudentLectureGroup, resolveStudentSubSection, matchSheetToSubject } from '../../utils/excelHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { 
   Download, Users, UserPlus, UserMinus, UserCheck, CheckSquare, 
@@ -226,11 +226,58 @@ export default function AttendanceTab({ user }) {
   };
 
   const getStudentSubSection = (student, subId) => {
-    if (student && Array.isArray(student.assigned_subjects)) {
-      const match = student.assigned_subjects.find(entry => typeof entry === 'string' && entry.startsWith(subId + ':'));
-      if (match) return normalizeSection(match.split(':')[1]);
+    return resolveStudentSubSection(student, subId || currentSub, allSystemSubjects);
+  };
+
+  const handleQuickChangeStudentSection = async (studentUserId, newSec) => {
+    if (!selectedSubject || !studentUserId || !newSec) return;
+    const cleanSec = normalizeSection(newSec);
+    const cleanGrp = (cleanSec === 'S1' || cleanSec === 'S2' || cleanSec === 'S5') ? 'A' : 'B';
+
+    const targetStudent = allStudents.find(s => s.user_id === studentUserId);
+    const currentAssigned = Array.isArray(targetStudent?.assigned_subjects) ? [...targetStudent.assigned_subjects] : [];
+
+    // Filter out previous entries for this subject in assigned_subjects
+    const filteredAssigned = currentAssigned.filter(e => {
+      if (typeof e !== 'string') return true;
+      if (e.startsWith(selectedSubject + ':') || (currentSub?.name && e.startsWith(currentSub.name + ':'))) return false;
+      return true;
+    });
+
+    const newEntry = `${selectedSubject}:${cleanSec}`;
+    filteredAssigned.push(newEntry);
+    if (targetStudent) targetStudent.assigned_subjects = filteredAssigned;
+
+    // Dual persistence: also save tag in subject.excluded_students
+    // STU_SEC_<userId>:<cleanSec> and STU_GRP_<userId>:<cleanGrp>
+    const subObj = subjects.find(s => s.id === selectedSubject) || allSystemSubjects.find(s => s.id === selectedSubject);
+    let updatedExcluded = Array.isArray(subObj?.excluded_students) ? [...subObj.excluded_students] : [];
+    const secTagPrefix = `STU_SEC_${studentUserId}:`;
+    const grpTagPrefix = `STU_GRP_${studentUserId}:`;
+    updatedExcluded = updatedExcluded.filter(t => typeof t === 'string' && !t.startsWith(secTagPrefix) && !t.startsWith(grpTagPrefix));
+    updatedExcluded.push(secTagPrefix + cleanSec);
+    updatedExcluded.push(grpTagPrefix + cleanGrp);
+    if (subObj) subObj.excluded_students = updatedExcluded;
+
+    // Immediate reactive update in state
+    setAllStudents(prev => prev.map(s => s.user_id === studentUserId ? { ...s, assigned_subjects: filteredAssigned } : s));
+    if (subObj) {
+      setSubjects(prev => prev.map(s => s.id === subObj.id ? { ...s, excluded_students: updatedExcluded } : s));
+      setAllSystemSubjects(prev => prev.map(s => s.id === subObj.id ? { ...s, excluded_students: updatedExcluded } : s));
     }
-    return normalizeSection(student?.section || 'S1');
+
+    try {
+      await Promise.all([
+        supabase.from('users').update({ assigned_subjects: filteredAssigned }).eq('user_id', studentUserId),
+        supabase.from('subjects').update({ excluded_students: updatedExcluded }).eq('id', selectedSubject)
+      ]);
+      cacheManager.invalidate('admin_users_base');
+      cacheManager.invalidate('admin_subjects_base');
+      setMessage(`✅ تم تحديث سكشن الطالب ${targetStudent?.name || studentUserId} في هذه المادة إلى [${cleanSec} - Group ${cleanGrp}] بنجاح.`);
+      setTimeout(() => setMessage(''), 3500);
+    } catch (err) {
+      console.warn('Quick change section notice:', err);
+    }
   };
 
   const normalizeSection = (sec) => {
@@ -736,8 +783,8 @@ export default function AttendanceTab({ user }) {
 
   const enrolledStudents = getEnrolledStudents();
 
-  const groupACount = enrolledStudents.filter(stu => getStudentLectureGroup(stu, selectedSubject) === 'A').length;
-  const groupBCount = enrolledStudents.filter(stu => getStudentLectureGroup(stu, selectedSubject) === 'B').length;
+  const groupACount = enrolledStudents.filter(stu => getStudentLectureGroup(stu, selectedSubject, allSystemSubjects) === 'A').length;
+  const groupBCount = enrolledStudents.filter(stu => getStudentLectureGroup(stu, selectedSubject, allSystemSubjects) === 'B').length;
 
   const candidatePool = enrolledStudents;
 
@@ -745,7 +792,7 @@ export default function AttendanceTab({ user }) {
     .filter(stu => {
       if (attendanceType === 'lecture') {
         if (selectedGroup === 'all') return true;
-        const grp = getStudentLectureGroup(stu, selectedSubject);
+        const grp = getStudentLectureGroup(stu, selectedSubject, allSystemSubjects);
         return grp === selectedGroup;
       } else {
         if (selectedSection === 'all') return true;
@@ -759,9 +806,11 @@ export default function AttendanceTab({ user }) {
     });
 
   baseEnrolledStudents.sort((a, b) => {
-    const secA = (a.section || '').localeCompare(b.section || '');
-    if (secA !== 0) return secA;
-    return String(a.user_id).localeCompare(String(b.user_id));
+    const secA = getStudentSubSection(a, selectedSubject);
+    const secB = getStudentSubSection(b, selectedSubject);
+    const secCmp = secA.localeCompare(secB, undefined, { numeric: true });
+    if (secCmp !== 0) return secCmp;
+    return String(a.user_id).localeCompare(String(b.user_id), undefined, { numeric: true });
   });
 
   const displayedEnrolledStudents = baseEnrolledStudents.filter(stu => {
@@ -839,9 +888,26 @@ export default function AttendanceTab({ user }) {
     if (!selectedStudentToAdd) return;
     const currentEnrolled = Array.isArray(currentSub.enrolled_students) ? currentSub.enrolled_students : [];
     const updatedEnrolled = [...new Set([...currentEnrolled, selectedStudentToAdd])];
-    const { error } = await supabase.from('subjects').update({ enrolled_students: updatedEnrolled }).eq('id', currentSub.id);
+
+    let updatedExcluded = Array.isArray(currentSub.excluded_students) ? [...currentSub.excluded_students] : [];
+    if (filterSectionToAdd && filterSectionToAdd !== 'all') {
+      const cleanSec = normalizeSection(filterSectionToAdd);
+      const cleanGrp = (cleanSec === 'S1' || cleanSec === 'S2' || cleanSec === 'S5') ? 'A' : 'B';
+      updatedExcluded = updatedExcluded.filter(t => typeof t === 'string' && !t.startsWith(`STU_SEC_${selectedStudentToAdd}:`) && !t.startsWith(`STU_GRP_${selectedStudentToAdd}:`));
+      updatedExcluded.push(`STU_SEC_${selectedStudentToAdd}:${cleanSec}`);
+      updatedExcluded.push(`STU_GRP_${selectedStudentToAdd}:${cleanGrp}`);
+    }
+
+    const { error } = await supabase.from('subjects').update({ 
+      enrolled_students: updatedEnrolled,
+      excluded_students: updatedExcluded
+    }).eq('id', currentSub.id);
+
     if (!error) { 
-      setSubjects(prev => prev.map(s => s.id === currentSub.id ? { ...s, enrolled_students: updatedEnrolled } : s)); 
+      currentSub.enrolled_students = updatedEnrolled;
+      currentSub.excluded_students = updatedExcluded;
+      setSubjects(prev => prev.map(s => s.id === currentSub.id ? { ...s, enrolled_students: updatedEnrolled, excluded_students: updatedExcluded } : s)); 
+      setAllSystemSubjects(prev => prev.map(s => s.id === currentSub.id ? { ...s, enrolled_students: updatedEnrolled, excluded_students: updatedExcluded } : s));
       setSelectedStudentToAdd('');
       cacheManager.invalidate('admin_subjects_base');
     }
@@ -851,9 +917,28 @@ export default function AttendanceTab({ user }) {
     if (selectedStudentsList.length === 0) return;
     const currentEnrolled = Array.isArray(currentSub.enrolled_students) ? currentSub.enrolled_students : [];
     const updatedEnrolled = [...new Set([...currentEnrolled, ...selectedStudentsList])];
-    const { error } = await supabase.from('subjects').update({ enrolled_students: updatedEnrolled }).eq('id', currentSub.id);
+
+    let updatedExcluded = Array.isArray(currentSub.excluded_students) ? [...currentSub.excluded_students] : [];
+    if (filterSectionToAdd && filterSectionToAdd !== 'all') {
+      const cleanSec = normalizeSection(filterSectionToAdd);
+      const cleanGrp = (cleanSec === 'S1' || cleanSec === 'S2' || cleanSec === 'S5') ? 'A' : 'B';
+      selectedStudentsList.forEach(sId => {
+        updatedExcluded = updatedExcluded.filter(t => typeof t === 'string' && !t.startsWith(`STU_SEC_${sId}:`) && !t.startsWith(`STU_GRP_${sId}:`));
+        updatedExcluded.push(`STU_SEC_${sId}:${cleanSec}`);
+        updatedExcluded.push(`STU_GRP_${sId}:${cleanGrp}`);
+      });
+    }
+
+    const { error } = await supabase.from('subjects').update({ 
+      enrolled_students: updatedEnrolled,
+      excluded_students: updatedExcluded
+    }).eq('id', currentSub.id);
+
     if (!error) {
-      setSubjects(prev => prev.map(s => s.id === currentSub.id ? { ...s, enrolled_students: updatedEnrolled } : s));
+      currentSub.enrolled_students = updatedEnrolled;
+      currentSub.excluded_students = updatedExcluded;
+      setSubjects(prev => prev.map(s => s.id === currentSub.id ? { ...s, enrolled_students: updatedEnrolled, excluded_students: updatedExcluded } : s));
+      setAllSystemSubjects(prev => prev.map(s => s.id === currentSub.id ? { ...s, enrolled_students: updatedEnrolled, excluded_students: updatedExcluded } : s));
       alert('تمت إضافة ' + selectedStudentsList.length + ' طالب إلى المادة بنجاح!');
       setSelectedStudentsList([]);
       cacheManager.invalidate('admin_subjects_base');
@@ -1349,7 +1434,7 @@ export default function AttendanceTab({ user }) {
   });
 
   const handleAddExtraStudent = (stu) => {
-    const nativeGrp = getStudentLectureGroup(stu, selectedSubject);
+    const nativeGrp = getStudentLectureGroup(stu, selectedSubject, allSystemSubjects);
     const nativeSec = getStudentSubSection(stu, selectedSubject);
     setExportExtraStudents(prev => [
       ...prev,
@@ -1388,7 +1473,7 @@ export default function AttendanceTab({ user }) {
 
     let targetStudents = baseEnrolledStudents;
     if (attendanceType === 'lecture' && selectedGroup !== 'all') {
-      targetStudents = targetStudents.filter(s => getStudentLectureGroup(s, selectedSubject) === selectedGroup);
+      targetStudents = targetStudents.filter(s => getStudentLectureGroup(s, selectedSubject, allSystemSubjects) === selectedGroup);
     }
 
     if (exportFilter === 'recorded') {
@@ -1473,7 +1558,7 @@ export default function AttendanceTab({ user }) {
           attendanceRecords: effectiveExportRecords,
           excuseReasons: excuseReasons,
           getStudentSubSection: (s) => s.nativeSection || getStudentSubSection(s, selectedSubject),
-          getStudentLectureGroup: (s) => s.nativeGroup || getStudentLectureGroup(s, selectedSubject),
+          getStudentLectureGroup: (s) => s.nativeGroup || getStudentLectureGroup(s, selectedSubject, allSystemSubjects),
           studentScores: sectionScores,
           showSectionScore: attendanceType === 'section' && secPartConfig.enabled,
           maxSectionScore: secPartConfig.max || 5,
@@ -1501,7 +1586,7 @@ export default function AttendanceTab({ user }) {
       const excelRows = finalExportStudents.map((s, idx) => {
         const st = effectiveExportRecords[s.user_id] || 'لم يرصد';
         const stLabel = st === 'present' ? 'حاضر' : st === 'absent' ? 'غائب' : st === 'late' ? 'تأخير' : st === 'excused' ? 'عذر' : 'لم يرصد';
-        const nativeGrp = s.nativeGroup || getStudentLectureGroup(s, selectedSubject);
+        const nativeGrp = s.nativeGroup || getStudentLectureGroup(s, selectedSubject, allSystemSubjects);
         const isFromOtherGroup = s.isExtra || (attendanceType === 'lecture' && selectedGroup !== 'all' && nativeGrp !== selectedGroup);
         const groupDisplay = isFromOtherGroup ? `${nativeGrp} (حاضر مع ${selectedGroup})` : nativeGrp;
         return {
@@ -2867,10 +2952,44 @@ export default function AttendanceTab({ user }) {
                         <span className="badge" style={{background:'var(--bg)',border:'1px solid var(--border)',color:'var(--text-muted)',fontFamily:'monospace',fontSize:'0.8rem'}}>
                           {s.user_id}
                         </span>
-                        {/* Removed profile section badge to prevent confusion */}
                         <span className="badge" style={{background:'rgba(79, 70, 229, 0.08)',color:'var(--primary-hover)',border:'1px solid rgba(79, 70, 229, 0.2)',fontSize:'0.75rem'}}>
                           فرقة {normalizeYear(s.year_level)}
                         </span>
+
+                        {/* Interactive Section & Lecture Group Badge */}
+                        <div style={{display:'inline-flex',alignItems:'center',gap:'4px'}}>
+                          <select
+                            value={getStudentSubSection(s, selectedSubject)}
+                            onChange={(e) => handleQuickChangeStudentSection(s.user_id, e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="input-field"
+                            style={{
+                              padding:'1px 6px',fontSize:'0.75rem',fontWeight:800,borderRadius:'4px',
+                              height:'auto',background:'var(--bg)',color:'var(--success)',
+                              borderColor:'rgba(16,185,129,0.3)',cursor:'pointer'
+                            }}
+                            title="تعديل سكشن الطالب في هذه المادة فوراً"
+                          >
+                            <option value="S1">سكشن S1</option>
+                            <option value="S2">سكشن S2</option>
+                            <option value="S3">سكشن S3</option>
+                            <option value="S4">سكشن S4</option>
+                            <option value="S5">سكشن S5</option>
+                            <option value="S6">سكشن S6</option>
+                          </select>
+                          <span 
+                            className="badge" 
+                            style={{
+                              background: getStudentLectureGroup(s, selectedSubject, allSystemSubjects) === 'A' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(168, 85, 247, 0.15)',
+                              color: getStudentLectureGroup(s, selectedSubject, allSystemSubjects) === 'A' ? '#38bdf8' : '#c084fc',
+                              border: getStudentLectureGroup(s, selectedSubject, allSystemSubjects) === 'A' ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid rgba(168, 85, 247, 0.3)',
+                              fontSize:'0.72rem',fontWeight:800
+                            }}
+                            title="مجموعة المحاضرة المقررة للطالب في هذه المادة"
+                          >
+                            Group {getStudentLectureGroup(s, selectedSubject, allSystemSubjects)}
+                          </span>
+                        </div>
                       </div>
                       {status === 'excused' && excuse && (
                         <div style={{marginTop:'6px',fontSize:'0.8rem',color:'#3b82f6',display:'flex',alignItems:'center',gap:'4px'}}>
@@ -3065,9 +3184,37 @@ export default function AttendanceTab({ user }) {
                       {status === 'excused' && excuse && <span style={{fontSize:'0.75rem',color:'#3b82f6',display:'block'}}>عذر: {excuse}</span>}
                     </td>
                     <td style={{padding:'12px 16px'}}>
-                      <span className="badge" style={{background:'rgba(16, 185, 129, 0.1)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.2)'}}>
-                        {normalizeSection(s.section || 'S1')}
-                      </span>
+                      <div style={{display:'inline-flex',alignItems:'center',gap:'6px'}}>
+                        <select
+                          value={getStudentSubSection(s, selectedSubject)}
+                          onChange={(e) => handleQuickChangeStudentSection(s.user_id, e.target.value)}
+                          className="input-field"
+                          style={{
+                            padding:'2px 6px',fontSize:'0.8rem',fontWeight:800,borderRadius:'4px',
+                            height:'auto',background:'var(--bg)',color:'var(--success)',
+                            borderColor:'rgba(16,185,129,0.3)',cursor:'pointer'
+                          }}
+                          title="تعديل سكشن الطالب في هذه المادة"
+                        >
+                          <option value="S1">S1</option>
+                          <option value="S2">S2</option>
+                          <option value="S3">S3</option>
+                          <option value="S4">S4</option>
+                          <option value="S5">S5</option>
+                          <option value="S6">S6</option>
+                        </select>
+                        <span 
+                          className="badge" 
+                          style={{
+                            background: getStudentLectureGroup(s, selectedSubject, allSystemSubjects) === 'A' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(168, 85, 247, 0.15)',
+                            color: getStudentLectureGroup(s, selectedSubject, allSystemSubjects) === 'A' ? '#38bdf8' : '#c084fc',
+                            border: getStudentLectureGroup(s, selectedSubject, allSystemSubjects) === 'A' ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid rgba(168, 85, 247, 0.3)',
+                            fontSize:'0.75rem',fontWeight:800
+                          }}
+                        >
+                          {getStudentLectureGroup(s, selectedSubject, allSystemSubjects)}
+                        </span>
+                      </div>
                     </td>
                     <td style={{padding:'8px 16px',textAlign:'center'}}>
                       <div style={{display:'inline-flex',gap:'6px',background:'var(--bg)',padding:'3px',borderRadius:'6px',border:'1px solid var(--border)'}}>
@@ -3244,7 +3391,7 @@ export default function AttendanceTab({ user }) {
                             <span style={{color:'var(--text-muted)',fontSize:'0.75rem',marginRight:'6px'}}>({stu.user_id})</span>
                           </div>
                           <span className="badge" style={{fontSize:'0.72rem'}}>
-                            {attendanceType === 'lecture' ? `مجموعة ${getStudentLectureGroup(stu, selectedSubject)}` : getStudentSubSection(stu, selectedSubject)}
+                            {attendanceType === 'lecture' ? `مجموعة ${getStudentLectureGroup(stu, selectedSubject, allSystemSubjects)}` : getStudentSubSection(stu, selectedSubject)}
                           </span>
                         </div>
                       ))}

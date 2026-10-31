@@ -16,6 +16,7 @@ import {
   DEFAULT_VISIBILITY,
   DEFAULT_MAX_SCORES
 } from '../utils/gradeConfigHelper';
+import { resolveStudentSubSection } from '../utils/excelHelper';
 
 const SUBJECT_COLORS = [
   { bg: 'rgba(79, 70, 229, 0.15)', border: 'var(--primary)', text: 'var(--primary-hover)', tag: '#6366f1' },
@@ -407,11 +408,7 @@ export default function StudentDashboard({ user, onLogout }) {
   };
 
   const getStudentSubSection = (student, subId) => {
-    if (student && Array.isArray(student.assigned_subjects)) {
-      const match = student.assigned_subjects.find(entry => typeof entry === 'string' && entry.startsWith(subId + ':'));
-      if (match) return normalizeSection(match.split(':')[1]);
-    }
-    return normalizeSection(student?.section || 'S1');
+    return resolveStudentSubSection(student, subId, subjects);
   };
 
   const normalizeSection = (sec) => {

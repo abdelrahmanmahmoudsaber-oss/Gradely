@@ -272,40 +272,134 @@ export async function generateMultiSheetExcelBase64(sheets) {
 
 
 /**
+ * Normalizes a section identifier to standard form: 'S1', 'S2', 'S3', etc.
+ */
+const normalizeSection = (sec) => {
+  if (!sec) return 'S1';
+  const s = sec.toString().trim().toUpperCase().replace(/\s+/g, '');
+  const match = s.match(/(\d+)/);
+  if (match) return 'S' + parseInt(match[1], 10);
+  return 'S1';
+};
+
+/**
+ * Resolves a student's actual section for a specific subject with deep resiliency:
+ * 1. Checks explicit subject tags in subject.excluded_students (e.g. STU_SEC_<id>:<sec>)
+ * 2. Checks student's assigned_subjects (matches subject ID, full name, or normalized name)
+ * 3. Falls back to student's base section
+ */
+export const resolveStudentSubSection = (student, subOrId, allSubjects = []) => {
+  if (!student) return 'S1';
+
+  let targetId = typeof subOrId === 'object' && subOrId !== null ? subOrId.id : (subOrId ? String(subOrId).trim() : '');
+  let targetName = typeof subOrId === 'object' && subOrId !== null ? subOrId.name : '';
+
+  // If subOrId was just an ID or name, find the subject in allSubjects if available
+  if (Array.isArray(allSubjects) && allSubjects.length > 0) {
+    const found = allSubjects.find(s => s && (s.id === targetId || s.name === targetId || s.id === subOrId || s.name === subOrId));
+    if (found) {
+      targetId = found.id;
+      targetName = found.name;
+    }
+  }
+
+  // 1. Check subject.excluded_students for explicit student-specific section tag
+  // e.g. STU_SEC_<userId>:<sec>
+  const targetSubObj = typeof subOrId === 'object' && subOrId !== null ? subOrId : (Array.isArray(allSubjects) ? allSubjects.find(s => s && s.id === targetId) : null);
+  if (targetSubObj && Array.isArray(targetSubObj.excluded_students)) {
+    const stuTag = targetSubObj.excluded_students.find(t => typeof t === 'string' && t.startsWith(`STU_SEC_${student.user_id}:`));
+    if (stuTag) {
+      return normalizeSection(stuTag.split(':')[1]);
+    }
+  }
+
+  // 2. Check student.assigned_subjects
+  if (Array.isArray(student.assigned_subjects) && (targetId || targetName)) {
+    const normTargetName = targetName ? normalizeSubjectNameForMatch(targetName) : '';
+    const normTargetId = targetId ? targetId.toLowerCase().trim() : '';
+
+    for (const entry of student.assigned_subjects) {
+      if (typeof entry !== 'string' || entry.startsWith('GROUP:') || entry.includes(':GROUP:')) continue;
+      const parts = entry.split(':');
+      if (parts.length >= 2) {
+        const entrySub = parts[0].trim();
+        const entrySec = parts[1].trim();
+
+        // Exact ID match
+        if (normTargetId && entrySub.toLowerCase() === normTargetId) {
+          return normalizeSection(entrySec);
+        }
+        // Exact Name match
+        if (targetName && entrySub.toLowerCase() === targetName.toLowerCase()) {
+          return normalizeSection(entrySec);
+        }
+        // Normalized Name match
+        if (normTargetName && normalizeSubjectNameForMatch(entrySub) === normTargetName) {
+          return normalizeSection(entrySec);
+        }
+      }
+    }
+  }
+
+  // 3. Fallback to student base section
+  return normalizeSection(student.section || 'S1');
+};
+
+/**
  * Resolves a student's lecture group (Group A, Group B) based strictly on section in the given subject.
  * Rule:
  * Section 1 and Section 2 => Group A
  * Section 3 and Section 4 => Group B
  */
-export const getStudentLectureGroup = (student, subId = null) => {
+export const getStudentLectureGroup = (student, subOrId = null, allSubjects = []) => {
   if (!student) return 'A';
 
-  // 1. Subject-specific explicit group override if set: '<subId>:GROUP:A' or '<subId>:GROUP:B'
-  if (subId && Array.isArray(student.assigned_subjects)) {
-    const subGroup = student.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(subId + ':GROUP:'));
-    if (subGroup) {
-      const g = subGroup.split(':')[2]?.toUpperCase();
+  let targetId = typeof subOrId === 'object' && subOrId !== null ? subOrId.id : (subOrId ? String(subOrId).trim() : '');
+  let targetName = typeof subOrId === 'object' && subOrId !== null ? subOrId.name : '';
+
+  if (Array.isArray(allSubjects) && allSubjects.length > 0) {
+    const found = allSubjects.find(s => s && (s.id === targetId || s.name === targetId || s.id === subOrId || s.name === subOrId));
+    if (found) {
+      targetId = found.id;
+      targetName = found.name;
+    }
+  }
+
+  // 1. Explicit group override in subject metadata: STU_GRP_<userId>:<A|B>
+  const targetSubObj = typeof subOrId === 'object' && subOrId !== null ? subOrId : (Array.isArray(allSubjects) ? allSubjects.find(s => s && s.id === targetId) : null);
+  if (targetSubObj && Array.isArray(targetSubObj.excluded_students)) {
+    const grpTag = targetSubObj.excluded_students.find(t => typeof t === 'string' && t.startsWith(`STU_GRP_${student.user_id}:`));
+    if (grpTag) {
+      const g = grpTag.split(':')[1]?.trim()?.toUpperCase();
       if (g === 'A' || g === 'B') return g;
     }
   }
 
-  // 2. Resolve section for this specific subject first (PRIORITY: this subject's actual section)
-  let sec = null;
-  if (subId && Array.isArray(student.assigned_subjects)) {
-    const match = student.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(subId + ':') && !e.includes(':GROUP:'));
-    if (match) {
-      sec = match.split(':')[1];
+  // 2. Explicit group override for this subject in student.assigned_subjects:
+  // e.g., '<subId>:GROUP:A', '<subName>:GROUP:B'
+  if (Array.isArray(student.assigned_subjects) && (targetId || targetName)) {
+    const normTargetName = targetName ? normalizeSubjectNameForMatch(targetName) : '';
+    for (const entry of student.assigned_subjects) {
+      if (typeof entry !== 'string' || !entry.includes(':GROUP:')) continue;
+      const parts = entry.split(':GROUP:');
+      if (parts.length === 2) {
+        const entrySub = parts[0].trim();
+        const g = parts[1].trim().toUpperCase();
+        if (g === 'A' || g === 'B') {
+          if (targetId && entrySub.toLowerCase() === targetId.toLowerCase()) return g;
+          if (targetName && entrySub.toLowerCase() === targetName.toLowerCase()) return g;
+          if (normTargetName && normalizeSubjectNameForMatch(entrySub) === normTargetName) return g;
+        }
+      }
     }
   }
 
-  // 3. Fallback to student base section if not assigned per-subject
-  if (!sec) {
-    sec = student.section || 'S1';
-  }
+  // 3. Resolve section for this specific subject first
+  const sec = resolveStudentSubSection(student, subOrId, allSubjects);
 
-  // 4. Strict Academic Mapping based on the resolved section number:
-  // Sections 1 & 2 -> ALWAYS Group A
-  // Sections 3 & 4 -> ALWAYS Group B
+  // 4. Strict Academic Mapping based on resolved section:
+  // S1 & S2 -> ALWAYS Group A
+  // S3 & S4 -> ALWAYS Group B
   if (sec) {
     const cleanSec = sec.toString().trim().toUpperCase().replace(/\s+/g, '');
     const match = cleanSec.match(/(\d+)/);
@@ -317,15 +411,7 @@ export const getStudentLectureGroup = (student, subId = null) => {
     }
   }
 
-  // 5. Fallback only if section has no digits: check global group or student.group
-  if (Array.isArray(student.assigned_subjects)) {
-    const globalGroup = student.assigned_subjects.find(e => typeof e === 'string' && (e === 'GROUP:A' || e === 'GROUP:B' || e.startsWith('GROUP:')));
-    if (globalGroup) {
-      const g = globalGroup.split(':')[1]?.toUpperCase();
-      if (g === 'A' || g === 'B') return g;
-    }
-  }
-
+  // 5. Fallback only if no section exists or no digits
   if (student.group && (student.group === 'A' || student.group === 'B')) {
     return student.group;
   }
@@ -605,6 +691,7 @@ export async function parseAttendanceExcelFile(file) {
     let idColIdx = null;
     let nameColIdx = null;
     let sectionColIdx = null;
+    let yearColIdx = null;
     let groupColIdx = null;
     const weekColMap = {};
 
@@ -619,8 +706,10 @@ export async function parseAttendanceExcelFile(file) {
         idColIdx = colNumber;
       } else if (lower.includes('name') || lower.includes('الاسم') || lower.includes('اسم الطالب')) {
         nameColIdx = colNumber;
-      } else if (lower === 'section' || lower === 'السكشن' || lower === 'sec' || lower === 'فرقة' || lower === 'الفرقة') {
+      } else if (lower === 'section' || lower === 'السكشن' || lower === 'sec' || lower.includes('سكشن')) {
         sectionColIdx = colNumber;
+      } else if (lower === 'year' || lower === 'level' || lower === 'الفرقة' || lower === 'فرقة' || lower.includes('الفرقة')) {
+        yearColIdx = colNumber;
       } else if (lower === 'group' || lower.includes('الجروب') || lower.includes('المجموعة') || lower.includes('مجموعة')) {
         groupColIdx = colNumber;
       } else {
