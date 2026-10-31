@@ -5,6 +5,7 @@
  */
 
 import { getSectionInstructorName as resolveSectionTA } from './sectionHelper';
+import { getStudentLectureGroup as defaultGetStudentLectureGroup } from './excelHelper';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import DOMPurify from 'dompurify';
@@ -30,8 +31,11 @@ const formatStudentNameForPdf = (rawName) => {
     ? "'Cairo', 'Segoe UI', Tahoma, sans-serif" 
     : "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans', Arial, sans-serif";
   const dirAttr = isArabic ? 'rtl' : 'ltr';
+  // NEVER apply letter-spacing or word-spacing on Arabic as it tears cursive ligatures apart!
+  const letterSpacing = isArabic ? '0px' : '0.25px';
+  const wordSpacing = isArabic ? 'normal' : '3px';
   
-  return `<span style="font-family:${fontFamily};direction:${dirAttr};unicode-bidi:isolate;display:inline-block;letter-spacing:0.25px;word-spacing:3px;">${safeName}</span>`;
+  return `<span style="font-family:${fontFamily};direction:${dirAttr};unicode-bidi:isolate;display:inline-block;letter-spacing:${letterSpacing};word-spacing:${wordSpacing};">${safeName}</span>`;
 };
 
 export function printStudentReportPDF({ student, subjects, grades, attendance, options }) {
@@ -844,7 +848,7 @@ export async function printWeekAttendancePDF(options = {}) {
     attendanceRecords = {},
     excuseReasons = {},
     getStudentSubSection = (s) => s.section || 'S1',
-    getStudentLectureGroup = () => 'A',
+    getStudentLectureGroup = defaultGetStudentLectureGroup,
     studentScores = {},
     showSectionScore = false,
     maxSectionScore = 5,

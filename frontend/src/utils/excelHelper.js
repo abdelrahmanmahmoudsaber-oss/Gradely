@@ -280,40 +280,57 @@ export async function generateMultiSheetExcelBase64(sheets) {
 export const getStudentLectureGroup = (student, subId = null) => {
   if (!student) return 'A';
 
-  // 1. Subject-specific explicit group if set: '<subId>:GROUP:A'
+  // 1. Subject-specific explicit group override if set: '<subId>:GROUP:A' or '<subId>:GROUP:B'
   if (subId && Array.isArray(student.assigned_subjects)) {
     const subGroup = student.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(subId + ':GROUP:'));
-    if (subGroup) return subGroup.split(':')[2].toUpperCase();
+    if (subGroup) {
+      const g = subGroup.split(':')[2]?.toUpperCase();
+      if (g === 'A' || g === 'B') return g;
+    }
   }
 
-  // 2. Explicit global group tag on student: 'GROUP:A' or 'GROUP:B'
-  if (Array.isArray(student.assigned_subjects)) {
-    const globalGroup = student.assigned_subjects.find(e => typeof e === 'string' && (e === 'GROUP:A' || e === 'GROUP:B' || e.startsWith('GROUP:')));
-    if (globalGroup) return globalGroup.split(':')[1].toUpperCase();
-  }
-
-  // 3. Resolve section for this specific subject first
+  // 2. Resolve section for this specific subject first (PRIORITY: this subject's actual section)
   let sec = null;
   if (subId && Array.isArray(student.assigned_subjects)) {
     const match = student.assigned_subjects.find(e => typeof e === 'string' && e.startsWith(subId + ':') && !e.includes(':GROUP:'));
-    if (match) sec = match.split(':')[1];
+    if (match) {
+      sec = match.split(':')[1];
+    }
   }
 
-  // 4. Fallback to student base section if not assigned per-subject
+  // 3. Fallback to student base section if not assigned per-subject
   if (!sec) {
     sec = student.section || 'S1';
   }
 
-  // 5. Strict Binary Mapping based on section number:
+  // 4. Strict Academic Mapping based on the resolved section number:
   // Sections 1 & 2 -> ALWAYS Group A
   // Sections 3 & 4 -> ALWAYS Group B
-  const cleanSec = sec.toString().trim().toUpperCase().replace(/\s+/g, '');
-  const match = cleanSec.match(/(\d+)/);
-  const num = match ? parseInt(match[1], 10) : 1;
+  if (sec) {
+    const cleanSec = sec.toString().trim().toUpperCase().replace(/\s+/g, '');
+    const match = cleanSec.match(/(\d+)/);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (num === 1 || num === 2) return 'A';
+      if (num === 3 || num === 4) return 'B';
+      return (num % 2 === 1) ? 'A' : 'B';
+    }
+  }
 
-  if (num === 1 || num === 2) return 'A';
-  if (num === 3 || num === 4) return 'B';
-  return (num % 2 === 1) ? 'A' : 'B';
+  // 5. Fallback only if section has no digits: check global group or student.group
+  if (Array.isArray(student.assigned_subjects)) {
+    const globalGroup = student.assigned_subjects.find(e => typeof e === 'string' && (e === 'GROUP:A' || e === 'GROUP:B' || e.startsWith('GROUP:')));
+    if (globalGroup) {
+      const g = globalGroup.split(':')[1]?.toUpperCase();
+      if (g === 'A' || g === 'B') return g;
+    }
+  }
+
+  if (student.group && (student.group === 'A' || student.group === 'B')) {
+    return student.group;
+  }
+
+  return 'A';
 };
 
 /**
