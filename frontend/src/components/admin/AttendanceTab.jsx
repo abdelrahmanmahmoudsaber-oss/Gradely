@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../../supabaseClient';
-import { exportExcelFile, parseAttendanceExcelFile, exportAttendanceTemplateExcel, getStudentLectureGroup, resolveStudentSubSection, matchSheetToSubject } from '../../utils/excelHelper';
+import { exportExcelFile, parseAttendanceExcelFile, exportAttendanceTemplateExcel, getStudentLectureGroup, resolveStudentSubSection, matchSheetToSubject, normalizeSubjectNameForMatch } from '../../utils/excelHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { 
   Download, Users, UserPlus, UserMinus, UserCheck, CheckSquare, 
@@ -227,57 +227,6 @@ export default function AttendanceTab({ user }) {
 
   const getStudentSubSection = (student, subId) => {
     return resolveStudentSubSection(student, subId || currentSub, allSystemSubjects);
-  };
-
-  const handleQuickChangeStudentSection = async (studentUserId, newSec) => {
-    if (!selectedSubject || !studentUserId || !newSec) return;
-    const cleanSec = normalizeSection(newSec);
-    const cleanGrp = (cleanSec === 'S1' || cleanSec === 'S2' || cleanSec === 'S5') ? 'A' : 'B';
-
-    const targetStudent = allStudents.find(s => s.user_id === studentUserId);
-    const currentAssigned = Array.isArray(targetStudent?.assigned_subjects) ? [...targetStudent.assigned_subjects] : [];
-
-    // Filter out previous entries for this subject in assigned_subjects
-    const filteredAssigned = currentAssigned.filter(e => {
-      if (typeof e !== 'string') return true;
-      if (e.startsWith(selectedSubject + ':') || (currentSub?.name && e.startsWith(currentSub.name + ':'))) return false;
-      return true;
-    });
-
-    const newEntry = `${selectedSubject}:${cleanSec}`;
-    filteredAssigned.push(newEntry);
-    if (targetStudent) targetStudent.assigned_subjects = filteredAssigned;
-
-    // Dual persistence: also save tag in subject.excluded_students
-    // STU_SEC_<userId>:<cleanSec> and STU_GRP_<userId>:<cleanGrp>
-    const subObj = subjects.find(s => s.id === selectedSubject) || allSystemSubjects.find(s => s.id === selectedSubject);
-    let updatedExcluded = Array.isArray(subObj?.excluded_students) ? [...subObj.excluded_students] : [];
-    const secTagPrefix = `STU_SEC_${studentUserId}:`;
-    const grpTagPrefix = `STU_GRP_${studentUserId}:`;
-    updatedExcluded = updatedExcluded.filter(t => typeof t === 'string' && !t.startsWith(secTagPrefix) && !t.startsWith(grpTagPrefix));
-    updatedExcluded.push(secTagPrefix + cleanSec);
-    updatedExcluded.push(grpTagPrefix + cleanGrp);
-    if (subObj) subObj.excluded_students = updatedExcluded;
-
-    // Immediate reactive update in state
-    setAllStudents(prev => prev.map(s => s.user_id === studentUserId ? { ...s, assigned_subjects: filteredAssigned } : s));
-    if (subObj) {
-      setSubjects(prev => prev.map(s => s.id === subObj.id ? { ...s, excluded_students: updatedExcluded } : s));
-      setAllSystemSubjects(prev => prev.map(s => s.id === subObj.id ? { ...s, excluded_students: updatedExcluded } : s));
-    }
-
-    try {
-      await Promise.all([
-        supabase.from('users').update({ assigned_subjects: filteredAssigned }).eq('user_id', studentUserId),
-        supabase.from('subjects').update({ excluded_students: updatedExcluded }).eq('id', selectedSubject)
-      ]);
-      cacheManager.invalidate('admin_users_base');
-      cacheManager.invalidate('admin_subjects_base');
-      setMessage(`✅ تم تحديث سكشن الطالب ${targetStudent?.name || studentUserId} في هذه المادة إلى [${cleanSec} - Group ${cleanGrp}] بنجاح.`);
-      setTimeout(() => setMessage(''), 3500);
-    } catch (err) {
-      console.warn('Quick change section notice:', err);
-    }
   };
 
   const normalizeSection = (sec) => {
@@ -772,13 +721,38 @@ export default function AttendanceTab({ user }) {
 
   const getEnrolledStudents = () => {
     if (!currentSub) return [];
-    if (Array.isArray(currentSub.enrolled_students) && currentSub.enrolled_students.length > 0) {
-      const matched = allStudents.filter(stu => currentSub.enrolled_students.includes(stu.user_id));
-      if (matched.length > 0) return matched;
-    }
-    // Fallback: match all students in the subject's academic year level
+    const enrolledIds = new Set(Array.isArray(currentSub.enrolled_students) ? currentSub.enrolled_students.map(id => String(id).trim()) : []);
+    const subIdStr = String(currentSub.id || '').toLowerCase().trim();
+    const subNameStr = (currentSub.name || '').toLowerCase().trim();
+    const normSubName = currentSub.name ? normalizeSubjectNameForMatch(currentSub.name) : '';
     const subYear = normalizeYear(currentSub.year_level);
-    return allStudents.filter(stu => normalizeYear(stu.year_level) === subYear);
+
+    return allStudents.filter(stu => {
+      const stuUid = String(stu.user_id || '').trim();
+      // 1. Explicitly in enrolled_students
+      if (enrolledIds.has(stuUid)) return true;
+
+      // 2. Cross-year / carryover check: check if student has explicit assignment for this subject in assigned_subjects
+      if (Array.isArray(stu.assigned_subjects) && stu.assigned_subjects.length > 0) {
+        const hasAssignment = stu.assigned_subjects.some(entry => {
+          if (typeof entry !== 'string' || entry.startsWith('GROUP:') || entry.includes(':GROUP:')) return false;
+          const parts = entry.split(':');
+          const entrySub = parts[0].trim().toLowerCase();
+          if (subIdStr && entrySub === subIdStr) return true;
+          if (subNameStr && entrySub === subNameStr) return true;
+          if (normSubName && normalizeSubjectNameForMatch(parts[0]) === normSubName) return true;
+          return false;
+        });
+        if (hasAssignment) return true;
+      }
+
+      // 3. Fallback: if no explicit enrolled_students list is configured on the subject, include all students of this academic year
+      if (enrolledIds.size === 0) {
+        return normalizeYear(stu.year_level) === subYear;
+      }
+
+      return false;
+    });
   };
 
   const enrolledStudents = getEnrolledStudents();
@@ -2956,34 +2930,28 @@ export default function AttendanceTab({ user }) {
                           فرقة {normalizeYear(s.year_level)}
                         </span>
 
-                        {/* Interactive Section & Lecture Group Badge */}
+                        {/* Static Read-only Section & Lecture Group Badge */}
                         <div style={{display:'inline-flex',alignItems:'center',gap:'4px'}}>
-                          <select
-                            value={getStudentSubSection(s, selectedSubject)}
-                            onChange={(e) => handleQuickChangeStudentSection(s.user_id, e.target.value)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="input-field"
+                          <span 
+                            className="badge" 
                             style={{
-                              padding:'1px 6px',fontSize:'0.75rem',fontWeight:800,borderRadius:'4px',
-                              height:'auto',background:'var(--bg)',color:'var(--success)',
-                              borderColor:'rgba(16,185,129,0.3)',cursor:'pointer'
+                              background:'rgba(16, 185, 129, 0.1)',
+                              color:'var(--success)',
+                              border:'1px solid rgba(16, 185, 129, 0.25)',
+                              fontSize:'0.75rem',
+                              fontWeight:800
                             }}
-                            title="تعديل سكشن الطالب في هذه المادة فوراً"
                           >
-                            <option value="S1">سكشن S1</option>
-                            <option value="S2">سكشن S2</option>
-                            <option value="S3">سكشن S3</option>
-                            <option value="S4">سكشن S4</option>
-                            <option value="S5">سكشن S5</option>
-                            <option value="S6">سكشن S6</option>
-                          </select>
+                            سكشن {getStudentSubSection(s, selectedSubject)}
+                          </span>
                           <span 
                             className="badge" 
                             style={{
                               background: getStudentLectureGroup(s, selectedSubject, allSystemSubjects) === 'A' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(168, 85, 247, 0.15)',
                               color: getStudentLectureGroup(s, selectedSubject, allSystemSubjects) === 'A' ? '#38bdf8' : '#c084fc',
                               border: getStudentLectureGroup(s, selectedSubject, allSystemSubjects) === 'A' ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid rgba(168, 85, 247, 0.3)',
-                              fontSize:'0.72rem',fontWeight:800
+                              fontSize:'0.72rem',
+                              fontWeight:800
                             }}
                             title="مجموعة المحاضرة المقررة للطالب في هذه المادة"
                           >
@@ -3185,31 +3153,26 @@ export default function AttendanceTab({ user }) {
                     </td>
                     <td style={{padding:'12px 16px'}}>
                       <div style={{display:'inline-flex',alignItems:'center',gap:'6px'}}>
-                        <select
-                          value={getStudentSubSection(s, selectedSubject)}
-                          onChange={(e) => handleQuickChangeStudentSection(s.user_id, e.target.value)}
-                          className="input-field"
+                        <span 
+                          className="badge" 
                           style={{
-                            padding:'2px 6px',fontSize:'0.8rem',fontWeight:800,borderRadius:'4px',
-                            height:'auto',background:'var(--bg)',color:'var(--success)',
-                            borderColor:'rgba(16,185,129,0.3)',cursor:'pointer'
+                            background:'rgba(16, 185, 129, 0.1)',
+                            color:'var(--success)',
+                            border:'1px solid rgba(16, 185, 129, 0.25)',
+                            fontSize:'0.8rem',
+                            fontWeight:800
                           }}
-                          title="تعديل سكشن الطالب في هذه المادة"
                         >
-                          <option value="S1">S1</option>
-                          <option value="S2">S2</option>
-                          <option value="S3">S3</option>
-                          <option value="S4">S4</option>
-                          <option value="S5">S5</option>
-                          <option value="S6">S6</option>
-                        </select>
+                          {getStudentSubSection(s, selectedSubject)}
+                        </span>
                         <span 
                           className="badge" 
                           style={{
                             background: getStudentLectureGroup(s, selectedSubject, allSystemSubjects) === 'A' ? 'rgba(56, 189, 248, 0.15)' : 'rgba(168, 85, 247, 0.15)',
                             color: getStudentLectureGroup(s, selectedSubject, allSystemSubjects) === 'A' ? '#38bdf8' : '#c084fc',
                             border: getStudentLectureGroup(s, selectedSubject, allSystemSubjects) === 'A' ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid rgba(168, 85, 247, 0.3)',
-                            fontSize:'0.75rem',fontWeight:800
+                            fontSize:'0.75rem',
+                            fontWeight:800
                           }}
                         >
                           {getStudentLectureGroup(s, selectedSubject, allSystemSubjects)}
