@@ -1520,6 +1520,21 @@ export default function AttendanceTab({ user }) {
         ? (selectedGroup !== 'all' ? selectedGroup : 'A / B')
         : (secName !== 'All' ? secName : 'كافة السكاشن');
 
+      // Prepare student notes for PDF export (excuse, attending with other group, or custom notes)
+      const studentNotesMap = {};
+      finalExportStudents.forEach(s => {
+        const nativeGrp = s.nativeGroup || getStudentLectureGroup(s, selectedSubject, allSystemSubjects);
+        const isFromOtherGroup = s.isExtra || (attendanceType === 'lecture' && selectedGroup !== 'all' && nativeGrp !== selectedGroup);
+        const excuse = excuseReasons[s.user_id];
+        if (excuse) {
+          studentNotesMap[s.user_id] = `عذر: ${excuse}`;
+        } else if (isFromOtherGroup) {
+          studentNotesMap[s.user_id] = attendanceType === 'lecture' && selectedGroup !== 'all' ? `حاضر مع مجموعة ${selectedGroup}` : 'طالب من مجموعة أخرى';
+        } else if (s.notes) {
+          studentNotesMap[s.user_id] = s.notes;
+        }
+      });
+
       setPdfExportLoading(true);
       setPdfProgressText('جاري تجهيز كشف الغياب (PDF)...');
       try {
@@ -1536,6 +1551,7 @@ export default function AttendanceTab({ user }) {
           students: finalExportStudents,
           attendanceRecords: effectiveExportRecords,
           excuseReasons: excuseReasons,
+          studentNotes: studentNotesMap,
           getStudentSubSection: (s) => s.nativeSection || getStudentSubSection(s, selectedSubject),
           getStudentLectureGroup: (s) => s.nativeGroup || getStudentLectureGroup(s, selectedSubject, allSystemSubjects),
           studentScores: sectionScores,

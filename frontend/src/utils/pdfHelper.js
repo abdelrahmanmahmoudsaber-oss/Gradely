@@ -843,6 +843,7 @@ export async function printWeekAttendancePDF(options = {}) {
     students = [],
     attendanceRecords = {},
     excuseReasons = {},
+    studentNotes = {},
     getStudentSubSection = (s) => s.section || 'S1',
     getStudentLectureGroup = defaultGetStudentLectureGroup,
     studentScores = {},
@@ -986,6 +987,13 @@ export async function printWeekAttendancePDF(options = {}) {
     const stuScore = (options.studentScores && options.studentScores[s.user_id] != null) ? options.studentScores[s.user_id] : '';
     const displayScore = stuScore !== '' ? `<span style="font-weight:700;color:#0f172a;font-size:11px;">${stuScore} / ${maxScoreVal}</span>` : '&nbsp;';
 
+    const rawNote = (studentNotes && studentNotes[s.user_id]) 
+      || (excuseReasons && excuseReasons[s.user_id] ? `عذر: ${excuseReasons[s.user_id]}` : '')
+      || (s.isExtra ? 'حاضر استثنائي' : '')
+      || s.notes
+      || '';
+    const displayNote = rawNote ? escapeHtml(rawNote) : '&nbsp;';
+
     return `
       <tr style="border-bottom: 1px solid #cbd5e1; background-color: ${globalIdx % 2 === 0 ? '#ffffff' : '#f8fafc'}; height: 26px;">
         <td style="text-align:center;font-weight:700;color:#64748b;padding:4px 3px;border:1px solid #cbd5e1;font-size:11px;">${globalIdx + 1}</td>
@@ -1002,7 +1010,8 @@ export async function printWeekAttendancePDF(options = {}) {
             ${statusText}
           </span>
         </td>
-        ${isSectionScoreEnabled ? `<td style="text-align:center;min-width:75px;padding:4px 3px;border:1px solid #cbd5e1;">${displayScore}</td>` : ''}
+        ${isSectionScoreEnabled ? `<td style="text-align:center;min-width:70px;padding:4px 3px;border:1px solid #cbd5e1;">${displayScore}</td>` : ''}
+        <td style="text-align:center;padding:4px 4px;border:1px solid #cbd5e1;color:#475569;font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${displayNote}</td>
       </tr>
     `;
   };
@@ -1034,10 +1043,11 @@ export async function printWeekAttendancePDF(options = {}) {
         const curGrp = getStudentLectureGroup ? getStudentLectureGroup(stu) : 'A';
 
         // Group transition divider
+        const totalColumns = 7 + (Boolean(showSectionScore) ? 1 : 0);
         if (localIdx === 0 && !pageInfo.isFirstPage) {
           pageRowsHtml += `
             <tr style="background:#f1f5f9;border-top:1.5px solid #6366f1;border-bottom:1.5px solid #6366f1;">
-              <td colspan="${Boolean(showSectionScore) ? 7 : 6}" style="padding:4px 10px;font-weight:800;font-size:11px;color:#312e81;text-align:right;">
+              <td colspan="${totalColumns}" style="padding:4px 10px;font-weight:800;font-size:11px;color:#312e81;text-align:right;">
                 📌 طلاب مجموعة (جروب ${escapeHtml(curGrp)})
               </td>
             </tr>
@@ -1045,7 +1055,7 @@ export async function printWeekAttendancePDF(options = {}) {
         } else if (lastGrp && curGrp !== lastGrp) {
           pageRowsHtml += `
             <tr style="background:#f1f5f9;border-top:1.5px solid #6366f1;border-bottom:1.5px solid #6366f1;">
-              <td colspan="${Boolean(showSectionScore) ? 7 : 6}" style="padding:4px 10px;font-weight:800;font-size:11px;color:#312e81;text-align:right;">
+              <td colspan="${totalColumns}" style="padding:4px 10px;font-weight:800;font-size:11px;color:#312e81;text-align:right;">
                 📌 طلاب مجموعة (جروب ${escapeHtml(curGrp)})
               </td>
             </tr>
@@ -1115,21 +1125,23 @@ export async function printWeekAttendancePDF(options = {}) {
       `;
 
       // Table block with consistent column widths
+      const totalColumns = 7 + (Boolean(options.showSectionScore) ? 1 : 0);
       const tableSectionHtml = `
         <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:auto;table-layout:fixed;border:1.5px solid #1e293b;">
           <thead>
             <tr style="background:#1e293b;color:#ffffff;height:30px;">
-              <th style="width:36px;padding:5px 2px;border:1px solid #1e293b;font-weight:700;text-align:center;">م</th>
-              <th style="width:110px;padding:5px 3px;border:1px solid #1e293b;font-weight:700;text-align:center;white-space:nowrap;font-size:11px;">الرقم الأكاديمي</th>
+              <th style="width:34px;padding:5px 2px;border:1px solid #1e293b;font-weight:700;text-align:center;">م</th>
+              <th style="width:100px;padding:5px 3px;border:1px solid #1e293b;font-weight:700;text-align:center;white-space:nowrap;font-size:11px;">الرقم الأكاديمي</th>
               <th style="padding:5px 8px;border:1px solid #1e293b;font-weight:700;text-align:right;">اسم الطالب</th>
-              <th style="width:55px;padding:5px 2px;border:1px solid #1e293b;font-weight:700;text-align:center;">السكشن</th>
-              <th style="width:55px;padding:5px 2px;border:1px solid #1e293b;font-weight:700;text-align:center;">الجروب</th>
-              <th style="width:75px;padding:5px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الحالة</th>
-              ${Boolean(options.showSectionScore) ? `<th style="width:75px;padding:5px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الدرجة (من ${options.maxSectionScore || 5})</th>` : ''}
+              <th style="width:50px;padding:5px 2px;border:1px solid #1e293b;font-weight:700;text-align:center;">السكشن</th>
+              <th style="width:50px;padding:5px 2px;border:1px solid #1e293b;font-weight:700;text-align:center;">الجروب</th>
+              <th style="width:70px;padding:5px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الحالة</th>
+              ${Boolean(options.showSectionScore) ? `<th style="width:70px;padding:5px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">الدرجة (من ${options.maxSectionScore || 5})</th>` : ''}
+              <th style="width:90px;padding:5px 4px;border:1px solid #1e293b;font-weight:700;text-align:center;">ملاحظات</th>
             </tr>
           </thead>
           <tbody>
-            ${pageRowsHtml || `<tr><td colspan="${Boolean(options.showSectionScore) ? 7 : 6}" style="text-align:center;padding:15px;color:#94a3b8;border:1px solid #cbd5e1;">لا توجد سجلات مطابقة</td></tr>`}
+            ${pageRowsHtml || `<tr><td colspan="${totalColumns}" style="text-align:center;padding:15px;color:#94a3b8;border:1px solid #cbd5e1;">لا توجد سجلات مطابقة</td></tr>`}
           </tbody>
         </table>
       `;
