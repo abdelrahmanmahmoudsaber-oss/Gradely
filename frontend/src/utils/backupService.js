@@ -3,7 +3,7 @@ import { generateMultiSheetExcelBase64 } from './excelHelper';
 import { isSuperUser } from './dataCache';
 
 const DEFAULT_EMAIL = 'abdo2171999m@gmail.com';
-const DEFAULT_WEBHOOK = '';
+const DEFAULT_WEBHOOK = 'https://script.google.com/macros/s/AKfycbykd7LVJ8p0dqrHqW9UUJ04i40qFwRTa0b98YPA1NgXzJ3U0EECa9i-EbiVa70pvHzbiQ/exec';
 
 /**
  * Sanitizes and formats a Google Apps Script Web App URL
@@ -48,7 +48,7 @@ export async function getBackupSettings() {
   return {
     email: (localStorage.getItem('gradely_backup_email') || DEFAULT_EMAIL).trim(),
     schedule: localStorage.getItem('gradely_backup_schedule') || 'daily',
-    webhookUrl: savedWebhook,
+    webhookUrl: savedWebhook || DEFAULT_WEBHOOK,
     lastBackup: localStorage.getItem('gradely_last_backup') || '',
     nextBackup: localStorage.getItem('gradely_next_backup') || '',
     lastBackupTimestamp: parseInt(localStorage.getItem('gradely_last_backup_timestamp') || '0', 10)

@@ -36,9 +36,15 @@ const DEFAULT_WEBHOOK = 'https://script.google.com/macros/s/AKfycbykd7LVJ8p0dqrH
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'https://bbdyexsaqnlremprfmph.supabase.co';
 // Use Service Role Key if available (bypasses RLS for full data access), fallback to anon key
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || 'sb_publishable_7lextLm1cEOuRlz4XMiV9w_F01aZaho';
-const BACKUP_SECRET = process.env.BACKUP_CRON_SECRET || '';
-const BACKUP_EMAIL = process.env.BACKUP_EMAIL || DEFAULT_EMAIL;
-const WEBHOOK_URL = process.env.BACKUP_WEBHOOK_URL || DEFAULT_WEBHOOK;
+const BACKUP_SECRET = (process.env.BACKUP_CRON_SECRET && process.env.BACKUP_CRON_SECRET.trim() !== '')
+  ? process.env.BACKUP_CRON_SECRET.trim()
+  : 'gradely_backup_cron_sec_7f9a2b8e4c1d6e5a';
+const BACKUP_EMAIL = (process.env.BACKUP_EMAIL && process.env.BACKUP_EMAIL.trim() !== '')
+  ? process.env.BACKUP_EMAIL.trim()
+  : DEFAULT_EMAIL;
+const WEBHOOK_URL = (process.env.BACKUP_WEBHOOK_URL && process.env.BACKUP_WEBHOOK_URL.trim() !== '')
+  ? process.env.BACKUP_WEBHOOK_URL.trim()
+  : DEFAULT_WEBHOOK;
 
 console.log('╔══════════════════════════════════════════════════════════════════╗');
 console.log('║  Gradely Automated Cloud Backup Generator (Zero-Browser)         ║');

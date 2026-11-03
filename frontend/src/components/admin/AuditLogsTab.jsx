@@ -24,6 +24,8 @@ export default function AuditLogsTab({ user }) {
   const [actorsList, setActorsList] = useState([]);
   const [yearFilter, setYearFilter] = useState('all');
   const [subjectFilter, setSubjectFilter] = useState('all');
+  const [timeRange, setTimeRange] = useState('all'); // 'all', '24h', '7d', '30d'
+  const [fetchLimit, setFetchLimit] = useState(1500); // 500, 1500, 3000, 5000
 
   useEffect(() => {
     fetchMetadata();
@@ -31,7 +33,7 @@ export default function AuditLogsTab({ user }) {
 
   useEffect(() => {
     fetchAuditLogs();
-  }, [tableFilter, actionFilter, actorFilter]);
+  }, [tableFilter, actionFilter, actorFilter, timeRange, fetchLimit]);
 
   const fetchMetadata = async () => {
     try {
@@ -78,7 +80,16 @@ export default function AuditLogsTab({ user }) {
         .from('audit_logs')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(400);
+        .limit(fetchLimit);
+
+      if (timeRange !== 'all') {
+        const now = new Date();
+        const past = new Date();
+        if (timeRange === '24h') past.setHours(now.getHours() - 24);
+        else if (timeRange === '7d') past.setDate(now.getDate() - 7);
+        else if (timeRange === '30d') past.setDate(now.getDate() - 30);
+        query = query.gte('created_at', past.toISOString());
+      }
 
       if (tableFilter !== 'all') {
         query = query.eq('table_name', tableFilter);
@@ -155,6 +166,44 @@ export default function AuditLogsTab({ user }) {
     return s || '—';
   };
 
+  const getStatusBadge = (s, isHighlight = false) => {
+    let bg = 'rgba(255, 255, 255, 0.06)';
+    let color = 'var(--text-main)';
+    let border = '1px solid var(--border)';
+    if (s === 'present') {
+      bg = 'rgba(16, 185, 129, 0.15)';
+      color = '#34d399';
+      border = '1px solid rgba(16, 185, 129, 0.3)';
+    } else if (s === 'absent') {
+      bg = 'rgba(239, 68, 68, 0.15)';
+      color = '#f87171';
+      border = '1px solid rgba(239, 68, 68, 0.3)';
+    } else if (s === 'late') {
+      bg = 'rgba(245, 158, 11, 0.15)';
+      color = '#fbbf24';
+      border = '1px solid rgba(245, 158, 11, 0.3)';
+    } else if (s === 'excused') {
+      bg = 'rgba(59, 130, 246, 0.15)';
+      color = '#60a5fa';
+      border = '1px solid rgba(59, 130, 246, 0.3)';
+    }
+    return (
+      <span style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '2px 8px',
+        borderRadius: '5px',
+        fontSize: '0.78rem',
+        fontWeight: isHighlight ? 800 : 600,
+        background: bg,
+        color: color,
+        border: border
+      }}>
+        {statusAr(s)}
+      </span>
+    );
+  };
+
   // Compare old and new data to extract clean, informative diffs
   const renderLogDetails = (log) => {
     const data = log.new_data || log.old_data || {};
@@ -185,15 +234,29 @@ export default function AuditLogsTab({ user }) {
             </span>
           </div>
 
-          <div style={{ fontSize: '0.82rem', marginTop: '2px', color: 'var(--text-muted)' }}>
+          <div style={{ fontSize: '0.82rem', marginTop: '3px', color: 'var(--text-muted)' }}>
             {log.action === 'UPDATE' && oldStatus && newStatus ? (
-              <span>
-                تغيير حالة الحضور: <span style={{ textDecoration: 'line-through', opacity: 0.7 }}>{statusAr(oldStatus)}</span> ⬅️ <strong style={{ color: newStatus === 'present' ? 'var(--success)' : 'var(--danger)' }}>{statusAr(newStatus)}</strong>
-              </span>
+              oldStatus === newStatus ? (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>تأكيد/حفظ الحالة:</span>
+                  {getStatusBadge(newStatus, true)}
+                </div>
+              ) : (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>تم التغيير من:</span>
+                  {getStatusBadge(oldStatus, false)}
+                  <span style={{ color: 'var(--primary-hover)', fontWeight: 800 }}>⬅️</span>
+                  <span style={{ color: 'var(--text-muted)' }}>إلى:</span>
+                  {getStatusBadge(newStatus, true)}
+                </div>
+              )
             ) : log.action === 'INSERT' ? (
-              <span>رصد غياب مبدئي: <strong style={{ color: newStatus === 'present' ? 'var(--success)' : 'var(--danger)' }}>{statusAr(newStatus)}</strong></span>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <span>رصد غياب مبدئي:</span>
+                {getStatusBadge(newStatus, true)}
+              </div>
             ) : (
-              <span>حذف سجل غياب</span>
+              <span style={{ color: 'var(--danger)' }}>🗑️ حذف سجل غياب</span>
             )}
           </div>
         </div>
@@ -637,6 +700,38 @@ export default function AuditLogsTab({ user }) {
               </select>
             </div>
           )}
+
+          {/* Time Range Filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>الفترة:</span>
+            <select
+              value={timeRange}
+              onChange={e => setTimeRange(e.target.value)}
+              className="input-field"
+              style={{ padding: '6px 10px', fontSize: '0.85rem' }}
+            >
+              <option value="all">كل السجل الأكاديمي</option>
+              <option value="24h">آخر 24 ساعة (اليوم)</option>
+              <option value="7d">آخر 7 أيام (أسبوع)</option>
+              <option value="30d">آخر 30 يوماً (شهر)</option>
+            </select>
+          </div>
+
+          {/* Fetch Capacity Limit */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>سعة العرض:</span>
+            <select
+              value={fetchLimit}
+              onChange={e => setFetchLimit(Number(e.target.value))}
+              className="input-field"
+              style={{ padding: '6px 10px', fontSize: '0.85rem' }}
+            >
+              <option value="500">500 عملية</option>
+              <option value="1500">1500 عملية (موصى به)</option>
+              <option value="3000">3000 عملية</option>
+              <option value="5000">أرشيف كامل (5000 عملية)</option>
+            </select>
+          </div>
 
         </div>
       </div>

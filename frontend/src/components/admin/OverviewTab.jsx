@@ -1831,22 +1831,54 @@ export default function OverviewTab({ user }) {
                     onClick={() => {
                       const code = `function doPost(e) {
   try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return ContentService.createTextOutput(JSON.stringify({ status: "error", error: "No post data received" })).setMimeType(ContentService.MimeType.JSON);
+    }
     var data = JSON.parse(e.postData.contents);
-    var recipient = data.email || "your-email@gmail.com";
-    var filename = data.filename || "Gradely_Full_Backup.xlsx";
+    var recipient = data.email || "abdo2171999m@gmail.com";
+    var filename = data.filename || ("Gradely_Backup_" + new Date().toISOString().slice(0, 10) + ".xlsx");
     var fileBase64 = data.fileBase64;
+    
+    if (!fileBase64) {
+      return ContentService.createTextOutput(JSON.stringify({ status: "error", error: "Missing fileBase64" })).setMimeType(ContentService.MimeType.JSON);
+    }
     
     // 1. Decode Base64 Excel File
     var decoded = Utilities.base64Decode(fileBase64);
     var blob = Utilities.newBlob(decoded, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename);
     
-    // 2. Send Email via Gmail
-    MailApp.sendEmail({
-      to: recipient,
-      subject: "📊 كشف الحضور والغياب والدرجات الشامل - Gradely (" + new Date().toLocaleDateString("ar-EG") + ")",
-      body: "مرحباً يا بشمهندس،\\n\\nمرفق مع هذه الرسالة النسخة الاحتياطية الشاملة لكافة المواد والطلاب (حضور، غياب، وكافة الدرجات) بصيغة Excel.\\n\\nتم الإرسال تلقائياً من منصة Gradely.\\nالتاريخ: " + new Date().toLocaleString("ar-EG"),
-      attachments: [blob]
-    });
+    // 2. Send Email via Gmail (prefer GmailApp with fallback to MailApp)
+    var emailSent = false;
+    var emailError = "";
+    var subject = "📊 كشف الحضور والغياب والدرجات الشامل - Gradely (" + new Date().toLocaleDateString("ar-EG") + ")";
+    var body = "مرحباً يا بشمهندس،\\n\\nمرفق مع هذه الرسالة النسخة الاحتياطية الشاملة لكافة المواد والطلاب (حضور، غياب، وكافة الدرجات) بصيغة Excel.\\n\\nتم الإرسال بنجاح من منصة Gradely السحابية.\\nالتاريخ: " + new Date().toLocaleString("ar-EG");
+    
+    try {
+      if (typeof GmailApp !== 'undefined') {
+        GmailApp.sendEmail(recipient, subject, body, {
+          name: "منصة Gradely الأكاديمية",
+          attachments: [blob]
+        });
+        emailSent = true;
+      }
+    } catch (e1) {
+      emailError = e1.toString();
+    }
+    
+    if (!emailSent) {
+      try {
+        MailApp.sendEmail({
+          to: recipient,
+          subject: subject,
+          body: body,
+          name: "منصة Gradely الأكاديمية",
+          attachments: [blob]
+        });
+        emailSent = true;
+      } catch (e2) {
+        emailError += " | " + e2.toString();
+      }
+    }
     
     // 3. Save copy to Google Drive in Gradely_Backups folder
     try {
@@ -1856,11 +1888,13 @@ export default function OverviewTab({ user }) {
       folder.createFile(blob);
     } catch(errDrive) {}
     
-    return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
-      .setMimeType(ContentService.MimeType.JSON);
+    if (!emailSent) {
+      return ContentService.createTextOutput(JSON.stringify({ status: "warning", message: "Saved to Drive but email failed: " + emailError })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({ status: "success" })).setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ status: "error", error: err.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", error: err.toString() })).setMimeType(ContentService.MimeType.JSON);
   }
 }`;
                       navigator.clipboard.writeText(code);
@@ -1877,24 +1911,34 @@ export default function OverviewTab({ user }) {
                 <pre style={{margin:0,fontSize:'0.75rem',color:'#38bdf8',fontFamily:'monospace',maxHeight:'160px',overflowY:'auto',lineHeight:1.4}}>
 {`function doPost(e) {
   try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return ContentService.createTextOutput(JSON.stringify({ status: "error", error: "No post data" })).setMimeType(ContentService.MimeType.JSON);
+    }
     var data = JSON.parse(e.postData.contents);
-    var recipient = data.email || "your-email@gmail.com";
-    var filename = data.filename || "Gradely_Full_Backup.xlsx";
+    var recipient = data.email || "abdo2171999m@gmail.com";
+    var filename = data.filename || "Gradely_Backup.xlsx";
     var fileBase64 = data.fileBase64;
     
-    // 1. Decode Base64 Excel File
     var decoded = Utilities.base64Decode(fileBase64);
     var blob = Utilities.newBlob(decoded, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename);
     
-    // 2. Send Email via Gmail
-    MailApp.sendEmail({
-      to: recipient,
-      subject: "📊 كشف الحضور والغياب والدرجات الشامل - Gradely (" + new Date().toLocaleDateString("ar-EG") + ")",
-      body: "مرحباً يا بشمهندس،\\n\\nمرفق مع هذه الرسالة النسخة الاحتياطية الشاملة لكافة المواد والطلاب (حضور، غياب، وكافة الدرجات) بصيغة Excel.\\n\\nتم الإرسال تلقائياً من منصة Gradely.\\nالتاريخ: " + new Date().toLocaleString("ar-EG"),
-      attachments: [blob]
-    });
+    var subject = "📊 كشف الحضور والغياب والدرجات الشامل - Gradely (" + new Date().toLocaleDateString("ar-EG") + ")";
+    var body = "مرحباً يا بشمهندس،\\n\\nمرفق مع هذه الرسالة النسخة الاحتياطية الشاملة لكافة المواد والطلاب بصيغة Excel.\\n\\nتم الإرسال بنجاح من منصة Gradely.\\nالتاريخ: " + new Date().toLocaleString("ar-EG");
     
-    // 3. Save copy to Google Drive
+    var emailSent = false;
+    try {
+      if (typeof GmailApp !== 'undefined') {
+        GmailApp.sendEmail(recipient, subject, body, { name: "منصة Gradely الأكاديمية", attachments: [blob] });
+        emailSent = true;
+      }
+    } catch(e1) {}
+    if (!emailSent) {
+      try {
+        MailApp.sendEmail({ to: recipient, subject: subject, body: body, name: "منصة Gradely الأكاديمية", attachments: [blob] });
+        emailSent = true;
+      } catch(e2) {}
+    }
+    
     try {
       var folderName = "Gradely_Backups";
       var folders = DriveApp.getFoldersByName(folderName);
@@ -1902,11 +1946,9 @@ export default function OverviewTab({ user }) {
       folder.createFile(blob);
     } catch(errDrive) {}
     
-    return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return ContentService.createTextOutput(JSON.stringify({ status: "success" })).setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ status: "error", error: err.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", error: err.toString() })).setMimeType(ContentService.MimeType.JSON);
   }
 }`}
                 </pre>
