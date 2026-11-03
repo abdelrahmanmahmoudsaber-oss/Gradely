@@ -420,6 +420,44 @@ export const getStudentLectureGroup = (student, subOrId = null, allSubjects = []
 };
 
 /**
+ * Canonical unified student sorting standard across all of Gradely.
+ * Guarantees 100% identical order between Attendance, Detailed Grades, Excel and PDF exports.
+ * 
+ * Order of priority:
+ * 1. If groupByLecture=true: Group A first, then Group B
+ * 2. Section in ascending order (S1, S2, S3, S4...)
+ * 3. Academic ID in natural numerical ascending order (e.g. 2301120 < 2400070)
+ * 4. Name alphabetically (Arabic locale)
+ */
+export const sortStudentsStandard = (students, subOrId = null, allSubjects = [], { groupByLecture = false } = {}) => {
+  if (!Array.isArray(students)) return [];
+  return [...students].sort((a, b) => {
+    // 1. Group comparison for lectures
+    if (groupByLecture) {
+      const grpA = getStudentLectureGroup(a, subOrId, allSubjects);
+      const grpB = getStudentLectureGroup(b, subOrId, allSubjects);
+      const grpCmp = grpA.localeCompare(grpB, undefined, { numeric: true });
+      if (grpCmp !== 0) return grpCmp;
+    }
+
+    // 2. Section comparison
+    const secA = resolveStudentSubSection(a, subOrId, allSubjects);
+    const secB = resolveStudentSubSection(b, subOrId, allSubjects);
+    const secCmp = secA.localeCompare(secB, undefined, { numeric: true });
+    if (secCmp !== 0) return secCmp;
+
+    // 3. Academic ID numerical comparison
+    const idA = String(a.user_id || '').trim();
+    const idB = String(b.user_id || '').trim();
+    const idCmp = idA.localeCompare(idB, undefined, { numeric: true });
+    if (idCmp !== 0) return idCmp;
+
+    // 4. Name comparison (Arabic collation)
+    return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
+  });
+};
+
+/**
  * Generates an Excel template (.xlsx) for attendance recording (Section or Lecture).
  */
 export async function exportAttendanceTemplateExcel(students, subjectName, totalWeeks = 12, attendanceType = 'section', selectedGroup = 'all') {
@@ -459,12 +497,14 @@ export async function exportAttendanceTemplateExcel(students, subjectName, total
     cell.alignment = { horizontal: 'center', vertical: 'middle' };
   });
 
-  // Populate Student Rows
-  students.forEach((stu, idx) => {
-    const grp = getStudentLectureGroup(stu);
+  // Populate Student Rows (strictly sorted by canonical standard)
+  const sortedStudents = sortStudentsStandard(students, subjectName, [], { groupByLecture: isLecture });
+  sortedStudents.forEach((stu, idx) => {
+    const grp = getStudentLectureGroup(stu, subjectName);
+    const sec = resolveStudentSubSection(stu, subjectName);
     const rowValues = [
       idx + 1, 
-      sanitizeCell(stu.section || 'S01'), 
+      sanitizeCell(sec || 'S1'), 
       sanitizeCell(`Group ${grp}`), 
       sanitizeCell(stu.user_id), 
       sanitizeCell(stu.name)

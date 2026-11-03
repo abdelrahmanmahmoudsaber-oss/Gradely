@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../supabaseClient';
-import { exportExcelFile, parseExcelFile } from '../../utils/excelHelper';
+import { exportExcelFile, parseExcelFile, resolveStudentSubSection, sortStudentsStandard, normalizeSubjectNameForMatch } from '../../utils/excelHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { Download, Upload, Save, Users, Filter, BookOpen, AlertCircle, Plus, X, Check, Eye, EyeOff, Bell, Send } from 'lucide-react';
 import { getSectionInstructorName as resolveSectionTA } from '../../utils/sectionHelper';
@@ -62,11 +62,7 @@ export default function GradesTab({ user }) {
   };
 
   const getStudentSubSection = (student, subId) => {
-    if (student && Array.isArray(student.assigned_subjects)) {
-      const match = student.assigned_subjects.find(entry => typeof entry === 'string' && entry.startsWith(subId + ':'));
-      if (match) return normalizeSection(match.split(':')[1]);
-    }
-    return normalizeSection(student?.section || 'S1');
+    return resolveStudentSubSection(student, subId || selectedSubject, subjects);
   };
 
   const normalizeSection = (sec) => {
@@ -352,16 +348,49 @@ export default function GradesTab({ user }) {
 
   const getEnrolledStudents = () => {
     if (!currentSub) return [];
-    if (Array.isArray(currentSub.enrolled_students)) return allStudents.filter(stu => currentSub.enrolled_students.includes(stu.user_id));
-    return [];
+    const enrolledIds = new Set(Array.isArray(currentSub.enrolled_students) ? currentSub.enrolled_students.map(id => String(id).trim()) : []);
+    const subIdStr = String(currentSub.id || '').toLowerCase().trim();
+    const subNameStr = (currentSub.name || '').toLowerCase().trim();
+    const normSubName = currentSub.name ? normalizeSubjectNameForMatch(currentSub.name) : '';
+    const subYear = normalizeYear(currentSub.year_level);
+
+    return allStudents.filter(stu => {
+      const stuUid = String(stu.user_id || '').trim();
+      // 1. Explicitly in enrolled_students
+      if (enrolledIds.has(stuUid)) return true;
+
+      // 2. Cross-year / carryover check: check if student has explicit assignment for this subject in assigned_subjects
+      if (Array.isArray(stu.assigned_subjects) && stu.assigned_subjects.length > 0) {
+        const hasAssignment = stu.assigned_subjects.some(entry => {
+          if (typeof entry !== 'string' || entry.startsWith('GROUP:') || entry.includes(':GROUP:')) return false;
+          const parts = entry.split(':');
+          const entrySub = parts[0].trim().toLowerCase();
+          if (subIdStr && entrySub === subIdStr) return true;
+          if (subNameStr && entrySub === subNameStr) return true;
+          if (normSubName && normalizeSubjectNameForMatch(parts[0]) === normSubName) return true;
+          return false;
+        });
+        if (hasAssignment) return true;
+      }
+
+      // 3. Fallback: if no explicit enrolled_students list is configured on the subject, include all students of this academic year
+      if (enrolledIds.size === 0) {
+        return normalizeYear(stu.year_level) === subYear;
+      }
+
+      return false;
+    });
   };
 
   const enrolledStudents = getEnrolledStudents();
 
-  const displayedEnrolledStudents = enrolledStudents.filter(stu => {
+  const rawDisplayedStudents = enrolledStudents.filter(stu => {
     if (selectedSection === 'all') return true;
     return getStudentSubSection(stu, selectedSubject) === normalizeSection(selectedSection);
   });
+
+  // Strictly sort according to canonical standard (Section -> Academic ID numerically -> Name)
+  const displayedEnrolledStudents = sortStudentsStandard(rawDisplayedStudents, selectedSubject, subjects);
 
   const getSectionInstructorName = (subId, sec) => {
     return resolveSectionTA(subId, sec, allAdmins, subjects);

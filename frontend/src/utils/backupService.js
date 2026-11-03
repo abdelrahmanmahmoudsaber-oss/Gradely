@@ -1,5 +1,5 @@
 import { supabase } from '../supabaseClient';
-import { generateMultiSheetExcelBase64 } from './excelHelper';
+import { generateMultiSheetExcelBase64, sortStudentsStandard } from './excelHelper';
 import { isSuperUser } from './dataCache';
 
 const DEFAULT_EMAIL = 'abdo2171999m@gmail.com';
@@ -297,14 +297,10 @@ export async function sendFullSystemBackupEmail({ isAuto = false, user, customEm
         return inSub || hasAssigned;
       });
 
-      // Sort deterministically: section, then academic ID
-      enrolled.sort((a, b) => {
-        const secA = (a.section || '').localeCompare(b.section || '');
-        if (secA !== 0) return secA;
-        return String(a.user_id).localeCompare(String(b.user_id));
-      });
+      // Sort strictly using canonical standard: section -> academic ID -> name
+      const sortedEnrolled = sortStudentsStandard(enrolled, sub, allSubs, { groupByLecture: hasLectures });
 
-      const rows = enrolled.map(stu => {
+      const rows = sortedEnrolled.map(stu => {
         const stuId = String(stu.user_id || '').trim();
         const stuSubSec = (() => {
           if (Array.isArray(stu.assigned_subjects)) {

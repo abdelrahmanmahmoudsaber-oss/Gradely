@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../../supabaseClient';
-import { exportExcelFile, parseAttendanceExcelFile, exportAttendanceTemplateExcel, getStudentLectureGroup, resolveStudentSubSection, matchSheetToSubject, normalizeSubjectNameForMatch } from '../../utils/excelHelper';
+import { exportExcelFile, parseAttendanceExcelFile, exportAttendanceTemplateExcel, getStudentLectureGroup, resolveStudentSubSection, matchSheetToSubject, normalizeSubjectNameForMatch, sortStudentsStandard } from '../../utils/excelHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { 
   Download, Users, UserPlus, UserMinus, UserCheck, CheckSquare, 
@@ -762,30 +762,27 @@ export default function AttendanceTab({ user }) {
 
   const candidatePool = enrolledStudents;
 
-  const baseEnrolledStudents = candidatePool
-    .filter(stu => {
-      if (attendanceType === 'lecture') {
-        if (selectedGroup === 'all') return true;
-        const grp = getStudentLectureGroup(stu, selectedSubject, allSystemSubjects);
-        return grp === selectedGroup;
-      } else {
-        if (selectedSection === 'all') return true;
-        return getStudentSubSection(stu, selectedSubject) === normalizeSection(selectedSection);
-      }
-    })
-    .filter(stu => {
-      if (!studentSearch.trim()) return true;
-      const q = studentSearch.toLowerCase().trim();
-      return (stu.name && stu.name.toLowerCase().includes(q)) || (stu.user_id && stu.user_id.toLowerCase().includes(q));
-    });
-
-  baseEnrolledStudents.sort((a, b) => {
-    const secA = getStudentSubSection(a, selectedSubject);
-    const secB = getStudentSubSection(b, selectedSubject);
-    const secCmp = secA.localeCompare(secB, undefined, { numeric: true });
-    if (secCmp !== 0) return secCmp;
-    return String(a.user_id).localeCompare(String(b.user_id), undefined, { numeric: true });
-  });
+  const baseEnrolledStudents = sortStudentsStandard(
+    candidatePool
+      .filter(stu => {
+        if (attendanceType === 'lecture') {
+          if (selectedGroup === 'all') return true;
+          const grp = getStudentLectureGroup(stu, selectedSubject, allSystemSubjects);
+          return grp === selectedGroup;
+        } else {
+          if (selectedSection === 'all') return true;
+          return getStudentSubSection(stu, selectedSubject) === normalizeSection(selectedSection);
+        }
+      })
+      .filter(stu => {
+        if (!studentSearch.trim()) return true;
+        const q = studentSearch.toLowerCase().trim();
+        return (stu.name && stu.name.toLowerCase().includes(q)) || (stu.user_id && stu.user_id.toLowerCase().includes(q));
+      }),
+    selectedSubject,
+    allSystemSubjects,
+    { groupByLecture: attendanceType === 'lecture' }
+  );
 
   const displayedEnrolledStudents = baseEnrolledStudents.filter(stu => {
     if (statusFilter === 'all') return true;
@@ -1464,7 +1461,7 @@ export default function AttendanceTab({ user }) {
 
     // Combine with any extra students explicitly added for this export
     const effectiveExportRecords = { ...attendanceRecords };
-    const finalExportStudents = [...targetStudents];
+    const rawFinalExportStudents = [...targetStudents];
 
     exportExtraStudents.forEach(extra => {
       effectiveExportRecords[extra.user_id] = extra.status || 'present';
@@ -1473,10 +1470,18 @@ export default function AttendanceTab({ user }) {
         exportFilter === 'recorded' ||
         exportFilter === (extra.status || 'present');
 
-      if (matchesFilter && !finalExportStudents.some(s => String(s.user_id).trim() === String(extra.user_id).trim())) {
-        finalExportStudents.push(extra);
+      if (matchesFilter && !rawFinalExportStudents.some(s => String(s.user_id).trim() === String(extra.user_id).trim())) {
+        rawFinalExportStudents.push(extra);
       }
     });
+
+    // Enforce canonical unified sorting across all formats (PDF, Excel, TXT)
+    const finalExportStudents = sortStudentsStandard(
+      rawFinalExportStudents,
+      selectedSubject,
+      allSystemSubjects,
+      { groupByLecture: attendanceType === 'lecture' }
+    );
 
     // Optionally save extra attendance to Supabase
     if (saveExtraAttendanceToDb && exportExtraStudents.length > 0) {

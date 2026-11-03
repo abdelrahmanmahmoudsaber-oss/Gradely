@@ -220,9 +220,11 @@ async function generateExcelWorkbook({ users, subjects, attendance, grades }) {
     });
 
     enrolled.sort((a, b) => {
-      const secA = (a.section || '').localeCompare(b.section || '');
+      const secA = (a.section || '').localeCompare(b.section || '', undefined, { numeric: true });
       if (secA !== 0) return secA;
-      return String(a.user_id).localeCompare(String(b.user_id));
+      const idCmp = String(a.user_id || '').localeCompare(String(b.user_id || ''), undefined, { numeric: true });
+      if (idCmp !== 0) return idCmp;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'ar');
     });
 
     let sheetName = String(sub.name || 'مادة').replace(/[:\\/?*[\]]/g, '').slice(0, 28);
