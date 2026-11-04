@@ -16,17 +16,59 @@
 import { createRequire } from 'module';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Resolve node_modules: works whether cwd is repo root OR frontend/
+const possibleNodeModulesPaths = [
+  path.resolve(__dirname, '../frontend/node_modules'),  // script at scripts/, cwd = repo root
+  path.resolve(__dirname, '../node_modules'),            // cwd = frontend/, script at ../scripts/
+  path.resolve(process.cwd(), 'node_modules'),           // cwd = frontend/
+  path.resolve(process.cwd(), 'frontend/node_modules'), // cwd = repo root
+];
 
 const require = createRequire(import.meta.url);
 let createClient;
 let ExcelJS;
 
-try {
-  createClient = require('../frontend/node_modules/@supabase/supabase-js').createClient;
-  ExcelJS = require('../frontend/node_modules/exceljs');
-} catch (e) {
-  createClient = require('@supabase/supabase-js').createClient;
-  ExcelJS = require('exceljs');
+function tryRequire(mod, nmPath) {
+  try {
+    const resolved = path.join(nmPath, mod);
+    return require(resolved);
+  } catch (e) {
+    return null;
+  }
+}
+
+let loaded = false;
+for (const nmPath of possibleNodeModulesPaths) {
+  if (fs.existsSync(path.join(nmPath, '@supabase/supabase-js'))) {
+    console.log(`[INIT] Found node_modules at: ${nmPath}`);
+    const sb = tryRequire('@supabase/supabase-js', nmPath);
+    const xl = tryRequire('exceljs', nmPath);
+    if (sb && xl) {
+      createClient = sb.createClient;
+      ExcelJS = xl;
+      loaded = true;
+      break;
+    }
+  }
+}
+
+if (!loaded) {
+  // Last resort: rely on NODE_PATH or globally installed packages
+  try {
+    createClient = require('@supabase/supabase-js').createClient;
+    ExcelJS = require('exceljs');
+    loaded = true;
+    console.log('[INIT] Loaded packages via NODE_PATH / global resolution.');
+  } catch (e) {
+    console.error('[FATAL] Cannot find @supabase/supabase-js or exceljs. Tried paths:', possibleNodeModulesPaths);
+    console.error('Make sure to run "npm ci" inside the frontend/ directory before running this script.');
+    process.exit(1);
+  }
 }
 
 // Environment Configuration (with safe defaults from frontend/.env if present)
