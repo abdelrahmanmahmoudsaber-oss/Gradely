@@ -16,13 +16,16 @@ export default function ActiveSessionsModal({ user, onLogout, onClose }) {
     setLoading(true);
     try {
       const dev = getDeviceDetails();
-      // 1. Register or update this device's heartbeat
+      const loginToken = user?.session_token || localStorage.getItem('gradely_session_token') || null;
+
+      // 1. Register or update this device's heartbeat with full authentication
       try {
         await supabase.rpc('register_active_session', {
           p_user_id: user.user_id,
           p_session_token: currentDeviceToken,
           p_device_name: dev.name,
-          p_device_type: dev.type
+          p_device_type: dev.type,
+          p_auth_token: loginToken
         });
       } catch (e) {}
 
