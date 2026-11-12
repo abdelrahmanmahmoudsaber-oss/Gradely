@@ -33,6 +33,7 @@ jobs:
 
       - name: Run Cloud Backup Engine
         env:
+          NODE_PATH: ${{ github.workspace }}/frontend/node_modules
           VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://bbdyexsaqnlremprfmph.supabase.co' }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || 'sb_publishable_7lextLm1cEOuRlz4XMiV9w_F01aZaho' }}
           BACKUP_CRON_SECRET: ${{ secrets.BACKUP_CRON_SECRET || 'gradely_backup_cron_sec_7f9a2b8e4c1d6e5a' }}
