@@ -64,6 +64,18 @@ export default function GradesTab({ user }) {
   const [notifyAutoMakeVisible, setNotifyAutoMakeVisible] = useState(true);
   const [sendingNotification, setSendingNotification] = useState(false);
 
+  // Helper to reliably retrieve current session token from all possible storage locations
+  const getSessionToken = () => {
+    let token = localStorage.getItem('gradely_session_token') || user?.session_token || null;
+    if (!token) {
+      try {
+        const adminData = JSON.parse(localStorage.getItem('gradely_admin_session') || '{}');
+        if (adminData?.session_token) token = adminData.session_token;
+      } catch (_) {}
+    }
+    return token;
+  };
+
   const normalizeYear = (yr) => {
     if (!yr) return '1';
     return yr.toString()
@@ -329,7 +341,7 @@ export default function GradesTab({ user }) {
       return;
     }
 
-    const sessionToken = localStorage.getItem('gradely_session_token') || user?.session_token || null;
+    const sessionToken = getSessionToken();
     let records = null;
 
     // 1. Try secure RPC get_subject_grades first (bypasses RLS issues for legacy TAs like Ashraf)
@@ -518,7 +530,7 @@ export default function GradesTab({ user }) {
     if (saveTimeout) clearTimeout(saveTimeout);
     setAutoSaveStatus('⏳ جاري الحفظ...');
     const t = setTimeout(async () => {
-      const sessionToken = localStorage.getItem('gradely_session_token') || user?.session_token || null;
+      const sessionToken = getSessionToken();
       const recordToSave = {
         student_id: String(studentId).trim(),
         subject_id: selectedSubject,
@@ -569,7 +581,7 @@ export default function GradesTab({ user }) {
     setMessage('');
 
     try {
-      const sessionToken = localStorage.getItem('gradely_session_token') || user?.session_token || null;
+      const sessionToken = getSessionToken();
       const currentActiveCols = getActiveCustomColumns();
       const targetStudents = enrolledStudents.length > 0 ? enrolledStudents : displayedEnrolledStudents;
       
@@ -602,6 +614,7 @@ export default function GradesTab({ user }) {
 
       if (rowsToUpsert.length > 0) {
         let saved = false;
+        let rpcError = null;
         try {
           const { error: rpcErr } = await supabase.rpc('save_bulk_grades', {
             p_records: rowsToUpsert,
@@ -610,9 +623,11 @@ export default function GradesTab({ user }) {
           if (!rpcErr) {
             saved = true;
           } else {
+            rpcError = rpcErr;
             console.warn('save_bulk_grades RPC notice in saveGrades:', rpcErr);
           }
         } catch (rpcEx) {
+          rpcError = rpcEx;
           console.warn('save_bulk_grades RPC exception in saveGrades:', rpcEx);
         }
 
@@ -621,9 +636,12 @@ export default function GradesTab({ user }) {
             .from('grades')
             .upsert(rowsToUpsert, { onConflict: 'student_id,subject_id' });
 
-          if (upsertErr) {
+          if (!upsertErr) {
+            saved = true;
+          } else {
             console.error('Direct upsert fallback error in saveGrades:', upsertErr);
-            throw upsertErr;
+            const finalErrMsg = rpcError?.message || upsertErr?.message || 'يرجى المحاولة مجدداً';
+            throw new Error(finalErrMsg);
           }
         }
       }
@@ -733,7 +751,7 @@ export default function GradesTab({ user }) {
       setResettingCol(true);
       const newGrades = { ...grades };
       const currentActiveCols = getActiveCustomColumns();
-      const sessionToken = localStorage.getItem('gradely_session_token') || user?.session_token || null;
+      const sessionToken = getSessionToken();
 
       // Update all enrolled students for this subject to 0 in target column
       enrolledStudents.forEach(stu => {
@@ -771,16 +789,31 @@ export default function GradesTab({ user }) {
 
       // Save via RPC with fallback
       let saved = false;
+      let rpcError = null;
       try {
         const { error: rpcErr } = await supabase.rpc('save_bulk_grades', {
           p_records: rowsToUpsert,
           p_session_token: sessionToken
         });
-        if (!rpcErr) saved = true;
-      } catch (_) {}
+        if (!rpcErr) {
+          saved = true;
+        } else {
+          rpcError = rpcErr;
+          console.warn('save_bulk_grades RPC notice in handleResetColumn:', rpcErr);
+        }
+      } catch (rpcEx) {
+        rpcError = rpcEx;
+        console.warn('save_bulk_grades RPC exception in handleResetColumn:', rpcEx);
+      }
 
       if (!saved) {
-        await supabase.from('grades').upsert(rowsToUpsert, { onConflict: 'student_id,subject_id' });
+        const { error: upsertErr } = await supabase.from('grades').upsert(rowsToUpsert, { onConflict: 'student_id,subject_id' });
+        if (!upsertErr) {
+          saved = true;
+        } else {
+          const finalErrMsg = rpcError?.message || upsertErr?.message || 'يرجى المحاولة مجدداً';
+          throw new Error(finalErrMsg);
+        }
       }
 
       setGrades(newGrades);
@@ -904,15 +937,18 @@ export default function GradesTab({ user }) {
       setConfirmingImport(true);
       const newGrades = { ...grades };
       const currentActiveCols = getActiveCustomColumns();
-      const sessionToken = localStorage.getItem('gradely_session_token') || user?.session_token || null;
+      const sessionToken = getSessionToken();
 
       const isQuiz1Selected = !!selectedImportCols['quiz_1'];
       const isQuiz2Selected = !!selectedImportCols['quiz_2'];
       const isProjectSelected = !!selectedImportCols['project'];
       const isAttendanceSelected = !!selectedImportCols['attendance_score'];
 
+      const importedStudentIds = new Set();
+
       importPreviewData.matchedRows.forEach(r => {
         const id = r._id;
+        importedStudentIds.add(String(id).trim());
         const currentStudent = newGrades[id] || {};
         const q1 = r['كويز 1'] ?? r['Quiz 1'] ?? r['quiz 1'] ?? r[getColumnLabel('showQuiz1', 'كويز 1')];
         const q2 = r['كويز 2'] ?? r['Quiz 2'] ?? r['quiz 2'] ?? r[getColumnLabel('showQuiz2', 'كويز 2')];
@@ -940,8 +976,11 @@ export default function GradesTab({ user }) {
         newGrades[id] = updatedStudent;
       });
 
-      // Prepare upsert rows for all enrolled students
-      const rowsToUpsert = enrolledStudents.map(stu => {
+      // Prepare upsert rows for matched/imported students (ultra-fast set-based payload)
+      const targetList = enrolledStudents.filter(stu => importedStudentIds.has(String(stu.user_id).trim()));
+      const fallbackList = targetList.length > 0 ? targetList : enrolledStudents;
+
+      const rowsToUpsert = fallbackList.map(stu => {
         const id = String(stu.user_id).trim();
         const g = newGrades[id] || {};
         const q1 = parseFloat(g.quiz_1) || 0;
@@ -968,8 +1007,9 @@ export default function GradesTab({ user }) {
         };
       }).filter(r => r.student_id && r.subject_id);
 
-      // Instant DB Persist via save_bulk_grades RPC
+      // Instant DB Persist via save_bulk_grades RPC (Set-Based)
       let saved = false;
+      let rpcError = null;
       try {
         const { error: rpcErr } = await supabase.rpc('save_bulk_grades', {
           p_records: rowsToUpsert,
@@ -978,23 +1018,28 @@ export default function GradesTab({ user }) {
         if (!rpcErr) {
           saved = true;
         } else {
+          rpcError = rpcErr;
           console.warn('save_bulk_grades RPC notice in confirmImportGrades:', rpcErr);
         }
       } catch (rpcEx) {
+        rpcError = rpcEx;
         console.warn('save_bulk_grades RPC exception in confirmImportGrades:', rpcEx);
       }
 
       if (!saved) {
         const { error: upsertErr } = await supabase.from('grades').upsert(rowsToUpsert, { onConflict: 'student_id,subject_id' });
-        if (upsertErr) {
+        if (!upsertErr) {
+          saved = true;
+        } else {
           console.error('Direct upsert fallback error in confirmImportGrades:', upsertErr);
-          throw upsertErr;
+          const finalErrMsg = rpcError?.message || upsertErr?.message || 'يرجى المحاولة مجدداً';
+          throw new Error(finalErrMsg);
         }
       }
 
       setGrades(newGrades);
       cacheManager.set('grades_' + selectedSubject, newGrades);
-      enrolledStudents.forEach(stu => {
+      fallbackList.forEach(stu => {
         cacheManager.invalidate('rep_' + stu.user_id);
         cacheManager.invalidate('student_data_' + stu.user_id);
       });
