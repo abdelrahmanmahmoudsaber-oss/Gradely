@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../supabaseClient';
 import { exportExcelFile, parseExcelFile, resolveStudentSubSection, sortStudentsStandard, normalizeSubjectNameForMatch } from '../../utils/excelHelper';
 import { cacheManager, isSuperUser } from '../../utils/dataCache';
-import { Download, Upload, Save, Users, Filter, BookOpen, AlertCircle, Plus, X, Check, Eye, EyeOff, Bell, Send } from 'lucide-react';
+import { Download, Upload, Save, Users, Filter, BookOpen, AlertCircle, Plus, X, Check, Eye, EyeOff, Bell, Send, Search, RotateCcw, AlertTriangle, FileSpreadsheet } from 'lucide-react';
 import { getSectionInstructorName as resolveSectionTA } from '../../utils/sectionHelper';
-import { getAdminBaseData } from '../../utils/adminDataHelper';
+import { getAdminBaseData, getBackupAttendanceAndGrades } from '../../utils/adminDataHelper';
 import { 
   parseGradeConfigs, 
   getSubjectVisibility, 
@@ -29,6 +29,19 @@ export default function GradesTab({ user }) {
   const [importing, setImporting] = useState(false);
   const [autoSaveStatus, setAutoSaveStatus] = useState('');
   const [saveTimeout, setSaveTimeout] = useState(null);
+
+  // Student Search filter state
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Reset / Zero-out Column modal state
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetTargetCol, setResetTargetCol] = useState('quiz_1');
+  const [resettingCol, setResettingCol] = useState(false);
+
+  // Excel Grade Import Preview & Validation modal state
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importPreviewData, setImportPreviewData] = useState(null);
+  const [confirmingImport, setConfirmingImport] = useState(false);
 
   // Grade visibility and max scores configuration state
   const [gradeConfigs, setGradeConfigs] = useState({
@@ -307,6 +320,7 @@ export default function GradesTab({ user }) {
   };
 
   const fetchGrades = async () => {
+    if (!selectedSubject) return;
     const cacheKey = 'grades_' + selectedSubject;
     const cached = cacheManager.get(cacheKey);
     if (cached) {
@@ -314,14 +328,46 @@ export default function GradesTab({ user }) {
       return;
     }
 
-    const { data } = await supabase
-      .from('grades')
-      .select('student_id, quiz_1, quiz_2, project, attendance_score, final_grade, custom_grades')
-      .eq('subject_id', selectedSubject);
+    const sessionToken = localStorage.getItem('gradely_session_token') || user?.session_token || null;
+    let records = null;
+
+    // 1. Try secure RPC get_subject_grades first (bypasses RLS issues for legacy TAs like Ashraf)
+    try {
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('get_subject_grades', {
+        p_subject_id: selectedSubject,
+        p_session_token: sessionToken
+      });
+      if (!rpcErr && Array.isArray(rpcData)) {
+        records = rpcData;
+      }
+    } catch (_) {}
+
+    // 2. Direct query fallback
+    if (!records) {
+      try {
+        const { data, error } = await supabase
+          .from('grades')
+          .select('student_id, quiz_1, quiz_2, project, attendance_score, final_grade, custom_grades')
+          .eq('subject_id', selectedSubject);
+        if (!error && Array.isArray(data)) {
+          records = data;
+        }
+      } catch (_) {}
+    }
+
+    // 3. Backup data fallback
+    if (!records) {
+      try {
+        const { grades: backupGrades } = await getBackupAttendanceAndGrades();
+        if (Array.isArray(backupGrades)) {
+          records = backupGrades.filter(g => g.subject_id === selectedSubject);
+        }
+      } catch (_) {}
+    }
 
     const grds = {};
-    if (data) {
-      data.forEach(g => {
+    if (records) {
+      records.forEach(g => {
         grds[g.student_id] = {
           quiz_1: g.quiz_1 || 0,
           quiz_2: g.quiz_2 || 0,
@@ -392,6 +438,17 @@ export default function GradesTab({ user }) {
   // Strictly sort according to canonical standard (Section -> Academic ID numerically -> Name)
   const displayedEnrolledStudents = sortStudentsStandard(rawDisplayedStudents, selectedSubject, subjects);
 
+  // Filter students based on quick search query (by student name or academic ID)
+  const filteredStudents = useMemo(() => {
+    if (!searchQuery.trim()) return displayedEnrolledStudents;
+    const q = searchQuery.trim().toLowerCase();
+    return displayedEnrolledStudents.filter(stu => {
+      const nameMatch = stu.name && stu.name.toLowerCase().includes(q);
+      const idMatch = stu.user_id && stu.user_id.toLowerCase().includes(q);
+      return nameMatch || idMatch;
+    });
+  }, [displayedEnrolledStudents, searchQuery]);
+
   const getSectionInstructorName = (subId, sec) => {
     return resolveSectionTA(subId, sec, allAdmins, subjects);
   };
@@ -456,11 +513,12 @@ export default function GradesTab({ user }) {
       totalScore += v;
     });
 
-    // Debounced Auto-Save
+    // Debounced Auto-Save with atomic RPC save_bulk_grades for legacy TAs & Admins
     if (saveTimeout) clearTimeout(saveTimeout);
     setAutoSaveStatus('جاري الحفظ...');
     const t = setTimeout(async () => {
-      const { error } = await supabase.from('grades').upsert({
+      const sessionToken = localStorage.getItem('gradely_session_token') || user?.session_token || null;
+      const recordToSave = {
         student_id: studentId,
         subject_id: selectedSubject,
         quiz_1: updatedStudentGrades.quiz_1 || 0,
@@ -469,11 +527,35 @@ export default function GradesTab({ user }) {
         attendance_score: updatedStudentGrades.attendance_score || 0,
         custom_grades: customObj,
         final_grade: totalScore
-      }, { onConflict: 'student_id,subject_id' });
+      };
 
-      if (!error) {
+      let saveSuccess = false;
+      try {
+        const { error: rpcErr } = await supabase.rpc('save_bulk_grades', {
+          p_records: [recordToSave],
+          p_session_token: sessionToken
+        });
+        if (!rpcErr) saveSuccess = true;
+      } catch (_) {}
+
+      // Direct upsert fallback
+      if (!saveSuccess) {
+        const { error } = await supabase.from('grades').upsert(recordToSave, { onConflict: 'student_id,subject_id' });
+        if (!error) saveSuccess = true;
+      }
+
+      if (saveSuccess) {
+        cacheManager.set('grades_' + selectedSubject, {
+          ...grades,
+          [studentId]: updatedStudentGrades
+        });
+        cacheManager.invalidate('rep_' + studentId);
+        cacheManager.invalidate('student_data_' + studentId);
         setAutoSaveStatus('✅ تم الحفظ تلقائياً');
-        setTimeout(() => setAutoSaveStatus(''), 2000);
+        setTimeout(() => setAutoSaveStatus(''), 2500);
+      } else {
+        setAutoSaveStatus('❌ تعذر الحفظ التلقائي');
+        setTimeout(() => setAutoSaveStatus(''), 3000);
       }
     }, 600);
     setSaveTimeout(t);
@@ -485,6 +567,7 @@ export default function GradesTab({ user }) {
     setMessage('');
 
     try {
+      const sessionToken = localStorage.getItem('gradely_session_token') || user?.session_token || null;
       const currentActiveCols = getActiveCustomColumns();
       const rowsToUpsert = Object.keys(grades).map(studentId => {
         const g = grades[studentId] || {};
@@ -509,11 +592,22 @@ export default function GradesTab({ user }) {
       });
 
       if (rowsToUpsert.length > 0) {
-        const { error } = await supabase
-          .from('grades')
-          .upsert(rowsToUpsert, { onConflict: 'student_id,subject_id' });
+        let saved = false;
+        try {
+          const { error: rpcErr } = await supabase.rpc('save_bulk_grades', {
+            p_records: rowsToUpsert,
+            p_session_token: sessionToken
+          });
+          if (!rpcErr) saved = true;
+        } catch (_) {}
 
-        if (error) throw error;
+        if (!saved) {
+          const { error } = await supabase
+            .from('grades')
+            .upsert(rowsToUpsert, { onConflict: 'student_id,subject_id' });
+
+          if (error) throw error;
+        }
       }
 
       cacheManager.set('grades_' + selectedSubject, grades);
@@ -614,56 +708,261 @@ export default function GradesTab({ user }) {
     await exportExcelFile(exportData, 'Grades_' + currentSub.name + (selectedSection !== 'all' ? '_' + selectedSection : '') + '.xlsx');
   };
 
-  const handleImport = async (e) => {
+  // Reset / Zero-out specific grade column for all students in the selected subject
+  const handleResetColumn = async () => {
+    if (!selectedSubject || !resetTargetCol || !currentSub) return;
+    try {
+      setResettingCol(true);
+      const newGrades = { ...grades };
+      const currentActiveCols = getActiveCustomColumns();
+      const sessionToken = localStorage.getItem('gradely_session_token') || user?.session_token || null;
+
+      // Update all enrolled students for this subject to 0 in target column
+      enrolledStudents.forEach(stu => {
+        const id = stu.user_id;
+        const currentStudent = newGrades[id] || {};
+        newGrades[id] = {
+          ...currentStudent,
+          [resetTargetCol]: 0
+        };
+      });
+
+      // Prepare upsert rows
+      const rowsToUpsert = enrolledStudents.map(stu => {
+        const id = stu.user_id;
+        const g = newGrades[id] || {};
+        let totalScore = (g.quiz_1 || 0) + (g.quiz_2 || 0) + (g.project || 0) + (g.attendance_score || 0);
+        const customObj = {};
+        currentActiveCols.forEach(col => {
+          const v = g[col.id] || 0;
+          customObj[col.id] = v;
+          totalScore += v;
+        });
+
+        return {
+          student_id: id,
+          subject_id: selectedSubject,
+          quiz_1: g.quiz_1 || 0,
+          quiz_2: g.quiz_2 || 0,
+          project: g.project || 0,
+          attendance_score: g.attendance_score || 0,
+          custom_grades: customObj,
+          final_grade: totalScore
+        };
+      });
+
+      // Save via RPC with fallback
+      let saved = false;
+      try {
+        const { error: rpcErr } = await supabase.rpc('save_bulk_grades', {
+          p_records: rowsToUpsert,
+          p_session_token: sessionToken
+        });
+        if (!rpcErr) saved = true;
+      } catch (_) {}
+
+      if (!saved) {
+        await supabase.from('grades').upsert(rowsToUpsert, { onConflict: 'student_id,subject_id' });
+      }
+
+      setGrades(newGrades);
+      cacheManager.set('grades_' + selectedSubject, newGrades);
+      enrolledStudents.forEach(stu => {
+        cacheManager.invalidate('rep_' + stu.user_id);
+        cacheManager.invalidate('student_data_' + stu.user_id);
+      });
+
+      const targetLabel = resetTargetCol === 'quiz_1' ? getColumnLabel('showQuiz1', 'كويز 1') :
+                          resetTargetCol === 'quiz_2' ? getColumnLabel('showQuiz2', 'كويز 2') :
+                          resetTargetCol === 'project' ? getColumnLabel('showProject', 'المشروع') :
+                          resetTargetCol === 'attendance_score' ? getColumnLabel('showAttendanceScore', 'درجة الحضور') :
+                          (currentActiveCols.find(c => c.id === resetTargetCol)?.label || resetTargetCol);
+
+      setShowResetModal(false);
+      setMessage(`✅ تم تصفير درجات (${targetLabel}) لجميع طلاب مادة (${currentSub.name}) بنجاح!`);
+      setTimeout(() => setMessage(''), 4500);
+    } catch (err) {
+      console.error('Reset column error:', err);
+      setMessage('❌ حدث خطأ أثناء تصفير درجات الخانة');
+    } finally {
+      setResettingCol(false);
+    }
+  };
+
+  // Step 1: When user selects an Excel file, parse and analyze it without applying immediately
+  const handleSelectExcelFile = async (e) => {
     const file = e.target.files[0];
-    if (!file || !selectedSubject) return;
+    if (!file || !selectedSubject || !currentSub) return;
 
     setImporting(true);
     setMessage('');
     try {
       const rows = await parseExcelFile(file);
-      const newGrades = { ...grades };
+      if (!Array.isArray(rows) || rows.length === 0) {
+        throw new Error('الملف فارغ أو لا يحتوي على صفوف بيانات صالحة.');
+      }
+
+      const enrolledMap = new Map();
+      enrolledStudents.forEach(s => {
+        if (s.user_id) enrolledMap.set(String(s.user_id).trim(), s);
+      });
+
       const currentActiveCols = getActiveCustomColumns();
+
+      // Detect grade columns present in the Excel file
+      const firstRow = rows[0] || {};
+      const detectedCols = [];
+
+      const checkColInRow = (row, ...keys) => keys.some(k => k && row[k] !== undefined);
+
+      if (rows.some(r => checkColInRow(r, 'كويز 1', 'Quiz 1', 'quiz 1', getColumnLabel('showQuiz1', 'كويز 1')))) {
+        detectedCols.push({ id: 'quiz_1', label: getColumnLabel('showQuiz1', 'كويز 1') });
+      }
+      if (rows.some(r => checkColInRow(r, 'كويز 2', 'Quiz 2', 'quiz 2', getColumnLabel('showQuiz2', 'كويز 2')))) {
+        detectedCols.push({ id: 'quiz_2', label: getColumnLabel('showQuiz2', 'كويز 2') });
+      }
+      if (rows.some(r => checkColInRow(r, 'المشروع', 'Project', 'project', getColumnLabel('showProject', 'المشروع')))) {
+        detectedCols.push({ id: 'project', label: getColumnLabel('showProject', 'المشروع') });
+      }
+      if (rows.some(r => checkColInRow(r, 'درجة الحضور', 'الحضور', 'Attendance', 'attendance', getColumnLabel('showAttendanceScore', 'درجة الحضور')))) {
+        detectedCols.push({ id: 'attendance_score', label: getColumnLabel('showAttendanceScore', 'درجة الحضور') });
+      }
+
+      currentActiveCols.forEach(col => {
+        if (rows.some(r => checkColInRow(r, col.label, col.id))) {
+          detectedCols.push({ id: col.id, label: col.label });
+        }
+      });
+
+      const matchedRows = [];
+      const unmatchedRows = [];
 
       rows.forEach(r => {
         const id = (r['ID'] || r['الرقم الأكاديمي'] || r['الكود'])?.toString().trim();
         if (id) {
-          const currentStudent = newGrades[id] || {};
-          const q1 = r['كويز 1'] ?? r['Quiz 1'] ?? r[getColumnLabel('showQuiz1', 'كويز 1')];
-          const q2 = r['كويز 2'] ?? r['Quiz 2'] ?? r[getColumnLabel('showQuiz2', 'كويز 2')];
-          const prj = r['المشروع'] ?? r['Project'] ?? r[getColumnLabel('showProject', 'المشروع')];
-          const att = r['درجة الحضور'] ?? r['الحضور'] ?? r['Attendance'] ?? r[getColumnLabel('showAttendanceScore', 'درجة الحضور')];
-
-          const updatedStudent = {
-            ...currentStudent,
-            quiz_1: q1 !== undefined ? (parseFloat(q1) || 0) : (currentStudent.quiz_1 || 0),
-            quiz_2: q2 !== undefined ? (parseFloat(q2) || 0) : (currentStudent.quiz_2 || 0),
-            project: prj !== undefined ? (parseFloat(prj) || 0) : (currentStudent.project || 0),
-            attendance_score: att !== undefined ? (parseFloat(att) || 0) : (currentStudent.attendance_score || 0)
-          };
-
-          // Parse any custom column values from Excel
-          currentActiveCols.forEach(col => {
-            const cVal = r[col.label] ?? r[col.id];
-            if (cVal !== undefined && cVal !== null && cVal !== '') {
-              updatedStudent[col.id] = parseFloat(cVal) || 0;
-            }
-          });
-
-          newGrades[id] = updatedStudent;
+          if (enrolledMap.has(id)) {
+            matchedRows.push({ ...r, _id: id, _student: enrolledMap.get(id) });
+          } else {
+            unmatchedRows.push({
+              id,
+              name: (r['Name'] || r['الاسم'] || r['اسم الطالب'] || '').toString().trim()
+            });
+          }
         }
       });
 
+      setImportPreviewData({
+        fileName: file.name,
+        subject: currentSub,
+        totalRows: rows.length,
+        matchedCount: matchedRows.length,
+        matchedRows,
+        unmatchedRows,
+        detectedCols,
+        samplePreview: matchedRows.slice(0, 5)
+      });
+      setShowImportModal(true);
+    } catch (err) {
+      console.error('Parse Excel import error:', err);
+      setMessage(`❌ ${err.message || 'فشل في قراءة ملف الإكسيل'}`);
+      setTimeout(() => setMessage(''), 5000);
+    } finally {
+      setImporting(false);
+      e.target.value = '';
+    }
+  };
+
+  // Step 2: Confirm import and strictly apply ONLY to selectedSubject & save immediately
+  const confirmImportGrades = async () => {
+    if (!importPreviewData || !selectedSubject || !currentSub) return;
+
+    try {
+      setConfirmingImport(true);
+      const newGrades = { ...grades };
+      const currentActiveCols = getActiveCustomColumns();
+      const sessionToken = localStorage.getItem('gradely_session_token') || user?.session_token || null;
+
+      importPreviewData.matchedRows.forEach(r => {
+        const id = r._id;
+        const currentStudent = newGrades[id] || {};
+        const q1 = r['كويز 1'] ?? r['Quiz 1'] ?? r['quiz 1'] ?? r[getColumnLabel('showQuiz1', 'كويز 1')];
+        const q2 = r['كويز 2'] ?? r['Quiz 2'] ?? r['quiz 2'] ?? r[getColumnLabel('showQuiz2', 'كويز 2')];
+        const prj = r['المشروع'] ?? r['Project'] ?? r['project'] ?? r[getColumnLabel('showProject', 'المشروع')];
+        const att = r['درجة الحضور'] ?? r['الحضور'] ?? r['Attendance'] ?? r['attendance'] ?? r[getColumnLabel('showAttendanceScore', 'درجة الحضور')];
+
+        const updatedStudent = {
+          ...currentStudent,
+          quiz_1: q1 !== undefined && q1 !== '' ? (parseFloat(q1) || 0) : (currentStudent.quiz_1 || 0),
+          quiz_2: q2 !== undefined && q2 !== '' ? (parseFloat(q2) || 0) : (currentStudent.quiz_2 || 0),
+          project: prj !== undefined && prj !== '' ? (parseFloat(prj) || 0) : (currentStudent.project || 0),
+          attendance_score: att !== undefined && att !== '' ? (parseFloat(att) || 0) : (currentStudent.attendance_score || 0)
+        };
+
+        // Custom columns values
+        currentActiveCols.forEach(col => {
+          const cVal = r[col.label] ?? r[col.id];
+          if (cVal !== undefined && cVal !== null && cVal !== '') {
+            updatedStudent[col.id] = parseFloat(cVal) || 0;
+          }
+        });
+
+        newGrades[id] = updatedStudent;
+      });
+
+      // Prepare upsert rows for all enrolled students
+      const rowsToUpsert = enrolledStudents.map(stu => {
+        const id = stu.user_id;
+        const g = newGrades[id] || {};
+        let totalScore = (g.quiz_1 || 0) + (g.quiz_2 || 0) + (g.project || 0) + (g.attendance_score || 0);
+        const customObj = {};
+        currentActiveCols.forEach(col => {
+          const v = g[col.id] || 0;
+          customObj[col.id] = v;
+          totalScore += v;
+        });
+
+        return {
+          student_id: id,
+          subject_id: selectedSubject,
+          quiz_1: g.quiz_1 || 0,
+          quiz_2: g.quiz_2 || 0,
+          project: g.project || 0,
+          attendance_score: g.attendance_score || 0,
+          custom_grades: customObj,
+          final_grade: totalScore
+        };
+      });
+
+      // Instant DB Persist via save_bulk_grades RPC
+      let saved = false;
+      try {
+        const { error: rpcErr } = await supabase.rpc('save_bulk_grades', {
+          p_records: rowsToUpsert,
+          p_session_token: sessionToken
+        });
+        if (!rpcErr) saved = true;
+      } catch (_) {}
+
+      if (!saved) {
+        await supabase.from('grades').upsert(rowsToUpsert, { onConflict: 'student_id,subject_id' });
+      }
+
       setGrades(newGrades);
       cacheManager.set('grades_' + selectedSubject, newGrades);
-      setMessage('✅ تم استيراد وتحديث الدرجات من الملف، اضغط "حفظ التعديلات" لتثبيتها');
+      enrolledStudents.forEach(stu => {
+        cacheManager.invalidate('rep_' + stu.user_id);
+        cacheManager.invalidate('student_data_' + stu.user_id);
+      });
+
+      setShowImportModal(false);
+      setMessage(`✅ تم استيراد وحفظ درجات (${importPreviewData.matchedCount}) طالب بنجاح لمادة (${currentSub.name})!`);
+      setTimeout(() => setMessage(''), 5000);
     } catch (err) {
-      console.error(err);
-      setMessage('❌ فشل في قراءة ملف الدرجات');
+      console.error('Confirm import error:', err);
+      setMessage('❌ حدث خطأ أثناء تثبيت الدرجات المستوردة');
+    } finally {
+      setConfirmingImport(false);
     }
-    setImporting(false);
-    e.target.value = '';
-    setTimeout(() => setMessage(''), 5000);
   };
 
   const handleOpenNotifyModal = () => {
@@ -766,7 +1065,7 @@ export default function GradesTab({ user }) {
         <div>
           <h2 style={{margin:0,fontSize:'1.6rem',fontWeight:800}}>الدرجات التفصيلية</h2>
           <p className="text-muted" style={{margin:'5px 0 0 0',fontSize:'0.9rem'}}>
-            الطلاب المعروضون: <strong style={{color:'var(--text-main)'}}>{displayedEnrolledStudents.length} طالب</strong> {selectedSection !== 'all' ? '(سكشن ' + selectedSection + ')' : '(جميع السكاشن)'}
+            الطلاب المعروضون: <strong style={{color:'var(--text-main)'}}>{filteredStudents.length} طالب</strong> {searchQuery ? `(من أصل ${displayedEnrolledStudents.length} بعد البحث)` : (selectedSection !== 'all' ? '(سكشن ' + selectedSection + ')' : '(جميع السكاشن)')}
           </p>
         </div>
         
@@ -792,9 +1091,20 @@ export default function GradesTab({ user }) {
           </button>
 
           <label className="btn-secondary" style={{cursor:'pointer',display:'inline-flex',alignItems:'center',gap:'8px',padding:'8px 14px',fontSize:'0.9rem',color:'#f59e0b',borderColor:'rgba(245, 158, 11, 0.4)'}}>
-            <Upload size={17} /> {importing ? 'جاري الاستيراد...' : 'استيراد درجات من Excel'}
-            <input type="file" accept=".xlsx, .xls" onChange={handleImport} style={{display:'none'}} disabled={importing || !selectedSubject} />
+            <Upload size={17} /> {importing ? 'جاري الفحص...' : 'استيراد درجات من Excel'}
+            <input type="file" accept=".xlsx, .xls" onChange={handleSelectExcelFile} style={{display:'none'}} disabled={importing || !selectedSubject} />
           </label>
+
+          <button 
+            type="button"
+            className="btn-secondary" 
+            onClick={() => setShowResetModal(true)}
+            disabled={!selectedSubject || displayedEnrolledStudents.length === 0}
+            style={{color:'#ef4444',borderColor:'rgba(239, 68, 68, 0.4)',display:'inline-flex',alignItems:'center',gap:'8px',padding:'8px 14px',fontSize:'0.9rem',fontWeight:700}}
+            title="تصفير درجات خانة معينة (كويز أو مشروع أو غيرها) لجميع طلاب المادة دفعة واحدة"
+          >
+            <RotateCcw size={17} /> تصفير خانة درجات
+          </button>
 
           <button 
             className="btn-secondary" 
@@ -888,6 +1198,30 @@ export default function GradesTab({ user }) {
               );
             })}
           </select>
+        </div>
+
+        <div style={{flex:1.5,minWidth:'210px'}}>
+          <label style={{display:'block',marginBottom:'8px',fontSize:'0.9rem',color:'var(--primary-hover)',fontWeight:'bold'}}>4. بحث سريع عن طالب:</label>
+          <div style={{position:'relative'}}>
+            <input 
+              type="text" 
+              className="input-field" 
+              placeholder="ابحث بالاسم أو الـ ID..." 
+              value={searchQuery} 
+              onChange={e => setSearchQuery(e.target.value)} 
+              style={{width:'100%',paddingRight:'10px',paddingLeft: searchQuery ? '32px' : '10px'}} 
+            />
+            {searchQuery && (
+              <button 
+                type="button" 
+                onClick={() => setSearchQuery('')} 
+                style={{position:'absolute',left:'8px',top:'50%',transform:'translateY(-50%)',background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',padding:'2px'}}
+                title="مسح البحث"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1143,7 +1477,7 @@ export default function GradesTab({ user }) {
                 </tr>
               </thead>
             <tbody>
-              {displayedEnrolledStudents.map(stu => {
+              {filteredStudents.map(stu => {
                 const g = grades[stu.user_id] || { quiz_1: 0, quiz_2: 0, project: 0, attendance_score: 0 };
                 let total = (g.quiz_1 || 0) + (g.quiz_2 || 0) + (g.project || 0) + (g.attendance_score || 0);
                 activeCustomCols.forEach(col => { total += (g[col.id] || 0); });
@@ -1186,13 +1520,19 @@ export default function GradesTab({ user }) {
                   </tr>
                 );
               })}
-              {displayedEnrolledStudents.length === 0 && (
+              {displayedEnrolledStudents.length === 0 ? (
                 <tr>
                   <td colSpan={8 + activeCustomCols.length} style={{textAlign:'center',padding:'3rem',color:'var(--text-muted)'}}>
-                    لا يوجد طلاب يطابقون التصفية في هذه المادة
+                    لا يوجد طلاب مسجلون في هذه المادة أو هذا السكشن
                   </td>
                 </tr>
-              )}
+              ) : filteredStudents.length === 0 ? (
+                <tr>
+                  <td colSpan={8 + activeCustomCols.length} style={{textAlign:'center',padding:'3rem',color:'var(--text-muted)'}}>
+                    🔍 لا توجد نتائج تطابق بحثك عن &quot;{searchQuery}&quot;
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>
@@ -1381,6 +1721,257 @@ export default function GradesTab({ user }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: RESET / ZERO-OUT COLUMN */}
+      {showResetModal && (
+        <div 
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.8)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem'
+          }}
+          onClick={e => { if (e.target === e.currentTarget && !resettingCol) setShowResetModal(false); }}
+        >
+          <div className="panel fade-in" style={{maxWidth: '480px', width: '100%', border: '1px solid rgba(239, 68, 68, 0.5)', borderRadius: '16px'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',borderBottom:'1px solid var(--border)',paddingBottom:'0.8rem'}}>
+              <h3 style={{margin:0,fontSize:'1.15rem',display:'flex',alignItems:'center',gap:'8px',color:'#ef4444'}}>
+                <RotateCcw size={19} /> تصفير درجات خانة معينة
+              </h3>
+              <button onClick={() => !resettingCol && setShowResetModal(false)} style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{marginBottom:'1rem'}}>
+              <label style={{display:'block',marginBottom:'6px',fontSize:'0.85rem',fontWeight:700}}>
+                المادة المحددة:
+              </label>
+              <div style={{padding:'8px 12px',background:'var(--bg)',borderRadius:'8px',fontSize:'0.92rem',fontWeight:800,color:'var(--primary-hover)'}}>
+                {currentSub ? `${currentSub.name} (الفرقة ${normalizeYear(currentSub.year_level)})` : 'يرجى اختيار مادة'}
+              </div>
+            </div>
+
+            <div style={{marginBottom:'1.2rem'}}>
+              <label style={{display:'block',marginBottom:'6px',fontSize:'0.85rem',fontWeight:700}}>
+                اختر الخانة المراد تصفير درجاتها (وضع 0 لجميع الطلاب):
+              </label>
+              <select 
+                className="input-field" 
+                value={resetTargetCol} 
+                onChange={e => setResetTargetCol(e.target.value)}
+                style={{width:'100%',padding:'9px 12px',fontWeight:700}}
+              >
+                <option value="quiz_1">{getColumnLabel('showQuiz1', 'كويز 1')}</option>
+                <option value="quiz_2">{getColumnLabel('showQuiz2', 'كويز 2')}</option>
+                <option value="project">{getColumnLabel('showProject', 'المشروع')}</option>
+                <option value="attendance_score">{getColumnLabel('showAttendanceScore', 'درجة الحضور')}</option>
+                {activeCustomCols.map(col => (
+                  <option key={col.id} value={col.id}>{col.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: '8px',
+              padding: '12px',
+              marginBottom: '1.5rem',
+              display: 'flex',
+              gap: '10px',
+              alignItems: 'flex-start'
+            }}>
+              <AlertTriangle size={20} color="#ef4444" style={{flexShrink:0,marginTop:'2px'}} />
+              <div style={{fontSize:'0.83rem',color:'var(--text-main)',lineHeight:1.6}}>
+                <strong>تنبيه هام:</strong> سيتم مسح الدرجة الحالية وتعيين <strong>(0)</strong> للخانة المحددة لجميع طلاب المادة البالغ عددهم <strong>({enrolledStudents.length} طالب)</strong>. هذه العملية مفيدة عند رصد كويز بالخطأ.
+              </div>
+            </div>
+
+            <div style={{display:'flex',justifyContent:'flex-end',gap:'10px'}}>
+              <button 
+                type="button" 
+                className="btn-secondary" 
+                onClick={() => setShowResetModal(false)}
+                disabled={resettingCol}
+              >
+                إلغاء
+              </button>
+              <button 
+                type="button" 
+                onClick={handleResetColumn}
+                disabled={resettingCol}
+                style={{
+                  background: '#dc2626',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '9px 18px',
+                  fontWeight: 800,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
+                <RotateCcw size={16} /> {resettingCol ? 'جاري التصفير...' : 'تأكيد تصفير الخانة الآن'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EXCEL IMPORT PREVIEW & VALIDATION */}
+      {showImportModal && importPreviewData && (
+        <div 
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.8)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem'
+          }}
+          onClick={e => { if (e.target === e.currentTarget && !confirmingImport) setShowImportModal(false); }}
+        >
+          <div className="panel fade-in" style={{maxWidth: '620px', width: '100%', maxHeight: '90vh', overflowY: 'auto', border: '2px solid var(--primary)', borderRadius: '16px', padding: '1.5rem'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',borderBottom:'1px solid var(--border)',paddingBottom:'0.8rem'}}>
+              <h3 style={{margin:0,fontSize:'1.2rem',display:'flex',alignItems:'center',gap:'8px',color:'var(--primary-hover)',fontWeight:800}}>
+                <FileSpreadsheet size={22} /> معاينة وتأكيد استيراد درجات الإكسيل
+              </h3>
+              <button onClick={() => !confirmingImport && setShowImportModal(false)} style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}}>
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Target Subject Notice Banner */}
+            <div style={{background:'rgba(79, 70, 229, 0.1)',border:'1px solid rgba(79, 70, 229, 0.3)',borderRadius:'10px',padding:'12px 16px',marginBottom:'1.2rem'}}>
+              <div style={{fontSize:'0.8rem',color:'var(--text-muted)',fontWeight:700,marginBottom:'4px'}}>
+                المادة المستهدفة بالرصد (حصرية لهذه المادة فقط):
+              </div>
+              <div style={{fontSize:'1.1rem',fontWeight:900,color:'var(--primary-hover)'}}>
+                📚 {importPreviewData.subject.name} (الفرقة {normalizeYear(importPreviewData.subject.year_level)})
+              </div>
+              <div style={{fontSize:'0.8rem',color:'var(--text-muted)',marginTop:'4px'}}>
+                🔒 تأكيد أمني: سيتم تطبيق الدرجات حصراً على هذه المادة ولن تتأثر أو تختلط بأي مادة أخرى إطلاقاً.
+              </div>
+            </div>
+
+            {/* Stats Summary Grid */}
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))',gap:'10px',marginBottom:'1.2rem'}}>
+              <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'10px 14px',textAlign:'center'}}>
+                <div style={{fontSize:'0.78rem',color:'var(--text-muted)'}}>إجمالي الصفوف بالملف</div>
+                <div style={{fontSize:'1.3rem',fontWeight:800,color:'var(--text-main)',marginTop:'2px'}}>{importPreviewData.totalRows} صف</div>
+              </div>
+              <div style={{background:'rgba(16, 185, 129, 0.08)',border:'1px solid rgba(16, 185, 129, 0.25)',borderRadius:'8px',padding:'10px 14px',textAlign:'center'}}>
+                <div style={{fontSize:'0.78rem',color:'var(--success)'}}>طلاب مطابقون للمادة</div>
+                <div style={{fontSize:'1.3rem',fontWeight:800,color:'var(--success)',marginTop:'2px'}}>{importPreviewData.matchedCount} طالب</div>
+              </div>
+              <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'10px 14px',textAlign:'center'}}>
+                <div style={{fontSize:'0.78rem',color:'var(--text-muted)'}}>الأعمدة المكتشفة</div>
+                <div style={{fontSize:'1.1rem',fontWeight:800,color:'var(--primary-hover)',marginTop:'2px'}}>
+                  {importPreviewData.detectedCols.length > 0 ? importPreviewData.detectedCols.length + ' خانات' : 'لم تكتشف'}
+                </div>
+              </div>
+            </div>
+
+            {/* Detected Columns Pills */}
+            <div style={{marginBottom:'1.2rem'}}>
+              <div style={{fontSize:'0.82rem',fontWeight:700,color:'var(--text-muted)',marginBottom:'6px'}}>
+                الخانات التي سيتم رصد درجاتها من ملف الإكسيل:
+              </div>
+              <div style={{display:'flex',gap:'6px',flexWrap:'wrap'}}>
+                {importPreviewData.detectedCols.length > 0 ? (
+                  importPreviewData.detectedCols.map(col => (
+                    <span key={col.id} className="badge" style={{background:'rgba(79, 70, 229, 0.15)',color:'var(--primary-hover)',border:'1px solid rgba(79, 70, 229, 0.3)',padding:'5px 10px',fontSize:'0.82rem',fontWeight:700}}>
+                      ✓ {col.label}
+                    </span>
+                  ))
+                ) : (
+                  <span style={{color:'var(--danger)',fontSize:'0.85rem'}}>لم يتم العثور على أعمدة درجات مطابقة (كويز 1، كويز 2، المشروع، إلخ)</span>
+                )}
+              </div>
+            </div>
+
+            {/* Unmatched Students Warning (if any) */}
+            {importPreviewData.unmatchedRows.length > 0 && (
+              <div style={{background:'rgba(245, 158, 11, 0.1)',border:'1px solid rgba(245, 158, 11, 0.3)',borderRadius:'8px',padding:'12px',marginBottom:'1.2rem'}}>
+                <div style={{display:'flex',alignItems:'center',gap:'6px',color:'#f59e0b',fontWeight:800,fontSize:'0.88rem',marginBottom:'4px'}}>
+                  <AlertTriangle size={18} />
+                  <span>تنبيه: {importPreviewData.unmatchedRows.length} طالب في الملف غير مسجلين في هذه المادة</span>
+                </div>
+                <div style={{fontSize:'0.8rem',color:'var(--text-muted)',lineHeight:1.5}}>
+                  تم العثور على أرقام أكاديمية في الشيت لا تتبع مادة ({importPreviewData.subject.name}). سيتم <strong>تجاهلهم تلقائياً</strong> حرصاً على عدم المساس ببيانات المواد والفرق الأخرى.
+                  <div style={{marginTop:'4px',fontSize:'0.75rem',color:'var(--text-muted)'}}>
+                    منهم: {importPreviewData.unmatchedRows.slice(0, 4).map(u => u.id + (u.name ? ` (${u.name})` : '')).join('، ')} {importPreviewData.unmatchedRows.length > 4 ? '...' : ''}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Sample Preview Table */}
+            {importPreviewData.samplePreview.length > 0 && (
+              <div style={{marginBottom:'1.5rem'}}>
+                <div style={{fontSize:'0.82rem',fontWeight:700,color:'var(--text-muted)',marginBottom:'6px'}}>
+                  عينة من الطلاب والدرجات التي تم التعرف عليها:
+                </div>
+                <div style={{background:'var(--bg)',borderRadius:'8px',border:'1px solid var(--border)',overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:'0.82rem',textAlign:'right'}}>
+                    <thead>
+                      <tr style={{borderBottom:'1px solid var(--border)',background:'rgba(255,255,255,0.02)'}}>
+                        <th style={{padding:'8px 10px'}}>الرقم</th>
+                        <th style={{padding:'8px 10px'}}>اسم الطالب</th>
+                        {importPreviewData.detectedCols.slice(0, 3).map(c => (
+                          <th key={c.id} style={{padding:'8px 10px',textAlign:'center'}}>{c.label}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importPreviewData.samplePreview.map(r => (
+                        <tr key={r._id} style={{borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
+                          <td style={{padding:'8px 10px',fontWeight:700}}>{r._id}</td>
+                          <td style={{padding:'8px 10px'}}>{r._student?.name || r['Name'] || r['الاسم']}</td>
+                          {importPreviewData.detectedCols.slice(0, 3).map(c => {
+                            const val = r[c.label] ?? r[c.id] ?? r['كويز 1'] ?? r['Quiz 1'] ?? '-';
+                            return <td key={c.id} style={{padding:'8px 10px',textAlign:'center',fontWeight:700,color:'var(--primary-hover)'}}>{val}</td>;
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Modal Action Buttons */}
+            <div style={{display:'flex',justifyContent:'flex-end',gap:'10px',borderTop:'1px solid var(--border)',paddingTop:'1rem'}}>
+              <button 
+                type="button" 
+                className="btn-secondary" 
+                onClick={() => setShowImportModal(false)}
+                disabled={confirmingImport}
+              >
+                إلغاء
+              </button>
+              <button 
+                type="button" 
+                onClick={confirmImportGrades}
+                disabled={confirmingImport || importPreviewData.matchedCount === 0}
+                style={{
+                  background: 'var(--primary)',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '9px 20px',
+                  fontWeight: 800,
+                  fontSize: '0.92rem',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
+                <Check size={18} /> {confirmingImport ? 'جاري الرصد والحفظ السحابي...' : `تأكيد واستيراد (${importPreviewData.matchedCount} طالب) للمادة الآن`}
+              </button>
+            </div>
           </div>
         </div>
       )}

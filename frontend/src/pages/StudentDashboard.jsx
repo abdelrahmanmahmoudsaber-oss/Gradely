@@ -37,16 +37,97 @@ const LinkedInOfficialIcon = () => (
 
 const renderGradeDisplay = (val, maxScore) => {
   if (val === null || val === undefined || val === '') {
-    return <span style={{fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 600}}>لم ترصد</span>;
+    return <span style={{fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 600}}>لم ترصد بعد</span>;
   }
-  if (maxScore !== undefined && maxScore !== null && maxScore !== '') {
-    return (
-      <span>
-        {val} <span style={{fontSize: '0.88rem', color: 'var(--text-muted)', fontWeight: 500}}>/ {maxScore}</span>
-      </span>
-    );
-  }
-  return val;
+  const numVal = parseFloat(val);
+  const numMax = (maxScore !== undefined && maxScore !== null && maxScore !== '') ? parseFloat(maxScore) : null;
+  const hasMax = numMax !== null && !isNaN(numMax) && numMax > 0;
+
+  return (
+    <span style={{display: 'inline-flex', alignItems: 'baseline', gap: '6px', direction: 'rtl'}}>
+      <span style={{fontWeight: 900}}>{numVal}</span>
+      {hasMax && <span style={{fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 600}}>من {numMax}</span>}
+    </span>
+  );
+};
+
+// Sleek Grade Card for Student Dashboard with Arabic RTL clarity & progress bar
+function GradeScoreCard({ title, score, maxScore, accentColor = 'var(--primary-hover)' }) {
+  const isRecorded = score !== null && score !== undefined && score !== '';
+  const numScore = isRecorded ? parseFloat(score) : null;
+  const numMax = (maxScore !== undefined && maxScore !== null && maxScore !== '') ? parseFloat(maxScore) : null;
+  const hasMax = numMax !== null && !isNaN(numMax) && numMax > 0;
+  const percentage = (isRecorded && hasMax) ? Math.min(100, Math.max(0, Math.round((numScore / numMax) * 100))) : null;
+
+  return (
+    <div style={{
+      background: 'linear-gradient(145deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '12px',
+      padding: '1.1rem 1.2rem',
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'space-between',
+      position: 'relative',
+      overflow: 'hidden',
+      boxShadow: '0 4px 14px rgba(0,0,0,0.12)'
+    }}>
+      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.7rem'}}>
+        <span style={{fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-muted)'}}>
+          {title}
+        </span>
+        {percentage !== null && (
+          <span style={{
+            fontSize: '0.72rem',
+            fontWeight: 800,
+            padding: '2px 7px',
+            borderRadius: '6px',
+            background: percentage >= 85 ? 'rgba(16, 185, 129, 0.12)' : percentage >= 50 ? 'rgba(79, 70, 229, 0.15)' : 'rgba(239, 68, 68, 0.12)',
+            color: percentage >= 85 ? 'var(--success)' : percentage >= 50 ? 'var(--primary-hover)' : 'var(--danger)',
+            border: '1px solid ' + (percentage >= 85 ? 'rgba(16, 185, 129, 0.25)' : percentage >= 50 ? 'rgba(79, 70, 229, 0.3)' : 'rgba(239, 68, 68, 0.25)')
+          }}>
+            {percentage}%
+          </span>
+        )}
+      </div>
+
+      {isRecorded ? (
+        <div>
+          <div style={{display: 'flex', alignItems: 'baseline', gap: '8px', margin: '4px 0', direction: 'rtl'}}>
+            <span style={{fontSize: '1.9rem', fontWeight: 900, color: accentColor, lineHeight: 1}}>
+              {numScore}
+            </span>
+            {hasMax && (
+              <span style={{fontSize: '0.92rem', color: 'var(--text-muted)', fontWeight: 600}}>
+                من {numMax}
+              </span>
+            )}
+            {!hasMax && (
+              <span style={{fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500}}>
+                درجة
+              </span>
+            )}
+          </div>
+
+          {hasMax && (
+            <div style={{width: '100%', height: '5px', background: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden', marginTop: '8px'}}>
+              <div style={{
+                width: `${percentage}%`,
+                height: '100%',
+                background: percentage >= 85 ? 'var(--success)' : percentage >= 50 ? 'var(--primary)' : 'var(--danger)',
+                borderRadius: '3px',
+                transition: 'width 0.4s ease'
+              }} />
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{padding: '8px 0', color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600}}>
+          لم ترصد بعد
+        </div>
+      )}
+    </div>
+  );
 };
 
 export default function StudentDashboard({ user, onLogout }) {
@@ -1342,41 +1423,41 @@ export default function StudentDashboard({ user, onLogout }) {
                 
                 {hasAnyGradeVisible ? (
                   <>
-                    <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem', marginBottom: '1.5rem'}}>
+                    <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '1.5rem'}}>
                       {currentSubVis.showQuiz1 && (
-                        <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
-                          <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, 'showQuiz1', 'كويز 1')}</span>
-                          <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
-                            {renderGradeDisplay(currentGrades.quiz_1, currentSubMaxScores.quiz_1)}
-                          </h3>
-                        </div>
+                        <GradeScoreCard 
+                          title={getColLabel(currentSubject.id, 'showQuiz1', 'كويز 1')} 
+                          score={currentGrades.quiz_1} 
+                          maxScore={currentSubMaxScores.quiz_1}
+                          accentColor="var(--primary-hover)"
+                        />
                       )}
 
                       {currentSubVis.showQuiz2 && (
-                        <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
-                          <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, 'showQuiz2', 'كويز 2')}</span>
-                          <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
-                            {renderGradeDisplay(currentGrades.quiz_2, currentSubMaxScores.quiz_2)}
-                          </h3>
-                        </div>
+                        <GradeScoreCard 
+                          title={getColLabel(currentSubject.id, 'showQuiz2', 'كويز 2')} 
+                          score={currentGrades.quiz_2} 
+                          maxScore={currentSubMaxScores.quiz_2}
+                          accentColor="var(--primary-hover)"
+                        />
                       )}
 
                       {currentSubVis.showProject && (
-                        <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
-                          <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, 'showProject', 'المشروع')}</span>
-                          <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
-                            {renderGradeDisplay(currentGrades.project, currentSubMaxScores.project)}
-                          </h3>
-                        </div>
+                        <GradeScoreCard 
+                          title={getColLabel(currentSubject.id, 'showProject', 'المشروع')} 
+                          score={currentGrades.project} 
+                          maxScore={currentSubMaxScores.project}
+                          accentColor="var(--primary-hover)"
+                        />
                       )}
 
                       {currentSubVis.showAttendanceScore && (
-                        <div className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
-                          <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, 'showAttendanceScore', 'الحضور')}</span>
-                          <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--success)'}}>
-                            {renderGradeDisplay(currentGrades.attendance_score, currentSubMaxScores.attendance_score)}
-                          </h3>
-                        </div>
+                        <GradeScoreCard 
+                          title={getColLabel(currentSubject.id, 'showAttendanceScore', 'الحضور')} 
+                          score={currentGrades.attendance_score} 
+                          maxScore={currentSubMaxScores.attendance_score}
+                          accentColor="var(--success)"
+                        />
                       )}
 
                       {/* Custom Grade Columns (e.g. تاسك, كويز 3) */}
@@ -1398,30 +1479,46 @@ export default function StudentDashboard({ user, onLogout }) {
                         });
 
                         return Array.from(allColsMap.values()).map(col => (
-                          <div key={col.id} className="panel" style={{background: 'var(--bg)', border: '1px solid var(--border)', textAlign: 'center', padding: '1.2rem'}}>
-                            <span className="text-muted" style={{fontSize: '0.8rem'}}>{getColLabel(currentSubject.id, col.id, col.label)}</span>
-                            <h3 style={{margin: '6px 0 0 0', fontSize: '1.4rem', color: 'var(--primary-hover)'}}>
-                              {renderGradeDisplay(currentGrades[col.id], currentSubMaxScores[col.id])}
-                            </h3>
-                          </div>
+                          <GradeScoreCard 
+                            key={col.id}
+                            title={getColLabel(currentSubject.id, col.id, col.label)} 
+                            score={currentGrades[col.id]} 
+                            maxScore={currentSubMaxScores[col.id]}
+                            accentColor="var(--primary-hover)"
+                          />
                         ));
                       })()}
                     </div>
 
                     {currentSubVis.showTotal && (
-                      <div style={{background: 'linear-gradient(135deg, rgba(79, 70, 229, 0.15), rgba(99, 102, 241, 0.05))', border: '1px solid var(--primary)', borderRadius: '10px', padding: '1.2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.8rem'}}>
+                      <div style={{
+                        background: 'linear-gradient(135deg, rgba(79, 70, 229, 0.15), rgba(99, 102, 241, 0.05))',
+                        border: '1px solid var(--primary)',
+                        borderRadius: '12px',
+                        padding: '1.2rem 1.4rem',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '1rem',
+                        boxShadow: '0 4px 16px rgba(79, 70, 229, 0.12)'
+                      }}>
                         <div>
-                          <h3 style={{margin: '0 0 2px 0', fontSize: '1.1rem', color: 'var(--text-main)'}}>المجموع الكلي</h3>
-                          <p className="text-muted" style={{margin: 0, fontSize: '0.8rem'}}>مجموع الدرجات المرصودة والمعلنة حالياً</p>
+                          <h3 style={{margin: '0 0 4px 0', fontSize: '1.15rem', color: 'var(--text-main)', fontWeight: 800}}>المجموع الكلي</h3>
+                          <p className="text-muted" style={{margin: 0, fontSize: '0.82rem'}}>مجموع كافة الدرجات المرصودة والمعلنة حالياً في المادة</p>
                         </div>
-                        <div style={{fontSize: '1.8rem', fontWeight: 800, color: 'var(--primary-hover)'}}>
-                          {visibleTotal}
+                        <div style={{display: 'flex', alignItems: 'baseline', gap: '8px', direction: 'rtl'}}>
+                          <span style={{fontSize: '2rem', fontWeight: 900, color: 'var(--primary-hover)', lineHeight: 1}}>
+                            {visibleTotal}
+                          </span>
                           {visibleMaxTotal > 0 && (
-                            <span style={{fontSize: '1.1rem', color: 'var(--text-muted)', marginRight: '6px', fontWeight: 600}}>
-                              / {visibleMaxTotal}
+                            <span style={{fontSize: '1.1rem', color: 'var(--text-muted)', fontWeight: 700}}>
+                              من {visibleMaxTotal}
                             </span>
                           )}
-                          <span style={{fontSize: '0.95rem', color: 'var(--text-muted)', marginRight: '4px'}}>درجة</span>
+                          <span style={{fontSize: '0.95rem', color: 'var(--text-muted)', fontWeight: 600}}>
+                            درجة
+                          </span>
                         </div>
                       </div>
                     )}
