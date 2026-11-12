@@ -55,11 +55,49 @@ BEGIN
       USING errcode = '42501';
   END IF;
 
-  -- 3. Upsert records into public.grades
+  -- 3. Upsert records into public.grades (with strict NULLIF string sanitation)
   IF p_records IS NOT NULL THEN
     IF jsonb_typeof(p_records) = 'array' THEN
       FOR rec IN SELECT * FROM jsonb_array_elements(p_records)
       LOOP
+        IF NULLIF(TRIM(COALESCE(rec ->> 'student_id', '')), '') IS NOT NULL 
+           AND NULLIF(TRIM(COALESCE(rec ->> 'subject_id', '')), '') IS NOT NULL THEN
+          INSERT INTO public.grades (
+            student_id,
+            subject_id,
+            quiz_1,
+            quiz_2,
+            project,
+            attendance_score,
+            custom_grades,
+            final_grade,
+            updated_at
+          ) VALUES (
+            TRIM(rec ->> 'student_id'),
+            (TRIM(rec ->> 'subject_id'))::uuid,
+            COALESCE(NULLIF(TRIM(COALESCE(rec ->> 'quiz_1', '')), '')::numeric, 0),
+            COALESCE(NULLIF(TRIM(COALESCE(rec ->> 'quiz_2', '')), '')::numeric, 0),
+            COALESCE(NULLIF(TRIM(COALESCE(rec ->> 'project', '')), '')::numeric, 0),
+            COALESCE(NULLIF(TRIM(COALESCE(rec ->> 'attendance_score', '')), '')::numeric, 0),
+            CASE WHEN jsonb_typeof(rec -> 'custom_grades') = 'object' THEN rec -> 'custom_grades' ELSE '{}'::jsonb END,
+            COALESCE(NULLIF(TRIM(COALESCE(rec ->> 'final_grade', '')), '')::numeric, 0),
+            now()
+          )
+          ON CONFLICT (student_id, subject_id)
+          DO UPDATE SET
+            quiz_1           = EXCLUDED.quiz_1,
+            quiz_2           = EXCLUDED.quiz_2,
+            project          = EXCLUDED.project,
+            attendance_score = EXCLUDED.attendance_score,
+            custom_grades    = EXCLUDED.custom_grades,
+            final_grade      = EXCLUDED.final_grade,
+            updated_at       = now();
+          v_count := v_count + 1;
+        END IF;
+      END LOOP;
+    ELSIF jsonb_typeof(p_records) = 'object' THEN
+      IF NULLIF(TRIM(COALESCE(p_records ->> 'student_id', '')), '') IS NOT NULL 
+         AND NULLIF(TRIM(COALESCE(p_records ->> 'subject_id', '')), '') IS NOT NULL THEN
         INSERT INTO public.grades (
           student_id,
           subject_id,
@@ -71,14 +109,14 @@ BEGIN
           final_grade,
           updated_at
         ) VALUES (
-          rec ->> 'student_id',
-          (rec ->> 'subject_id')::uuid,
-          COALESCE((rec ->> 'quiz_1')::numeric, 0),
-          COALESCE((rec ->> 'quiz_2')::numeric, 0),
-          COALESCE((rec ->> 'project')::numeric, 0),
-          COALESCE((rec ->> 'attendance_score')::numeric, 0),
-          COALESCE(rec -> 'custom_grades', '{}'::jsonb),
-          COALESCE((rec ->> 'final_grade')::numeric, 0),
+          TRIM(p_records ->> 'student_id'),
+          (TRIM(p_records ->> 'subject_id'))::uuid,
+          COALESCE(NULLIF(TRIM(COALESCE(p_records ->> 'quiz_1', '')), '')::numeric, 0),
+          COALESCE(NULLIF(TRIM(COALESCE(p_records ->> 'quiz_2', '')), '')::numeric, 0),
+          COALESCE(NULLIF(TRIM(COALESCE(p_records ->> 'project', '')), '')::numeric, 0),
+          COALESCE(NULLIF(TRIM(COALESCE(p_records ->> 'attendance_score', '')), '')::numeric, 0),
+          CASE WHEN jsonb_typeof(p_records -> 'custom_grades') = 'object' THEN p_records -> 'custom_grades' ELSE '{}'::jsonb END,
+          COALESCE(NULLIF(TRIM(COALESCE(p_records ->> 'final_grade', '')), '')::numeric, 0),
           now()
         )
         ON CONFLICT (student_id, subject_id)
@@ -90,40 +128,8 @@ BEGIN
           custom_grades    = EXCLUDED.custom_grades,
           final_grade      = EXCLUDED.final_grade,
           updated_at       = now();
-        v_count := v_count + 1;
-      END LOOP;
-    ELSIF jsonb_typeof(p_records) = 'object' THEN
-      INSERT INTO public.grades (
-        student_id,
-        subject_id,
-        quiz_1,
-        quiz_2,
-        project,
-        attendance_score,
-        custom_grades,
-        final_grade,
-        updated_at
-      ) VALUES (
-        p_records ->> 'student_id',
-        (p_records ->> 'subject_id')::uuid,
-        COALESCE((p_records ->> 'quiz_1')::numeric, 0),
-        COALESCE((p_records ->> 'quiz_2')::numeric, 0),
-        COALESCE((p_records ->> 'project')::numeric, 0),
-        COALESCE((p_records ->> 'attendance_score')::numeric, 0),
-        COALESCE(p_records -> 'custom_grades', '{}'::jsonb),
-        COALESCE((p_records ->> 'final_grade')::numeric, 0),
-        now()
-      )
-      ON CONFLICT (student_id, subject_id)
-      DO UPDATE SET
-        quiz_1           = EXCLUDED.quiz_1,
-        quiz_2           = EXCLUDED.quiz_2,
-        project          = EXCLUDED.project,
-        attendance_score = EXCLUDED.attendance_score,
-        custom_grades    = EXCLUDED.custom_grades,
-        final_grade      = EXCLUDED.final_grade,
-        updated_at       = now();
-      v_count := 1;
+        v_count := 1;
+      END IF;
     END IF;
   END IF;
 
