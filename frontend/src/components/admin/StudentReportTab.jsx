@@ -4,7 +4,11 @@ import { cacheManager, isSuperUser } from '../../utils/dataCache';
 import { printStudentReportPDF } from '../../utils/pdfHelper';
 import { getSectionInstructorName as resolveSectionTA } from '../../utils/sectionHelper';
 import { getAdminBaseData, getBackupAttendanceAndGrades } from '../../utils/adminDataHelper';
-import { Search, Printer, Calendar, BookOpen, FileText, CheckCircle2, XCircle, X, ChevronDown, ChevronUp, Sliders, CheckSquare, Square, RefreshCw } from 'lucide-react';
+import { 
+  Search, Printer, Calendar, BookOpen, FileText, CheckCircle2, 
+  XCircle, X, ChevronDown, ChevronUp, ChevronRight, ChevronLeft, 
+  Users, UserCheck, RefreshCw 
+} from 'lucide-react';
 
 export default function StudentReportTab({ user }) {
   const [loading, setLoading] = useState(true);
@@ -18,6 +22,7 @@ export default function StudentReportTab({ user }) {
   const [selectedYearFilter, setSelectedYearFilter] = useState('all');
   const [selectedSectionFilter, setSelectedSectionFilter] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
+  const [mobilePickerOpen, setMobilePickerOpen] = useState(false);
 
   // PDF Export Modal State
   const [showPdfModal, setShowPdfModal] = useState(false);
@@ -70,7 +75,7 @@ export default function StudentReportTab({ user }) {
     return 'S1';
   };
 
-    const formatDisplayDate = (dateStr) => {
+  const formatDisplayDate = (dateStr) => {
     if (!dateStr) return '';
     try {
       const parts = dateStr.split('-');
@@ -167,6 +172,7 @@ export default function StudentReportTab({ user }) {
   };
 
   const handleSelectStudent = async (stu) => {
+    if (!stu) return;
     setSelectedStudent(stu);
 
     try {
@@ -215,6 +221,19 @@ export default function StudentReportTab({ user }) {
     return isEnrolledInSub || hasAssignedEntry;
   });
 
+  // Mobile quick switcher navigation index
+  const currentStudentIndex = filteredStudents.findIndex(s => s.user_id === selectedStudent?.user_id);
+  const handlePrevStudent = () => {
+    if (currentStudentIndex > 0) {
+      handleSelectStudent(filteredStudents[currentStudentIndex - 1]);
+    }
+  };
+  const handleNextStudent = () => {
+    if (currentStudentIndex >= 0 && currentStudentIndex < filteredStudents.length - 1) {
+      handleSelectStudent(filteredStudents[currentStudentIndex + 1]);
+    }
+  };
+
   const handleOpenPdfModal = () => {
     setPdfOptions({
       includeAttendanceDetails: true,
@@ -261,10 +280,10 @@ export default function StudentReportTab({ user }) {
       {/* Top Header */}
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.5rem',flexWrap:'wrap',gap:'1rem'}}>
         <div>
-          <h2 style={{margin:0,fontSize:'1.6rem',fontWeight:800}}>التقرير الشامل للطالب</h2>
-          <p className="text-muted" style={{margin:'5px 0 0 0'}}>استعراض وتصدير السجل الأكاديمي والغياب لكل طالب</p>
+          <h2 style={{margin:0,fontSize:'clamp(1.25rem, 4vw, 1.6rem)',fontWeight:800}}>التقرير الشامل للطالب</h2>
+          <p className="text-muted" style={{margin:'5px 0 0 0',fontSize:'0.9rem'}}>استعراض وتصدير السجل الأكاديمي والغياب لكل طالب</p>
         </div>
-        <div style={{display:'flex',gap:'10px',alignItems:'center'}}>
+        <div style={{display:'flex',gap:'10px',alignItems:'center',flexWrap:'wrap',width:'100%',maxWidth:'max-content'}}>
           <button 
             className="btn-secondary" 
             onClick={() => fetchInitialData(true)}
@@ -283,7 +302,7 @@ export default function StudentReportTab({ user }) {
                 borderColor:'rgba(16, 185, 129, 0.4)',
                 background:'rgba(16, 185, 129, 0.08)',
                 padding:'8px 18px',
-                fontSize:'0.95rem',
+                fontSize:'0.92rem',
                 fontWeight:700,
                 display:'flex',
                 alignItems:'center',
@@ -296,28 +315,177 @@ export default function StudentReportTab({ user }) {
         </div>
       </div>
 
-      {/* Main Two-Column Layout */}
-      <div style={{display:'grid',gridTemplateColumns:'1fr 340px',gap:'1.5rem',alignItems:'flex-start'}}>
+      {/* MOBILE COMPACT STUDENT SWITCHER & SEARCH ACCORDION (Visible on screens <= 960px) */}
+      <div className="panel student-report-mobile-selector" style={{padding:'12px 14px',marginBottom:'1.2rem',borderRadius:'12px',border:'1px solid rgba(79, 70, 229, 0.3)'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
+          <div style={{display:'flex',alignItems:'center',gap:'8px',flex:1,minWidth:'180px'}}>
+            <div style={{background:'rgba(79, 70, 229, 0.15)',color:'var(--primary-hover)',borderRadius:'8px',padding:'6px 10px',display:'flex',alignItems:'center',justifyContent:'center'}}>
+              <Users size={18} />
+            </div>
+            <div>
+              <div style={{fontSize:'0.72rem',color:'var(--text-muted)'}}>الطالب المحدد حالياً:</div>
+              <div style={{fontWeight:800,fontSize:'0.95rem',color:'var(--text-main)',lineHeight:'1.3'}}>
+                {selectedStudent ? selectedStudent.name : 'لم يتم اختيار طالب'}
+              </div>
+            </div>
+          </div>
+
+          <div style={{display:'flex',gap:'6px',alignItems:'center'}}>
+            <button 
+              type="button" 
+              onClick={handlePrevStudent} 
+              disabled={currentStudentIndex <= 0}
+              style={{
+                background:'var(--bg)',
+                border:'1px solid var(--border)',
+                color:'var(--text-main)',
+                borderRadius:'8px',
+                padding:'6px 9px',
+                cursor: currentStudentIndex <= 0 ? 'not-allowed' : 'pointer',
+                opacity: currentStudentIndex <= 0 ? 0.35 : 1,
+                display:'flex',
+                alignItems:'center'
+              }}
+              title="الطالب السابق"
+            >
+              <ChevronRight size={16} />
+            </button>
+            <button 
+              type="button" 
+              onClick={handleNextStudent} 
+              disabled={currentStudentIndex < 0 || currentStudentIndex >= filteredStudents.length - 1}
+              style={{
+                background:'var(--bg)',
+                border:'1px solid var(--border)',
+                color:'var(--text-main)',
+                borderRadius:'8px',
+                padding:'6px 9px',
+                cursor: (currentStudentIndex < 0 || currentStudentIndex >= filteredStudents.length - 1) ? 'not-allowed' : 'pointer',
+                opacity: (currentStudentIndex < 0 || currentStudentIndex >= filteredStudents.length - 1) ? 0.35 : 1,
+                display:'flex',
+                alignItems:'center'
+              }}
+              title="الطالب التالي"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <button 
+              type="button"
+              className="btn-primary"
+              onClick={() => setMobilePickerOpen(!mobilePickerOpen)}
+              style={{padding:'6px 12px',fontSize:'0.85rem',minHeight:'34px',display:'flex',alignItems:'center',gap:'4px'}}
+            >
+              {mobilePickerOpen ? <ChevronUp size={15} /> : <Search size={14} />}
+              <span>{mobilePickerOpen ? 'إغلاق القائمة' : 'تغيير الطالب'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Collapsible search and student list for mobile */}
+        {mobilePickerOpen && (
+          <div className="fade-in" style={{marginTop:'12px',paddingTop:'12px',borderTop:'1px solid var(--border)'}}>
+            {/* Search Input */}
+            <div style={{position:'relative',marginBottom:'8px'}}>
+              <Search size={16} style={{position:'absolute',right:'10px',top:'50%',transform:'translateY(-50%)',color:'var(--text-muted)'}} />
+              <input 
+                type="text" 
+                className="input-field" 
+                placeholder="بحث بالاسم أو الرقم الأكاديمي..." 
+                value={searchTerm} 
+                onChange={e=>setSearchTerm(e.target.value)} 
+                style={{paddingRight:'34px',fontSize:'0.85rem',minHeight:'38px'}} 
+              />
+            </div>
+
+            {/* Filters */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px',marginBottom:'10px'}}>
+              <select className="input-field" value={selectedYearFilter} onChange={e=>setSelectedYearFilter(e.target.value)} style={{padding:'6px 8px',fontSize:'0.82rem',minHeight:'38px'}}>
+                <option value="all">كل الفرق</option>
+                <option value="1">الفرقة 1</option>
+                <option value="2">الفرقة 2</option>
+                <option value="3">الفرقة 3</option>
+                <option value="4">الفرقة 4</option>
+              </select>
+              <select className="input-field" value={selectedSectionFilter} onChange={e=>setSelectedSectionFilter(e.target.value)} style={{padding:'6px 8px',fontSize:'0.82rem',minHeight:'38px'}}>
+                <option value="all">كل السكاشن</option>
+                <option value="S1">S1</option>
+                <option value="S2">S2</option>
+                <option value="S3">S3</option>
+                <option value="S4">S4</option>
+                <option value="S5">S5</option>
+                <option value="S6">S6</option>
+              </select>
+            </div>
+
+            {/* Compact Student Cards List */}
+            <div style={{maxHeight:'280px',overflowY:'auto',display:'flex',flexDirection:'column',gap:'6px',paddingLeft:'2px'}}>
+              {filteredStudents.map(s => {
+                const isSelected = selectedStudent?.user_id === s.user_id;
+                return (
+                  <div 
+                    key={s.id || s.user_id} 
+                    onClick={() => {
+                      handleSelectStudent(s, true);
+                      setMobilePickerOpen(false);
+                    }} 
+                    style={{
+                      padding:'8px 10px',
+                      borderRadius:'8px',
+                      cursor:'pointer',
+                      transition:'all 0.15s ease',
+                      background: isSelected ? 'rgba(79, 70, 229, 0.2)' : 'var(--bg)',
+                      border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border)',
+                      display:'flex',
+                      justifyContent:'space-between',
+                      alignItems:'center'
+                    }}
+                  >
+                    <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                      <span className="badge" style={{fontSize:'0.75rem',padding:'2px 6px'}}>
+                        {normalizeSection(s.section || 'S1')}
+                      </span>
+                      <div style={{fontWeight:700,fontSize:'0.88rem',color: isSelected ? 'var(--primary-hover)' : 'var(--text-main)',lineHeight:'1.3'}}>
+                        {s.name}
+                      </div>
+                    </div>
+                    <div style={{fontSize:'0.78rem',color:'var(--text-muted)',fontFamily:'monospace'}}>
+                      {s.user_id}
+                    </div>
+                  </div>
+                );
+              })}
+              {filteredStudents.length === 0 && (
+                <div style={{textAlign:'center',padding:'1.5rem',color:'var(--text-muted)',fontSize:'0.85rem'}}>
+                  لا يوجد طلاب يطابقون البحث
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Main Two-Column Layout (Responsive CSS Grid) */}
+      <div className="student-report-grid">
         
         {/* LEFT COLUMN: Student Details & Subject Cards */}
-        <div>
+        <div style={{minWidth: 0, width: '100%'}}>
           {selectedStudent ? (
             <div className="fade-in">
               {/* Student Header Card with Badges */}
-              <div className="panel" style={{marginBottom:'1.2rem',padding:'1.2rem 1.6rem',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'1rem'}}>
+              <div className="panel" style={{marginBottom:'1.2rem',padding:'clamp(12px, 2.5vw, 20px)',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'0.8rem'}}>
                 <div>
-                  <h3 style={{margin:'0 0 6px 0',fontSize:'1.45rem',fontWeight:800,color:'var(--text-main)'}}>
+                  <h3 style={{margin:'0 0 4px 0',fontSize:'clamp(1.2rem, 3.5vw, 1.45rem)',fontWeight:800,color:'var(--text-main)'}}>
                     {selectedStudent.name}
                   </h3>
                 </div>
                 <div style={{display:'flex',gap:'8px',alignItems:'center',flexWrap:'wrap'}}>
-                  <span className="badge" style={{background:'var(--bg)',border:'1px solid var(--border)',padding:'6px 12px',fontSize:'0.9rem',fontWeight:700}}>
+                  <span className="badge" style={{background:'var(--bg)',border:'1px solid var(--border)',padding:'5px 10px',fontSize:'0.85rem',fontWeight:700}}>
                     {selectedStudent.user_id}
                   </span>
-                  <span className="badge" style={{background:'rgba(79, 70, 229, 0.12)',color:'var(--primary-hover)',border:'1px solid rgba(79, 70, 229, 0.25)',padding:'6px 12px',fontSize:'0.9rem',fontWeight:700}}>
+                  <span className="badge" style={{background:'rgba(79, 70, 229, 0.12)',color:'var(--primary-hover)',border:'1px solid rgba(79, 70, 229, 0.25)',padding:'5px 10px',fontSize:'0.85rem',fontWeight:700}}>
                     فرقة الطالب: {inferStudentYear(selectedStudent.user_id, selectedStudent.year_level)}
                   </span>
-                  <span className="badge" style={{background:'rgba(16, 185, 129, 0.12)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.25)',padding:'6px 12px',fontSize:'0.9rem',fontWeight:700}}>
+                  <span className="badge" style={{background:'rgba(16, 185, 129, 0.12)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.25)',padding:'5px 10px',fontSize:'0.85rem',fontWeight:700}}>
                     السكشن الأساسي: {normalizeSection(selectedStudent.section || 'S1')}
                   </span>
                 </div>
@@ -333,65 +501,71 @@ export default function StudentReportTab({ user }) {
                   const totalWeeks = sub.total_weeks || 12;
 
                   return (
-                    <div key={sub.id} className="panel" style={{padding:'1.4rem',position:'relative'}}>
+                    <div key={sub.id} className="panel" style={{padding:'clamp(14px, 3vw, 22px)',position:'relative'}}>
                       
-                      {/* Subject Top Row: Title on right, TA on left */}
+                      {/* Subject Top Row: Responsive Title & Badges */}
                       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',flexWrap:'wrap',gap:'0.8rem'}}>
-                        <div style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
-                          <span style={{fontSize:'0.9rem',color:'var(--text-muted)'}}>
-                            المعيد: <strong style={{color:'var(--text-main)'}}>{getSectionInstructorName(sub.id, getStudentSubSection(selectedStudent, sub.id))}</strong>
+                        <div style={{display:'flex',alignItems:'center',gap:'8px',flexWrap:'wrap'}}>
+                          <h4 style={{margin:0,fontSize:'clamp(1.15rem, 3vw, 1.35rem)',fontWeight:800,color:'var(--primary-hover)'}}>
+                            {sub.name}
+                          </h4>
+                          <span className="badge" style={{background:'rgba(16, 185, 129, 0.15)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.3)',fontSize:'0.85rem',fontWeight:800}}>
+                            السكشن: {getStudentSubSection(selectedStudent, sub.id)}
                           </span>
                           <span className="badge" style={{background:'rgba(79, 70, 229, 0.1)',color:'var(--primary-hover)',border:'1px solid rgba(79, 70, 229, 0.25)',fontSize:'0.8rem'}}>
                             فرقة المقرر: {normalizeYear(sub.year_level)}
                           </span>
                         </div>
-                        <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
-                          <span className="badge" style={{background:'rgba(16, 185, 129, 0.15)',color:'var(--success)',border:'1px solid rgba(16, 185, 129, 0.3)',fontSize:'0.9rem',fontWeight:800}}>
-                            السكشن: {getStudentSubSection(selectedStudent, sub.id)}
-                          </span>
-                          <h4 style={{margin:0,fontSize:'1.3rem',fontWeight:800,color:'var(--primary-hover)'}}>
-                            {sub.name}
-                          </h4>
+                        <div style={{fontSize:'0.88rem',color:'var(--text-muted)'}}>
+                          المعيد: <strong style={{color:'var(--text-main)'}}>{getSectionInstructorName(sub.id, getStudentSubSection(selectedStudent, sub.id))}</strong>
                         </div>
                       </div>
 
-                      {/* 5 Distinct Metric Cards */}
-                      <div style={{display:'grid',gridTemplateColumns:'repeat(5, 1fr)',gap:'10px',marginBottom:'1.2rem'}}>
-                        <div className="panel" style={{background:'rgba(79, 70, 229, 0.15)',border:'1px solid rgba(79, 70, 229, 0.3)',borderRadius:'8px',padding:'12px 6px',textAlign:'center'}}>
-                          <div style={{fontSize:'0.85rem',color:'var(--primary-hover)',fontWeight:700,marginBottom:'4px'}}>المجموع</div>
-                          <div style={{fontWeight:800,fontSize:'1.4rem',color:'var(--primary-hover)'}}>
+                      {/* 5 Distinct Metric Cards (Responsive CSS Grid) */}
+                      <div className="student-metrics-grid">
+                        <div className="panel" style={{background:'rgba(79, 70, 229, 0.15)',border:'1px solid rgba(79, 70, 229, 0.35)',borderRadius:'10px',padding:'10px 6px',textAlign:'center'}}>
+                          <div style={{fontSize:'clamp(0.75rem, 2.5vw, 0.85rem)',color:'var(--primary-hover)',fontWeight:700,marginBottom:'4px'}}>المجموع</div>
+                          <div style={{fontWeight:800,fontSize:'clamp(1.2rem, 4vw, 1.45rem)',color:'var(--primary-hover)'}}>
                             {(g.quiz_1 || 0) + (g.quiz_2 || 0) + (g.project || 0) + (g.attendance_score || 0)}
                           </div>
                         </div>
 
-                        <div className="panel" style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px 6px',textAlign:'center'}}>
-                          <div style={{fontSize:'0.85rem',color:'var(--text-muted)',fontWeight:600,marginBottom:'4px'}}>الحضور</div>
-                          <div style={{fontWeight:800,fontSize:'1.4rem',color:'var(--success)'}}>{g.attendance_score !== null && g.attendance_score !== undefined ? g.attendance_score : "لم ترصد"}</div>
+                        <div className="panel" style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'10px',padding:'10px 6px',textAlign:'center'}}>
+                          <div style={{fontSize:'clamp(0.75rem, 2.5vw, 0.85rem)',color:'var(--text-muted)',fontWeight:600,marginBottom:'4px'}}>الحضور</div>
+                          <div style={{fontWeight:800,fontSize:'clamp(1.2rem, 4vw, 1.45rem)',color:'var(--success)'}}>
+                            {g.attendance_score !== null && g.attendance_score !== undefined ? g.attendance_score : "لم ترصد"}
+                          </div>
                         </div>
 
-                        <div className="panel" style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px 6px',textAlign:'center'}}>
-                          <div style={{fontSize:'0.85rem',color:'var(--text-muted)',fontWeight:600,marginBottom:'4px'}}>المشروع</div>
-                          <div style={{fontWeight:800,fontSize:'1.4rem',color:'var(--text-main)'}}>{g.project !== null && g.project !== undefined ? g.project : "لم ترصد"}</div>
+                        <div className="panel" style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'10px',padding:'10px 6px',textAlign:'center'}}>
+                          <div style={{fontSize:'clamp(0.75rem, 2.5vw, 0.85rem)',color:'var(--text-muted)',fontWeight:600,marginBottom:'4px'}}>المشروع</div>
+                          <div style={{fontWeight:800,fontSize:'clamp(1.2rem, 4vw, 1.45rem)',color:'var(--text-main)'}}>
+                            {g.project !== null && g.project !== undefined ? g.project : "لم ترصد"}
+                          </div>
                         </div>
 
-                        <div className="panel" style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px 6px',textAlign:'center'}}>
-                          <div style={{fontSize:'0.85rem',color:'var(--text-muted)',fontWeight:600,marginBottom:'4px'}}>كويز 2</div>
-                          <div style={{fontWeight:800,fontSize:'1.4rem',color:'var(--text-main)'}}>{g.quiz_2 !== null && g.quiz_2 !== undefined ? g.quiz_2 : "لم ترصد"}</div>
+                        <div className="panel" style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'10px',padding:'10px 6px',textAlign:'center'}}>
+                          <div style={{fontSize:'clamp(0.75rem, 2.5vw, 0.85rem)',color:'var(--text-muted)',fontWeight:600,marginBottom:'4px'}}>كويز 2</div>
+                          <div style={{fontWeight:800,fontSize:'clamp(1.2rem, 4vw, 1.45rem)',color:'var(--text-main)'}}>
+                            {g.quiz_2 !== null && g.quiz_2 !== undefined ? g.quiz_2 : "لم ترصد"}
+                          </div>
                         </div>
 
-                        <div className="panel" style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px 6px',textAlign:'center'}}>
-                          <div style={{fontSize:'0.85rem',color:'var(--text-muted)',fontWeight:600,marginBottom:'4px'}}>كويز 1</div>
-                          <div style={{fontWeight:800,fontSize:'1.4rem',color:'var(--text-main)'}}>{g.quiz_1 !== null && g.quiz_1 !== undefined ? g.quiz_1 : "لم ترصد"}</div>
+                        <div className="panel" style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'10px',padding:'10px 6px',textAlign:'center'}}>
+                          <div style={{fontSize:'clamp(0.75rem, 2.5vw, 0.85rem)',color:'var(--text-muted)',fontWeight:600,marginBottom:'4px'}}>كويز 1</div>
+                          <div style={{fontWeight:800,fontSize:'clamp(1.2rem, 4vw, 1.45rem)',color:'var(--text-main)'}}>
+                            {g.quiz_1 !== null && g.quiz_1 !== undefined ? g.quiz_1 : "لم ترصد"}
+                          </div>
                         </div>
                       </div>
 
                       {/* Always Visible Detailed Week-by-Week Attendance Pills */}
-                      <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px',marginBottom:'1rem'}}>
-                        <div style={{fontSize:'0.85rem',fontWeight:700,color:'var(--text-muted)',marginBottom:'8px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                      <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'10px',padding:'12px',marginBottom:'1rem'}}>
+                        <div style={{fontSize:'0.85rem',fontWeight:700,color:'var(--text-muted)',marginBottom:'10px',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'6px'}}>
                           <span>📅 تفاصيل حضور الأسابيع:</span>
                           <span style={{fontSize:'0.8rem',fontWeight:'normal'}}>إجمالي المحاضرات: <strong>{totalWeeks}</strong></span>
                         </div>
-                        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(75px, 1fr))',gap:'6px'}}>
+                        <div className="student-weeks-grid">
                           {Array.from({ length: totalWeeks }, (_, i) => i + 1).map(w => {
                             const record = subAtt.find(a => a.week_number === w);
                             let stLabel = 'لم يرصد';
@@ -410,16 +584,16 @@ export default function StudentReportTab({ user }) {
                             const stuSec = getStudentSubSection(selectedStudent, sub.id);
                             const wDate = getSubjectWeekDate(sub, w, stuSec, record);
                             return (
-                              <div key={w} style={{background: stBg, border: '1px solid ' + stBorder, borderRadius: '6px', padding: '6px 4px', textAlign: 'center'}}>
-                                <div style={{fontSize: '0.75rem', color: 'var(--text-muted)'}}>أسبوع {w}</div>
-                                <div style={{fontWeight: 'bold', color: stColor, fontSize: '0.8rem', marginTop: '2px'}}>{stLabel}</div>
+                              <div key={w} style={{background: stBg, border: '1px solid ' + stBorder, borderRadius: '8px', padding: '6px 4px', textAlign: 'center'}}>
+                                <div style={{fontSize: '0.72rem', color: 'var(--text-muted)'}}>أسبوع {w}</div>
+                                <div style={{fontWeight: 'bold', color: stColor, fontSize: '0.78rem', marginTop: '2px'}}>{stLabel}</div>
                                 {isRecorded && wDate && (
                                   <div style={{
-                                    fontSize:'0.72rem',
+                                    fontSize:'0.68rem',
                                     color:'#60a5fa',
                                     marginTop:'4px',
                                     background:'rgba(59, 130, 246, 0.12)',
-                                    padding:'2px 5px',
+                                    padding:'2px 4px',
                                     borderRadius:'4px',
                                     fontWeight:700,
                                     border:'1px solid rgba(59, 130, 246, 0.25)',
@@ -460,8 +634,8 @@ export default function StudentReportTab({ user }) {
           )}
         </div>
 
-        {/* RIGHT COLUMN: Search + Filters + Student Cards List */}
-        <div className="panel" style={{padding:'1rem'}}>
+        {/* RIGHT COLUMN: Desktop Search + Filters + Student Cards List (Visible on desktop > 960px) */}
+        <div className="panel student-report-desktop-sidebar" style={{padding:'1rem'}}>
           
           {/* Search Input */}
           <div style={{position:'relative',marginBottom:'12px'}}>
@@ -499,10 +673,10 @@ export default function StudentReportTab({ user }) {
           {/* Student Cards List */}
           <div style={{maxHeight:'650px',overflowY:'auto',display:'flex',flexDirection:'column',gap:'8px'}}>
             {filteredStudents.map(s => {
-              const isSelected = selectedStudent?.id === s.id;
+              const isSelected = selectedStudent?.user_id === s.user_id;
               return (
                 <div 
-                  key={s.id} 
+                  key={s.id || s.user_id} 
                   onClick={()=>handleSelectStudent(s, true)} 
                   style={{
                     padding:'12px 14px',
@@ -548,16 +722,16 @@ export default function StudentReportTab({ user }) {
         <div 
           style={{
             position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.85)', backdropFilter: 'blur(8px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 'clamp(1rem, 3vw, 2rem)', boxSizing: 'border-box'
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 'clamp(0.8rem, 3vw, 2rem)', boxSizing: 'border-box'
           }}
           onClick={e => { if (e.target === e.currentTarget) setShowPdfModal(false); }}
         >
-          <div className="panel fade-in" style={{maxWidth: '520px', width: '100%', maxHeight: '90vh', overflowY: 'auto', border: '1px solid rgba(79, 70, 229, 0.35)', boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.85)', borderRadius: '16px'}}>
+          <div className="panel fade-in" style={{maxWidth: '520px', width: '100%', maxHeight: '90vh', overflowY: 'auto', border: '1px solid rgba(79, 70, 229, 0.35)', boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.85)', borderRadius: '16px', padding:'clamp(14px, 3vw, 24px)'}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1.2rem',borderBottom:'1px solid var(--border)',paddingBottom:'0.8rem'}}>
               <h3 style={{margin:0,fontSize:'1.25rem',display:'flex',alignItems:'center',gap:'8px'}}>
                 <Printer size={20} style={{color:'var(--primary-hover)'}} /> خيارات تصدير تقرير الطالب PDF
               </h3>
-              <button onClick={() => setShowPdfModal(false)} style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer'}}>
+              <button onClick={() => setShowPdfModal(false)} style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',padding:'4px'}}>
                 <X size={22} />
               </button>
             </div>
@@ -567,49 +741,54 @@ export default function StudentReportTab({ user }) {
                 <label style={{display:'block',marginBottom:'8px',fontWeight:700,fontSize:'0.95rem',color:'var(--primary-hover)'}}>
                   1. تحديد محتويات التقرير:
                 </label>
-                <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px',display:'flex',flexDirection:'column',gap:'8px'}}>
+                <div style={{background:'var(--bg)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px',display:'flex',flexDirection:'column',gap:'10px'}}>
                   
-                  <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'0.9rem',cursor:'pointer'}}>
+                  <label style={{display:'flex',alignItems:'center',gap:'10px',fontSize:'0.9rem',cursor:'pointer'}}>
                     <input 
                       type="checkbox" 
                       checked={pdfOptions.includeAttendanceDetails} 
                       onChange={e => setPdfOptions(prev => ({ ...prev, includeAttendanceDetails: e.target.checked }))} 
+                      style={{width:'18px',height:'18px',accentColor:'var(--primary)'}}
                     />
                     <span>📅 سجل وتفاصيل الغياب الأسبوعي (لكل أسبوع)</span>
                   </label>
 
-                  <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'0.9rem',cursor:'pointer'}}>
+                  <label style={{display:'flex',alignItems:'center',gap:'10px',fontSize:'0.9rem',cursor:'pointer'}}>
                     <input 
                       type="checkbox" 
                       checked={pdfOptions.includeQuizzes} 
                       onChange={e => setPdfOptions(prev => ({ ...prev, includeQuizzes: e.target.checked }))} 
+                      style={{width:'18px',height:'18px',accentColor:'var(--primary)'}}
                     />
                     <span>📝 درجات الكويزات (كويز 1 + كويز 2)</span>
                   </label>
 
-                  <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'0.9rem',cursor:'pointer'}}>
+                  <label style={{display:'flex',alignItems:'center',gap:'10px',fontSize:'0.9rem',cursor:'pointer'}}>
                     <input 
                       type="checkbox" 
                       checked={pdfOptions.includeProject} 
                       onChange={e => setPdfOptions(prev => ({ ...prev, includeProject: e.target.checked }))} 
+                      style={{width:'18px',height:'18px',accentColor:'var(--primary)'}}
                     />
                     <span>💻 درجة المشروع العملي</span>
                   </label>
 
-                  <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'0.9rem',cursor:'pointer'}}>
+                  <label style={{display:'flex',alignItems:'center',gap:'10px',fontSize:'0.9rem',cursor:'pointer'}}>
                     <input 
                       type="checkbox" 
                       checked={pdfOptions.includeAttendanceScore} 
                       onChange={e => setPdfOptions(prev => ({ ...prev, includeAttendanceScore: e.target.checked }))} 
+                      style={{width:'18px',height:'18px',accentColor:'var(--primary)'}}
                     />
                     <span>⭐ درجة الحضور والالتزام</span>
                   </label>
 
-                  <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'0.9rem',cursor:'pointer'}}>
+                  <label style={{display:'flex',alignItems:'center',gap:'10px',fontSize:'0.9rem',cursor:'pointer'}}>
                     <input 
                       type="checkbox" 
                       checked={pdfOptions.includeTotal} 
                       onChange={e => setPdfOptions(prev => ({ ...prev, includeTotal: e.target.checked }))} 
+                      style={{width:'18px',height:'18px',accentColor:'var(--primary)'}}
                     />
                     <span>🏆 المجموع الكلي لأعمال الفصل</span>
                   </label>
@@ -625,11 +804,12 @@ export default function StudentReportTab({ user }) {
                   {enrolledSubjects.map(sub => {
                     const isChecked = pdfOptions.selectedSubjectIds.includes(sub.id);
                     return (
-                      <label key={sub.id} style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'0.9rem',cursor:'pointer'}}>
+                      <label key={sub.id} style={{display:'flex',alignItems:'center',gap:'10px',fontSize:'0.9rem',cursor:'pointer'}}>
                         <input 
                           type="checkbox" 
                           checked={isChecked} 
                           onChange={() => togglePdfSubject(sub.id)} 
+                          style={{width:'18px',height:'18px',accentColor:'var(--primary)'}}
                         />
                         <span>{sub.name} (الفرقة {normalizeYear(sub.year_level)})</span>
                       </label>
@@ -638,17 +818,17 @@ export default function StudentReportTab({ user }) {
                 </div>
               </div>
 
-              <div style={{display:'flex',gap:'10px',marginTop:'0.5rem'}}>
+              <div style={{display:'flex',gap:'10px',marginTop:'0.5rem',flexWrap:'wrap'}}>
                 <button 
                   type="button" 
                   className="btn-primary" 
                   onClick={handleGeneratePdf} 
                   disabled={pdfOptions.selectedSubjectIds.length === 0}
-                  style={{flex:1,padding:'10px',fontSize:'1rem',display:'flex',alignItems:'center',justifyContent:'center',gap:'8px'}}
+                  style={{flex:1,minWidth:'180px',padding:'10px',fontSize:'0.95rem',display:'flex',alignItems:'center',justifyContent:'center',gap:'8px'}}
                 >
                   <Printer size={18} /> بدء الطباعة وتوليد PDF
                 </button>
-                <button type="button" className="btn-secondary" onClick={() => setShowPdfModal(false)}>
+                <button type="button" className="btn-secondary" onClick={() => setShowPdfModal(false)} style={{minWidth:'80px'}}>
                   إلغاء
                 </button>
               </div>

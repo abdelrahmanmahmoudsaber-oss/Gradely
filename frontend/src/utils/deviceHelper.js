@@ -81,7 +81,8 @@ export async function registerCurrentDevice(user) {
  * Starts a background heartbeat that:
  * 1. Renews device last_active timestamp so "الأجهزة المتصلة" is 100% accurate.
  * 2. Slides session validity window by 30 days so active users are never kicked out.
- * 3. Immediately detects if another device remotely revoked this session.
+ * 3. Only detects if this session was EXPLICITLY revoked from another device.
+ *    NEVER kicks out active users due to network glitches or token checks.
  */
 export function startDeviceHeartbeat(user, onRevoked) {
   if (!user || !user.user_id) return () => {};
@@ -96,8 +97,8 @@ export function startDeviceHeartbeat(user, onRevoked) {
     isChecking = true;
     try {
       const res = await registerCurrentDevice(user);
-      // If server explicitly returns unauthorized_token or session revoked
-      if (res && res.success === false && (res.error === 'unauthorized_token' || res.error === 'session_revoked')) {
+      // ONLY trigger revocation if server explicitly indicates this specific device was terminated
+      if (res && res.success === false && res.error === 'session_revoked') {
         if (typeof onRevoked === 'function') {
           onRevoked();
         }

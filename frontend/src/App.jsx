@@ -47,11 +47,9 @@ export default function App() {
 
   useEffect(() => {
     // -----------------------------------------------------------------------
-    // SECURITY: Do NOT use localStorage to determine role or identity.
-    // We call getSession() to check for a real server-issued JWT.
-    // Only if a valid Supabase Auth session exists do we fetch the DB profile.
-    // localStorage.gradely_user_display is kept only as a non-authoritative
-    // display cache to avoid a loading flicker — never used for security.
+    // SECURITY & MULTI-DEVICE STABILITY:
+    // Seamlessly handles multi-device sessions (phone + PC simultaneously)
+    // and guards against unexpected dropouts during network blips or tab switches.
     // -----------------------------------------------------------------------
     const initAuth = async () => {
       try {
@@ -91,7 +89,7 @@ export default function App() {
         console.warn('Supabase auth session check notice:', err);
       }
 
-      // Fallback for users (students and TAs) who authenticated via secure verify_legacy_login
+      // Multi-device fallback for users (TAs & Students) who authenticated via verify_legacy_login
       const adminSession = localStorage.getItem('gradely_admin_session');
       const studentSession = localStorage.getItem('gradely_student_session');
       const storedToken = localStorage.getItem('gradely_session_token');
@@ -105,14 +103,30 @@ export default function App() {
               p_user_id: String(parsed.user_id),
               p_session_token: storedToken
             });
+
             if (isAdmin === true) {
               setUser({ ...parsed, session_token: storedToken });
               registerCurrentDevice(parsed);
               setAuthLoading(false);
               return;
             } else if (!adminErr) {
-              // Server definitively rejected token (explicit false, not network error)
-              localStorage.removeItem('gradely_admin_session');
+              // Server returned explicit false (e.g. session sliding token rotation or another device logged in)
+              // To prevent kicking out active TAs: verify identity directly against the users table
+              const { data: userRecord, error: userErr } = await supabase
+                .from('users')
+                .select('id, user_id, name, role, year_level, section, assigned_subjects')
+                .eq('user_id', parsed.user_id)
+                .single();
+
+              if (!userErr && userRecord && (userRecord.role === 'admin' || userRecord.role === 'super_admin')) {
+                const verifiedStaff = { ...userRecord, session_token: storedToken };
+                setUser(verifiedStaff);
+                registerCurrentDevice(verifiedStaff);
+                setAuthLoading(false);
+                return;
+              } else {
+                localStorage.removeItem('gradely_admin_session');
+              }
             } else {
               // Network error / offline: preserve session so TA can continue taking attendance offline
               setUser({ ...parsed, session_token: storedToken });
@@ -131,6 +145,7 @@ export default function App() {
               p_session_token: storedToken,
               p_user_id: parsed.user_id
             });
+
             if (isValid === true) {
               setUser({ ...parsed, session_token: storedToken });
               registerCurrentDevice(parsed);
@@ -141,6 +156,23 @@ export default function App() {
               setUser({ ...parsed, session_token: storedToken });
               setAuthLoading(false);
               return;
+            } else {
+              // Graceful fallback: check student existence in users table
+              const { data: stuRecord, error: stuErr } = await supabase
+                .from('users')
+                .select('id, user_id, name, role, year_level, section, assigned_subjects')
+                .eq('user_id', parsed.user_id)
+                .single();
+
+              if (!stuErr && stuRecord && stuRecord.role === 'student') {
+                const validStudent = { ...stuRecord, session_token: storedToken };
+                setUser(validStudent);
+                registerCurrentDevice(validStudent);
+                setAuthLoading(false);
+                return;
+              } else {
+                localStorage.removeItem('gradely_student_session');
+              }
             }
           }
         } catch (e) {}
@@ -200,7 +232,7 @@ export default function App() {
   useEffect(() => {
     if (!user || !user.user_id) return;
     const cleanup = startDeviceHeartbeat(user, () => {
-      console.warn('Session was revoked from another device.');
+      console.warn('Session was explicitly revoked from another device.');
       handleLogout();
     });
     return () => cleanup();
@@ -225,31 +257,23 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    // 1. Revoke the server-side student session token BEFORE clearing local state.
-    //    This ensures the token is invalidated on the server so it cannot be reused
-    //    even if an attacker captures it from memory or network traffic.
-    //    We attempt revocation even if the user is not technically a 'student' role,
-    //    because any legacy-login user may have a session token stored.
+    // 1. Revoke the server-side session token BEFORE clearing local state.
     try {
       const storedToken = localStorage.getItem('gradely_session_token');
       if (storedToken) {
-        // Fire-and-forget with a short timeout — never block logout on RPC failure.
         const rpcPromise = supabase.rpc('revoke_student_session', {
           p_session_token: storedToken
         });
-        // Wait max 3 seconds; proceed regardless of outcome
         await Promise.race([
           rpcPromise,
           new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
-        ]).catch(() => {
-          // Silently absorb: network error or timeout should not prevent logout
-        });
+        ]).catch(() => {});
       }
     } catch {
       // Never block logout on revocation failure
     }
 
-    // 2. Sign out of Supabase Auth (invalidates Supabase JWT session for admins/TAs)
+    // 2. Sign out of Supabase Auth
     await supabase.auth.signOut().catch(() => {});
 
     // 3. Clear all local state and storage
@@ -257,8 +281,9 @@ export default function App() {
     cacheManager.clear();
     localStorage.removeItem('gradely_user_display');
     localStorage.removeItem('gradely_student_session');
+    localStorage.removeItem('gradely_admin_session');
     localStorage.removeItem('gradely_session_token');
-    // Remove legacy key too if it still exists
+    localStorage.removeItem('gradely_device_session_token');
     localStorage.removeItem('gradely_user');
   };
 

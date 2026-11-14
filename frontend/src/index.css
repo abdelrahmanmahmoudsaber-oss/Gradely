@@ -234,6 +234,74 @@ tr:hover td { background: rgba(255, 255, 255, 0.02); }
 }
 
 /* ============================================================
+   RESPONSIVE STUDENT COMPREHENSIVE REPORT STYLES
+   ============================================================ */
+.student-report-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.student-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+  margin-bottom: 1.2rem;
+}
+
+.student-weeks-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(75px, 1fr));
+  gap: 6px;
+}
+
+.student-report-desktop-sidebar {
+  display: block;
+}
+
+.student-report-mobile-selector {
+  display: none;
+}
+
+@media (max-width: 960px) {
+  .student-report-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+  }
+
+  .student-report-desktop-sidebar {
+    display: none;
+  }
+
+  .student-report-mobile-selector {
+    display: block;
+  }
+
+  .student-metrics-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+}
+
+@media (max-width: 560px) {
+  .student-metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .student-metrics-grid > div:first-child {
+    grid-column: span 2;
+  }
+
+  .student-weeks-grid {
+    grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+    gap: 5px;
+  }
+}
+
+/* ============================================================
    ISOLATED PRINT STYLES FOR STUDENT REPORT & ACADEMIC TRANSCRIPTS
    ============================================================ */
 @media print {
